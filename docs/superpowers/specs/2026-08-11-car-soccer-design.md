@@ -275,6 +275,12 @@ RLS: profiles and results are world-readable (they are a leaderboard), a player
 may only edit their own profile, and results are written solely by the server
 with the service role key.
 
+Privileges are a separate question from RLS and have to be set explicitly.
+Supabase's default privileges grant `all` on new tables in `public` to `anon` and
+`authenticated`, so the schema revokes first and then grants back only what the
+game needs. Without the revoke, clients keep `delete` and `truncate` — and
+`truncate` is not subject to RLS at all, so RLS alone does not cover for it.
+
 ### Goal credit
 
 Stats need to know who scored, which the simulation did not track. The ball now
@@ -301,7 +307,9 @@ customisation, spectators, matchmaking, mobile controls, public deployment.
 
 ## Running
 
-- Copy `.env.example` to `.env`. Leave it empty to play guest-only; fill in the
+- Copy `.env.example` to `.env`. It lives at the repo root, which is why
+  `vite.config.js` sets `envDir: '..'` — the Vite root is `client/`, so without
+  that Vite finds no configuration and quietly builds a guest-only client. Leave it empty to play guest-only; fill in the
   Supabase URL and keys to switch accounts on. `VITE_`-prefixed values are
   bundled into the browser build, so only the anon key belongs there — the
   service role key is server-side.

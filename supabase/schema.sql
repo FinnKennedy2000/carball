@@ -68,6 +68,11 @@ begin
 end;
 $$;
 
+-- Postgres grants EXECUTE to PUBLIC on every new function, so a security definer
+-- function in an exposed schema is a public endpoint until this is revoked. It is
+-- only ever meant to run as the trigger below.
+revoke execute on function public.handle_new_user() from public, anon, authenticated;
+
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
@@ -112,20 +117,27 @@ join public.match_players m on m.user_id = p.id
 group by p.id, p.username;
 
 -- Privileges -----------------------------------------------------------------
--- RLS decides which rows are visible; these grants decide whether the table is
--- reachable through the Data API at all, which does not follow from RLS and
--- depends on project settings. Granted explicitly, and no wider than needed:
--- clients read everything and write only their own profile, while the server
--- writes results with the service role key.
+-- RLS decides which rows are visible. Privileges decide whether the table is
+-- reachable at all — a separate question, and one RLS does not answer: TRUNCATE
+-- is not subject to RLS in the first place.
+--
+-- Supabase's default privileges grant ALL on new tables in `public` to anon and
+-- authenticated, so granting what we want is not enough; the defaults have to be
+-- revoked first, or the clients silently keep DELETE and TRUNCATE.
+
+revoke all on public.profiles from anon, authenticated;
+revoke all on public.match_players from anon, authenticated;
+revoke all on public.leaderboard from anon, authenticated;
 
 grant usage on schema public to anon, authenticated;
 
+-- Names are public, and a signed-in player may rename only themselves. The row
+-- itself is created by the on_auth_user_created trigger, not by the client.
 grant select on public.profiles to anon, authenticated;
-grant update (username) on public.profiles to authenticated;
 grant insert on public.profiles to authenticated;
+grant update (username) on public.profiles to authenticated;
 
+-- Results and the leaderboard are read-only to every client: only the server,
+-- holding the service role key, writes them.
 grant select on public.match_players to anon, authenticated;
 grant select on public.leaderboard to anon, authenticated;
-
--- Deliberately absent: any client privilege to write match_players, or to delete
--- anything. The server holds the service role key, which bypasses all of this.
