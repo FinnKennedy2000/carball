@@ -1,8 +1,11 @@
 // A room owns one simulation and the sockets watching it. Rooms are created on
 // demand and deleted when the last player leaves; nothing is persisted.
 
+import { randomUUID } from 'node:crypto'
+
 import * as C from '../shared/constants.js'
 import { createState, addCar, removeCar, resetPositions, step } from '../shared/sim.js'
+import { recordMatch } from './accounts.js'
 
 // No O/0 or I/1 — codes get read aloud and typed by hand.
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
@@ -25,17 +28,30 @@ export class Room {
     return this.players.size >= C.MAX_PLAYERS
   }
 
-  join(socket, name, wanted = null) {
+  /**
+   * `identity` is the verified account for this socket, or null for a guest. A
+   * signed-in player's name comes from it, not from the client's own claim.
+   */
+  join(socket, name, wanted = null, identity = null) {
     const id = this.nextId++
     // A requested side is honoured unless it is already full; otherwise balance.
     const team =
       wanted !== null && this.teamCount(wanted) < C.MAX_PER_TEAM ? wanted : this.smallestTeam()
     // team is kept on the player so a rematch does not reshuffle the sides.
-    const player = { id, name, socket, team, bits: 0 }
+    // goals accumulate across the match for the stats row written at the end.
+    const player = {
+      id,
+      name: identity?.username ?? name,
+      socket,
+      team,
+      bits: 0,
+      userId: identity?.userId ?? null,
+      goals: 0,
+    }
     this.players.set(id, player)
     addCar(this.state, id, team)
 
-    send(socket, { t: 'joined', id, code: this.code, team, name })
+    send(socket, { t: 'joined', id, code: this.code, team, name: player.name, signedIn: Boolean(identity) })
     this.broadcastRoster()
     if (!this.timer) this.start()
     return player
@@ -97,7 +113,10 @@ export class Room {
   tick() {
     const inputs = {}
     for (const p of this.players.values()) inputs[p.id] = p.bits
+
+    const before = this.state.score[0] + this.state.score[1]
     step(this.state, inputs)
+    if (this.state.score[0] + this.state.score[1] > before) this.creditGoal()
 
     // Let the final score sit on screen before the next match starts.
     if (this.state.phase === 'OVER' && this.state.phaseTimer <= 0) this.restart()
@@ -109,8 +128,18 @@ export class Room {
     }
   }
 
+  /** The sim names the car that earned the goal, or nobody for an own goal. */
+  creditGoal() {
+    const scorer = this.players.get(this.state.lastScorer)
+    if (scorer) scorer.goals++
+  }
+
   restart() {
     const finalScore = this.state.score.slice()
+    // Written before the state is thrown away. Deliberately not awaited: a slow
+    // or failing database must not stall the tick loop.
+    recordMatch(randomUUID(), finalScore, [...this.players.values()])
+    for (const p of this.players.values()) p.goals = 0
     this.state = createState()
     for (const p of this.players.values()) addCar(this.state, p.id, p.team)
     resetPositions(this.state)
@@ -118,7 +147,12 @@ export class Room {
   }
 
   broadcastRoster() {
-    const players = [...this.players.values()].map((p) => ({ id: p.id, name: p.name, team: p.team }))
+    const players = [...this.players.values()].map((p) => ({
+      id: p.id,
+      name: p.name,
+      team: p.team,
+      signedIn: Boolean(p.userId),
+    }))
     this.broadcast({ t: 'roster', players })
   }
 

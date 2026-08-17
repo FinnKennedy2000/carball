@@ -7,6 +7,7 @@ import { WebSocketServer } from 'ws'
 
 import { Rooms } from './room.js'
 import { parse } from './protocol.js'
+import { identify, authEnabled, statsEnabled } from './accounts.js'
 
 const PORT = Number(process.env.PORT ?? 3000)
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -51,34 +52,47 @@ const rooms = new Rooms()
 const wss = new WebSocketServer({ server, path: '/ws' })
 
 wss.on('connection', (socket) => {
-  // A socket belongs to no room until it creates or joins one.
+  // A socket belongs to no room until it creates or joins one. `entering` guards
+  // the await while a token is verified: without it, two quick join messages
+  // would both pass the room check and the socket would occupy two cars.
   let room = null
   let playerId = null
+  let entering = false
 
-  socket.on('message', (data) => {
+  socket.on('message', async (data) => {
     const msg = parse(data.toString())
     if (!msg) return // malformed input is dropped, never thrown
 
-    if (msg.t === 'create') {
-      if (room) return
-      room = rooms.create()
-      playerId = room.join(socket, msg.name, msg.team).id
-      return
-    }
+    if (msg.t === 'create' || msg.t === 'join') {
+      if (room || entering) return
+      entering = true
+      try {
+        // An unverifiable token is not an error: that player is simply a guest.
+        const identity = await identify(msg.token)
 
-    if (msg.t === 'join') {
-      if (room) return
-      const target = rooms.get(msg.code)
-      if (!target) {
-        socket.send(JSON.stringify({ t: 'error', reason: 'No room with that code' }))
-        return
+        let target
+        if (msg.t === 'create') {
+          target = rooms.create()
+        } else {
+          target = rooms.get(msg.code)
+          if (!target) {
+            send(socket, { t: 'error', reason: 'No room with that code' })
+            return
+          }
+          if (target.full) {
+            send(socket, { t: 'error', reason: 'Room is full' })
+            return
+          }
+        }
+
+        // The socket may have gone away while the token was being checked.
+        if (socket.readyState !== socket.OPEN) return
+
+        room = target
+        playerId = room.join(socket, msg.name, msg.team, identity).id
+      } finally {
+        entering = false
       }
-      if (target.full) {
-        socket.send(JSON.stringify({ t: 'error', reason: 'Room is full' }))
-        return
-      }
-      room = target
-      playerId = room.join(socket, msg.name, msg.team).id
       return
     }
 
@@ -96,7 +110,15 @@ wss.on('connection', (socket) => {
 
 server.listen(PORT, () => {
   for (const addr of localAddresses()) console.log(`  http://${addr}:${PORT}`)
+  console.log(
+    `  accounts: ${authEnabled ? 'on' : 'off (guest play only)'}` +
+      `, stats: ${statsEnabled ? 'on' : 'off'}`,
+  )
 })
+
+function send(socket, msg) {
+  if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg))
+}
 
 function localAddresses() {
   const out = ['localhost']

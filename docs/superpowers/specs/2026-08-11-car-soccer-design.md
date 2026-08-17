@@ -20,7 +20,10 @@ Success criteria: 2–6 people open a URL, enter a 4-letter room code, and play 
   scope for this spec.
 - **Sub-10ms latency assumed** (same house / LAN). This is what makes the netcode
   design below viable.
-- Three dependencies total: `vite`, `three`, `ws`.
+- Four dependencies: `vite`, `three`, `ws`, and `@supabase/supabase-js` for
+  accounts. Accounts are optional at runtime — see below — so the zero-budget and
+  local-only constraints still hold with the free Supabase tier or with no
+  Supabase project at all.
 
 ## Architecture
 
@@ -34,6 +37,7 @@ carsoccer/
     constants.js     all tuning knobs, imported by both sides
     sim.js           step(state, inputs) -> state. Pure, deterministic, no I/O.
   server/
+    accounts.js      token verification and match reporting (optional)
     index.js         http server, static files, ws upgrade, room routing
     room.js          one room: players, 60Hz tick loop, 30Hz snapshot broadcast
     protocol.js      message parsing and validation (the trust boundary)
@@ -42,9 +46,12 @@ carsoccer/
     main.js          boot, lobby -> game state machine
     net.js           websocket, snapshot buffer, interpolation
     render.js        three.js scene, draw(interpolatedState)
+    auth.js          Supabase sign-in, profile, leaderboard (optional)
     input.js         keyboard -> input bitmask
     sound.js         synthesised cues inferred from snapshots, no assets
     ui.js            plain DOM: room code, score, clock, messages
+  supabase/
+    schema.sql       profiles, match_players, leaderboard view, RLS
   test/
     sim.test.js      node:test, no framework
 ```
@@ -77,8 +84,9 @@ so results are reproducible.
   phaseTimer: float,      // seconds remaining in the current phase
   clock: float,           // seconds remaining in the match
   overtime: bool,         // the clock ran out level; next goal wins
+  lastScorer: int|null,   // car credited with the most recent goal
   score: [blue, orange],
-  ball: { x, y, vx, vy },
+  ball: { x, y, vx, vy, lastTouch },   // lastTouch: car id, for goal credit
   cars: [ { id, team, x, y, vx, vy, heading, boost } ]
 }
 ```
@@ -210,7 +218,7 @@ Other cases:
 
 ## Testing
 
-One file, `node:test`, no framework. Five checks aimed at where defects actually
+One file, `node:test`, no framework. Checks aimed at where defects actually
 occur:
 
 1. **Determinism** — the same initial state and input sequence run twice for 600
@@ -221,7 +229,60 @@ occur:
    every tick it remains in the net.
 4. **Energy conservation** — two cars colliding repeatedly for 1000 ticks do not
    gain speed without bound.
-5. **Protocol validation** — malformed messages are rejected without throwing.
+5. **Protocol validation** — malformed messages are rejected without throwing,
+   including oversized and non-string tokens.
+6. **Steering and drift** — A/D turn the way the camera shows, and drifting
+   produces a markedly larger slip angle than gripped cornering.
+7. **Full time** — a level clock goes to sudden death, a lead ends the match, and
+   the final score is held before the reset.
+8. **Goal credit** — the last attacker to touch the ball is credited; an own goal
+   is credited to nobody.
+9. **Match rows** — the row builder describes wins, draws and losses correctly
+   and omits guests. Pure, so it needs no database.
+
+## Accounts
+
+**Optional by construction.** Every piece is gated on configuration: with no
+Supabase URL and keys the sign-in panel is hidden, the server reports
+`accounts: off`, and the game behaves exactly as it did before, everyone a guest
+with a typed-in name. Nothing about a match depends on the database being
+reachable.
+
+### Trust
+
+Auth happens entirely in the browser against Supabase. On join the client passes
+its access token; the game server verifies it with `auth.getUser(token)` and
+looks up the profile. **A signed-in player's name comes from the database, never
+from the join message**, so a client cannot claim to be someone else. A token
+that fails to verify — expired, forged, or a Supabase outage — is not an error:
+that player is simply a guest. The token is treated as opaque and length-capped
+in `protocol.js`; only Supabase interprets it.
+
+Verification is a network call, so the join path is asynchronous. A flag guards
+the await: without it two rapid join messages on one socket would both pass the
+"already in a room" check and take two cars.
+
+### Schema
+
+Two tables. `profiles` holds the public username, created by a trigger on
+`auth.users` from the sign-up metadata, with a random suffix on collision so a
+taken name cannot fail the sign-up. `match_players` holds one row per player per
+finished match — team, goals, won, drawn.
+
+Career totals are the `leaderboard` **view** over those rows rather than counter
+columns, so concurrent match reports cannot race and the history is never lost.
+RLS: profiles and results are world-readable (they are a leaderboard), a player
+may only edit their own profile, and results are written solely by the server
+with the service role key.
+
+### Goal credit
+
+Stats need to know who scored, which the simulation did not track. The ball now
+carries `lastTouch`, and a goal sets `lastScorer` to that car if it was attacking
+that end — so an own goal counts on the scoreboard but is credited to nobody. The
+room accumulates per-player goals and writes the rows when the match ends. The
+write is deliberately not awaited: a slow or failing database must never stall a
+tick loop.
 
 ## Sound
 
@@ -236,11 +297,15 @@ button click, since a browser will not start one without a user gesture.
 
 Recorded so it does not creep in: client prediction, rollback, WebRTC transport,
 binary wire format, a vertical axis for the ball (aerials), boost pads, car
-customisation, persistent stats, spectators, matchmaking, mobile controls,
-public deployment.
+customisation, spectators, matchmaking, mobile controls, public deployment.
 
 ## Running
 
+- Copy `.env.example` to `.env`. Leave it empty to play guest-only; fill in the
+  Supabase URL and keys to switch accounts on. `VITE_`-prefixed values are
+  bundled into the browser build, so only the anon key belongs there — the
+  service role key is server-side.
+- `pnpm db:push` applies `supabase/schema.sql` (or paste it into the SQL editor).
 - `pnpm dev` — Vite dev server with hot reload for the client, `node --watch` for
   the server, Vite proxying the WebSocket.
 - `pnpm build && pnpm start` — a single process serving `dist/` and the

@@ -60,12 +60,12 @@ export function connect() {
   })
 }
 
-export function createRoom(name, team) {
-  send({ t: 'create', name, team })
+export function createRoom(name, team, token) {
+  send({ t: 'create', name, team, token })
 }
 
-export function joinRoom(name, code, team) {
-  send({ t: 'join', name, code, team })
+export function joinRoom(name, code, team, token) {
+  send({ t: 'join', name, code, team, token })
 }
 
 export function startSendingInput() {

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import * as C from '../shared/constants.js'
 import { createState, addCar, step, hashState } from '../shared/sim.js'
 import { parse } from '../server/protocol.js'
+import { matchRows } from '../server/accounts.js'
 
 /** A repeatable pseudo-random input stream — no Math.random, so runs are comparable. */
 function scriptedBits(tick, id) {
@@ -158,6 +159,64 @@ test('a level clock goes to sudden death, a lead ends the match', () => {
   run(led, 60, () => 0)
   assert.equal(led.phase, 'OVER')
   assert.equal(led.overtime, false)
+})
+
+test('a goal is credited to the last attacker to touch the ball', () => {
+  const state = twoCarGame()
+  state.phase = 'PLAY'
+  state.phaseTimer = 0
+
+  // Blue (car 1, attacking +x) nudges the ball into the orange goal.
+  state.cars[0].x = C.MAX_X - 8
+  state.cars[0].y = 0
+  state.cars[0].heading = 0
+  state.cars[1].x = C.MIN_X + 5 // keep orange out of it
+  state.ball.x = C.MAX_X - 4
+  state.ball.y = 0
+  state.ball.vx = 30
+  run(state, 30, (t, id) => (id === 1 ? C.IN_FWD : 0))
+
+  assert.deepEqual(state.score, [1, 0])
+  assert.equal(state.lastScorer, 1, 'blue is credited')
+
+  // The same shot from the wrong end is an own goal: on the board, uncredited.
+  const own = twoCarGame()
+  own.phase = 'PLAY'
+  own.phaseTimer = 0
+  own.cars[0].x = C.MIN_X + 8
+  own.cars[0].y = 0
+  own.cars[0].heading = Math.PI // blue facing its own goal
+  own.cars[1].x = C.MAX_X - 5
+  own.ball.x = C.MIN_X + 4
+  own.ball.y = 0
+  own.ball.vx = -30
+  run(own, 30, (t, id) => (id === 1 ? C.IN_FWD : 0))
+
+  assert.deepEqual(own.score, [0, 1], 'the goal still counts')
+  assert.equal(own.lastScorer, null, 'but nobody is credited')
+})
+
+test('match rows describe the result and skip guests', () => {
+  const players = [
+    { userId: 'u-blue', team: C.TEAM_BLUE, goals: 2 },
+    { userId: 'u-orange', team: C.TEAM_ORANGE, goals: 1 },
+    { userId: null, team: C.TEAM_ORANGE, goals: 5 }, // a guest
+  ]
+
+  const rows = matchRows('m1', [2, 1], players)
+  assert.equal(rows.length, 2, 'guests are not recorded')
+  assert.deepEqual(rows[0], {
+    match_id: 'm1',
+    user_id: 'u-blue',
+    team: C.TEAM_BLUE,
+    goals: 2,
+    won: true,
+    drawn: false,
+  })
+  assert.equal(rows[1].won, false)
+
+  const drawn = matchRows('m2', [3, 3], players)
+  assert.ok(drawn.every((r) => r.drawn && !r.won), 'a draw is neither won nor lost')
 })
 
 test('malformed messages are rejected without throwing', () => {

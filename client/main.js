@@ -3,6 +3,7 @@ import { initRenderer, setLocalId, draw } from './render.js'
 import { connect, createRoom, joinRoom, startSendingInput, sampleState, handlers } from './net.js'
 import { startInput } from './input.js'
 import { initSound, updateSound } from './sound.js'
+import * as auth from './auth.js'
 import { showGame, showRoster, lobbyError, updateHud, flashBanner } from './ui.js'
 
 const el = (id) => document.getElementById(id)
@@ -47,7 +48,7 @@ el('create').addEventListener('click', async () => {
   lobbyError('')
   initSound() // this click is the gesture the AudioContext needs
   if (!(await ready())) return
-  createRoom(name, wantedTeam)
+  createRoom(name, wantedTeam, await auth.accessToken())
 })
 
 el('join').addEventListener('click', async () => {
@@ -60,12 +61,85 @@ el('join').addEventListener('click', async () => {
   }
   initSound()
   if (!(await ready())) return
-  joinRoom(name, code, wantedTeam)
+  joinRoom(name, code, wantedTeam, await auth.accessToken())
 })
 
 el('code').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') el('join').click()
 })
+
+// Accounts ------------------------------------------------------------------
+// Optional throughout: with Supabase unconfigured the panel stays hidden and
+// everyone plays as a guest with a typed-in name.
+
+const accountNote = (text, ok = false) => {
+  el('account-note').textContent = text
+  el('account-note').classList.toggle('ok', ok)
+}
+
+if (auth.enabled) {
+  el('account').hidden = false
+
+  auth.watchSession(async (session) => {
+    el('account-signed-out').hidden = Boolean(session)
+    el('account-signed-in').hidden = !session
+    if (session) {
+      el('account-name').textContent = session.username
+      // The server takes the name from the account, so show it and lock it.
+      el('name').value = session.username
+      el('name').disabled = true
+      accountNote('')
+    } else {
+      el('name').disabled = false
+    }
+    showLeaderboard()
+  })
+
+  const attempt = (fn) => async () => {
+    const email = el('email').value.trim()
+    const password = el('password').value
+    if (!email || !password) {
+      accountNote('Email and password, please')
+      return
+    }
+    accountNote('')
+    try {
+      await fn(email, password)
+    } catch (err) {
+      accountNote(err.message)
+    }
+  }
+
+  el('sign-in').addEventListener('click', attempt(auth.signIn))
+  el('sign-up').addEventListener('click', attempt(async (email, password) => {
+    const wanted = el('name').value.trim() || email.split('@')[0]
+    const { needsConfirmation } = await auth.signUp(email, password, wanted)
+    accountNote(
+      needsConfirmation ? 'Check your email to confirm, then sign in.' : 'Account created.',
+      true,
+    )
+  }))
+  el('sign-out').addEventListener('click', () => auth.signOut())
+  el('password').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') el('sign-in').click()
+  })
+}
+
+async function showLeaderboard() {
+  const rows = await auth.leaderboard()
+  el('leaderboard').hidden = rows.length === 0
+  el('leaderboard-rows').replaceChildren(
+    ...rows.map((r) => {
+      const li = document.createElement('li')
+      li.textContent = r.username
+      const tally = document.createElement('span')
+      tally.className = 'tally'
+      tally.textContent = `${r.goals} goals · ${r.wins}W/${r.matches}`
+      li.append(tally)
+      return li
+    }),
+  )
+}
 
 // A shared link like http://host:3000/#ABCD prefills the code.
 if (/^#[A-Za-z]{4}$/.test(location.hash)) el('code').value = location.hash.slice(1).toUpperCase()

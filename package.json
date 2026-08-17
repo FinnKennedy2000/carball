@@ -3,12 +3,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "trap 'kill 0' EXIT; vite build --watch & node --watch server/index.js & wait",
+    "dev": "trap 'kill 0' EXIT; vite build --watch & node --env-file-if-exists=.env --watch server/index.js & wait",
     "build": "vite build",
-    "start": "node server/index.js",
-    "test": "node --test 'test/*.test.js'"
+    "start": "node --env-file-if-exists=.env server/index.js",
+    "test": "node --test 'test/*.test.js'",
+    "db:push": "supabase db push --password \"$SUPABASE_DB_PASSWORD\""
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.3",
     "three": "^0.171.0",
     "ws": "^8.18.0"
   },

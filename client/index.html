@@ -26,6 +26,25 @@
 
     <div id="lobby">
       <h1>Car Soccer</h1>
+
+      <div id="account" hidden>
+        <div id="account-signed-out">
+          <div class="row">
+            <input id="email" type="email" placeholder="email" autocomplete="username" />
+            <input id="password" type="password" placeholder="password" autocomplete="current-password" />
+          </div>
+          <div class="row">
+            <button id="sign-in">Sign in</button>
+            <button id="sign-up">Sign up</button>
+          </div>
+          <p id="account-note"></p>
+        </div>
+        <div id="account-signed-in" hidden>
+          signed in as <b id="account-name"></b>
+          <button id="sign-out" class="link">sign out</button>
+        </div>
+      </div>
+
       <input id="name" placeholder="your name" maxlength="16" autocomplete="off" />
       <div id="teams">
         <button class="team on" data-team="">Auto</button>
@@ -39,6 +58,11 @@
         <button id="join">Join</button>
       </div>
       <p id="lobby-error"></p>
+
+      <div id="leaderboard" hidden>
+        <h2>Top scorers</h2>
+        <ol id="leaderboard-rows"></ol>
+      </div>
     </div>
 
     <script type="module" src="./main.js"></script>

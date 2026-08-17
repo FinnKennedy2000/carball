@@ -230,6 +230,88 @@ button:hover {
   color: #fff;
 }
 
+#account {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid #ffffff14;
+}
+
+#account .row input {
+  width: 116px;
+  text-transform: none;
+  letter-spacing: normal;
+  text-align: left;
+}
+
+#account .row button {
+  width: 116px;
+  font-size: 14px;
+  padding: 9px 0;
+}
+
+#account-signed-in {
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+#account-note {
+  margin: 0;
+  min-height: 1.1em;
+  font-size: 13px;
+  color: #fca5a5;
+  max-width: 260px;
+  text-align: center;
+}
+
+#account-note.ok {
+  color: #86efac;
+}
+
+button.link {
+  width: auto;
+  background: none;
+  border: none;
+  padding: 0 0 0 8px;
+  color: var(--blue);
+  text-decoration: underline;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+#leaderboard {
+  margin-top: 6px;
+  width: 240px;
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+#leaderboard h2 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.6;
+  font-weight: 700;
+}
+
+#leaderboard ol {
+  margin: 0;
+  padding-left: 20px;
+}
+
+#leaderboard li {
+  padding: 1px 0;
+}
+
+#leaderboard .tally {
+  float: right;
+  opacity: 0.7;
+}
+
 #lobby-error {
   min-height: 1.2em;
   margin: 4px 0 0;

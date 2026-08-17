@@ -13,8 +13,10 @@ export function createState() {
     phaseTimer: C.KICKOFF_SECONDS,
     clock: C.MATCH_SECONDS,
     overtime: false, // sudden death: the clock ran out level
+    lastScorer: null, // car id credited with the most recent goal, or null
     score: [0, 0],
-    ball: { x: 0, y: 0, vx: 0, vy: 0 },
+    // lastTouch: the car that hit the ball most recently, for goal credit.
+    ball: { x: 0, y: 0, vx: 0, vy: 0, lastTouch: null },
     cars: [],
   }
   return state
@@ -41,6 +43,7 @@ export function resetPositions(state) {
   state.ball.y = 0
   state.ball.vx = 0
   state.ball.vy = 0
+  state.ball.lastTouch = null
 
   const perTeam = [0, 0]
   for (const car of state.cars) placeCar(car, perTeam[car.team]++)
@@ -96,7 +99,9 @@ export function step(state, inputs) {
     }
   }
   for (const car of state.cars) {
-    collide(car, state.ball, C.CAR_R, C.BALL_R, C.CAR_MASS, C.BALL_MASS)
+    if (collide(car, state.ball, C.CAR_R, C.BALL_R, C.CAR_MASS, C.BALL_MASS)) {
+      state.ball.lastTouch = car.id
+    }
   }
 
   for (const car of state.cars) confineCar(car)
@@ -111,6 +116,10 @@ export function step(state, inputs) {
   const scorer = confineBall(state.ball)
   if (scorer !== null) {
     state.score[scorer]++
+    // Credited only if the last toucher was attacking that goal — an own goal
+    // counts on the scoreboard but is nobody's goal.
+    const toucher = state.cars.find((c) => c.id === state.ball.lastTouch)
+    state.lastScorer = toucher && toucher.team === scorer ? toucher.id : null
     // Entering either phase freezes the ball, so this cannot re-trigger while it
     // sits in the net. In overtime the first goal is the last one.
     state.phase = state.overtime ? 'OVER' : 'GOAL'
