@@ -1,17 +1,35 @@
-// Transport plus the snapshot buffer. The client does not simulate: it renders a
-// short way in the past and interpolates between the two snapshots that straddle
-// that moment. INTERP_DELAY_MS is the knob to raise if someone's link is rough.
+// Transport plus the snapshot buffer. The room is a Supabase Realtime channel
+// rather than a socket to our own server, because Vercel has nowhere to run one.
+// One peer in the channel is the host and owns the simulation (see host.js);
+// everyone else sends inputs and renders what comes back.
+//
+// Realtime's message allowance is project-wide, so the two rates that matter are
+// SNAPSHOT_HZ and how often inputs go out. Inputs are sent only when the pressed
+// keys actually change — holding W is one message, not sixty a second — which is
+// what brings a match inside the budget.
+//
+// The client does not simulate: it renders a short way in the past and
+// interpolates between the two snapshots straddling that moment.
 
 import * as C from '../shared/constants.js'
 import { currentBits } from './input.js'
+import { randomCode } from './host.js'
+import { supabase, enabled as supabaseEnabled } from './auth.js'
 
-const INTERP_DELAY_MS = 100
+// Above one snapshot interval (1/12 s) or there is nothing to interpolate
+// towards and motion stutters at the buffer's edge.
+const INTERP_DELAY_MS = 220
 const BUFFER_MAX = 24
+const JOIN_TIMEOUT_MS = 4000
 
 const buffer = [] // [{ recvAt, s }], oldest first
-let socket = null
+let channel = null
+let host = null // the sim worker, in the tab that created the room
 let seq = 0
 let inputTimer = null
+let lastBits = -1
+let settleJoin = () => {} // replaced while a join is in flight
+const cid = crypto.randomUUID()
 
 export const handlers = {
   onJoined: () => {},
@@ -21,66 +39,169 @@ export const handlers = {
   onClosed: () => {},
 }
 
-export function connect() {
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  socket = new WebSocket(`${proto}//${location.host}/ws`)
+/**
+ * Realtime is the transport, so a project must be configured for multiplayer to
+ * work at all — unlike accounts, which stay optional.
+ */
+export const enabled = supabaseEnabled
 
-  socket.addEventListener('message', (e) => {
-    const msg = JSON.parse(e.data)
-    switch (msg.t) {
-      case 'snap':
-        buffer.push({ recvAt: performance.now(), s: msg.s })
-        while (buffer.length > BUFFER_MAX) buffer.shift()
-        break
-      case 'joined':
-        handlers.onJoined(msg)
-        break
-      case 'roster':
-        handlers.onRoster(msg.players)
-        break
-      case 'matchover':
-        handlers.onMatchOver(msg.score, msg.players)
-        break
-      case 'error':
-        handlers.onError(msg.reason)
-        break
+export async function createRoom(name, team) {
+  const code = randomCode()
+  await open(code)
+
+  host = new Worker(new URL('./sim-worker.js', import.meta.url), { type: 'module' })
+  const started = new Promise((resolve) => {
+    host.onmessage = ({ data }) => {
+      if (data.type === 'send') hostSend(data.event, data.payload)
+      else if (data.type === 'started') resolve(data)
     }
   })
+  host.postMessage({ type: 'start', code, hostName: name, hostTeam: team })
 
-  socket.addEventListener('close', () => {
-    stopSendingInput()
-    handlers.onClosed()
+  const { hostId, hostTeam, roster } = await started
+  handlers.onJoined({ id: hostId, code, team: hostTeam })
+  handlers.onRoster(roster)
+  startSendingInput()
+}
+
+export async function joinRoom(name, code, team) {
+  await open(code)
+
+  const settled = waitForWelcome()
+  // Everything aimed at the host goes on the one 'peer' event, so host.js has a
+  // single validated entry point rather than a listener per message type.
+  send('peer', { t: 'hello', cid, name, team })
+  const welcome = await settled
+  if (!welcome) return // the error has already been reported
+
+  handlers.onJoined({ id: welcome.id, code, team: welcome.team })
+  startSendingInput()
+}
+
+/** Subscribe to the room's channel and wire every event we care about. */
+function open(code) {
+  close()
+  channel = supabase.channel(`room:${code}`, {
+    // The host must not receive its own snapshots back, and a joiner's own
+    // input echo is equally useless: self defaults to false, which is what we want.
+    config: { presence: { key: cid } },
   })
 
+  channel
+    .on('broadcast', { event: 'snap' }, ({ payload }) => {
+      buffer.push({ recvAt: performance.now(), s: payload.s })
+      while (buffer.length > BUFFER_MAX) buffer.shift()
+    })
+    .on('broadcast', { event: 'roster' }, ({ payload }) => handlers.onRoster(payload.players))
+    .on('broadcast', { event: 'matchover' }, ({ payload }) =>
+      handlers.onMatchOver(payload.score, payload.players, payload.matchId),
+    )
+    // Peer messages are only the host's business, and only in the host's tab.
+    .on('broadcast', { event: 'peer' }, ({ payload }) =>
+      host?.postMessage({ type: 'peer', payload }),
+    )
+    // The answer to our own hello. Bound here rather than in joinRoom because a
+    // channel only registers listeners added before subscribe().
+    .on('broadcast', { event: 'welcome' }, ({ payload }) => {
+      if (payload.cid === cid) settleJoin(payload)
+    })
+    .on('broadcast', { event: 'reject' }, ({ payload }) => {
+      if (payload.cid === cid) settleJoin(null, payload.reason)
+    })
+    .on('presence', { event: 'leave' }, ({ leftPresences }) => {
+      for (const p of leftPresences) host?.postMessage({ type: 'dropPeer', cid: p.key ?? p.cid })
+    })
+
   return new Promise((resolve, reject) => {
-    socket.addEventListener('open', resolve, { once: true })
-    socket.addEventListener('error', () => reject(new Error('could not reach the server')), {
-      once: true,
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        channel.track({ cid })
+        resolve()
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        reject(new Error('could not reach the room'))
+      }
     })
   })
 }
 
-export function createRoom(name, team, token) {
-  send({ t: 'create', name, team, token })
-}
-
-export function joinRoom(name, code, team, token) {
-  send({ t: 'join', name, code, team, token })
+/**
+ * A room only exists while its host is in the channel, so "no room with that
+ * code" is really "nobody answered" — hence a timeout rather than a lookup.
+ */
+function waitForWelcome() {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => settleJoin(null, 'No room with that code'), JOIN_TIMEOUT_MS)
+    // The channel's listeners outlive this promise, so settleJoin is what makes
+    // sure only the first answer counts.
+    settleJoin = (welcome, error) => {
+      clearTimeout(timer)
+      settleJoin = () => {}
+      if (error) handlers.onError(error)
+      resolve(welcome)
+    }
+  })
 }
 
 export function startSendingInput() {
   if (inputTimer) return
-  inputTimer = setInterval(() => send({ t: 'input', seq: seq++, bits: currentBits() }), 1000 / C.TICK_HZ)
+  // Polled rather than driven off keydown so a key held across a tab switch, or
+  // a bit cleared by input.js's blur handler, still gets noticed. Only a change
+  // costs a message.
+  inputTimer = setInterval(() => {
+    const bits = currentBits()
+    if (bits === lastBits) return
+    lastBits = bits
+    if (host) host.postMessage({ type: 'localBits', bits })
+    else send('peer', { t: 'input', cid, seq: seq++, bits })
+  }, 1000 / C.TICK_HZ)
 }
 
 function stopSendingInput() {
   clearInterval(inputTimer)
   inputTimer = null
+  lastBits = -1
 }
 
-function send(msg) {
-  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(msg))
+function send(event, payload) {
+  channel?.send({ type: 'broadcast', event, payload })
 }
+
+/**
+ * What the host sends. Realtime does not echo a message back to its sender, so
+ * the host's own tab has to be handed everything it broadcasts or it would
+ * render nothing: no snapshots, no roster, no full-time panel.
+ */
+function hostSend(event, payload) {
+  send(event, payload)
+  if (event === 'snap') {
+    // Already a copy: it crossed the worker boundary, which clones.
+    buffer.push({ recvAt: performance.now(), s: payload.s })
+    while (buffer.length > BUFFER_MAX) buffer.shift()
+  } else if (event === 'roster') {
+    handlers.onRoster(payload.players)
+  } else if (event === 'matchover') {
+    handlers.onMatchOver(payload.score, payload.players, payload.matchId)
+  }
+}
+
+export function close() {
+  stopSendingInput()
+  const wasHost = Boolean(host)
+  host?.postMessage({ type: 'stop' })
+  host?.terminate()
+  host = null
+  if (channel) {
+    // A joiner frees its seat on the way out. A host has no one to tell: the
+    // room is the host, and it ends with them.
+    if (!wasHost) send('peer', { t: 'bye', cid })
+    supabase.removeChannel(channel)
+    channel = null
+  }
+  buffer.length = 0
+}
+
+// Leaving the tab should free the seat rather than leave a parked car behind.
+addEventListener('pagehide', close)
 
 /** Interpolated view of the world, or null until two snapshots have arrived. */
 export function sampleState() {
@@ -116,6 +237,7 @@ function blend(a, b, t) {
     clock: a.clock,
     overtime: a.overtime,
     score: a.score,
+    lastScorer: a.lastScorer,
     ball: {
       x: lerp(a.ball.x, b.ball.x, t),
       y: lerp(a.ball.y, b.ball.y, t),

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 
 import * as C from '../shared/constants.js'
 import { createState, addCar, step, hashState } from '../shared/sim.js'
-import { parse } from '../server/protocol.js'
-import { matchRows } from '../server/accounts.js'
+import { parse } from '../shared/protocol.js'
+import { buildRow } from '../api/record-match.js'
 
 /** A repeatable pseudo-random input stream — no Math.random, so runs are comparable. */
 function scriptedBits(tick, id) {
@@ -216,56 +216,69 @@ test('a goal is credited to the last attacker to touch the ball', () => {
   assert.equal(own.lastScorer, null, 'but nobody is credited')
 })
 
-test('match rows describe the result and skip guests', () => {
-  const players = [
-    { userId: 'u-blue', team: C.TEAM_BLUE, goals: 2 },
-    { userId: 'u-orange', team: C.TEAM_ORANGE, goals: 1 },
-    { userId: null, team: C.TEAM_ORANGE, goals: 5 }, // a guest
-  ]
-
-  const rows = matchRows('m1', [2, 1], players)
-  assert.equal(rows.length, 2, 'guests are not recorded')
-  assert.deepEqual(rows[0], {
-    match_id: 'm1',
+test('a reported result becomes a row, or is refused', () => {
+  const ID = '3f1a7c2e-9b4d-4e8a-8c1f-2d6e5a0b7c93'
+  const win = buildRow('u-blue', { matchId: ID, score: [2, 1], team: C.TEAM_BLUE, goals: 2 })
+  assert.deepEqual(win, {
+    match_id: ID,
     user_id: 'u-blue',
     team: C.TEAM_BLUE,
     goals: 2,
     won: true,
     drawn: false,
   })
-  assert.equal(rows[1].won, false)
+  assert.equal(buildRow('u-o', { matchId: ID, score: [2, 1], team: C.TEAM_ORANGE, goals: 1 }).won, false)
 
-  const drawn = matchRows('m2', [3, 3], players)
-  assert.ok(drawn.every((r) => r.drawn && !r.won), 'a draw is neither won nor lost')
+  const drawn = buildRow('u-x', { matchId: ID, score: [3, 3], team: C.TEAM_BLUE, goals: 1 })
+  assert.ok(drawn.drawn && !drawn.won, 'a draw is neither won nor lost')
+
+  // The user id comes from the verified token, never the body.
+  const spoofed = buildRow('u-real', { matchId: ID, score: [1, 0], team: 0, goals: 1, user_id: 'u-fake' })
+  assert.equal(spoofed.user_id, 'u-real')
+
+  for (const bad of [
+    null,
+    'nope',
+    { matchId: 'not-a-uuid', score: [1, 0], team: 0, goals: 0 },
+    { matchId: ID, score: [1], team: 0, goals: 0 },
+    { matchId: ID, score: [1, 0], team: 3, goals: 0 },
+    { matchId: ID, score: [1, 0], team: 0, goals: -1 },
+    // More goals than the side actually scored is not a result, it is a claim.
+    { matchId: ID, score: [1, 0], team: 0, goals: 2 },
+  ]) {
+    assert.equal(buildRow('u', bad), null, `should reject: ${JSON.stringify(bad)}`)
+  }
 })
 
-test('malformed messages are rejected without throwing', () => {
-  const bad = [
-    'not json',
-    '[]',
-    'null',
-    '"a string"',
-    JSON.stringify({ t: 'nope' }),
-    JSON.stringify({ t: 'input', seq: -1, bits: 0 }),
-    JSON.stringify({ t: 'input', seq: 1.5, bits: 0 }),
-    JSON.stringify({ t: 'input', seq: 0, bits: 999 }),
-    JSON.stringify({ t: 'input', seq: 0, bits: '3' }),
-    JSON.stringify({ t: 'join', name: 'x', code: 'toolong' }),
-    JSON.stringify({ t: 'join', name: 'x', code: 12 }),
-    'x'.repeat(600),
-  ]
-  for (const raw of bad) assert.equal(parse(raw), null, `should reject: ${raw.slice(0, 40)}`)
+test('malformed peer messages are rejected without throwing', () => {
+  const CID = 'peer-1'
+  for (const bad of [
+    null,
+    'a string',
+    [],
+    { t: 'nope', cid: CID },
+    { t: 'input', cid: CID, seq: -1, bits: 0 },
+    { t: 'input', cid: CID, seq: 1.5, bits: 0 },
+    { t: 'input', cid: CID, seq: 0, bits: 999 },
+    { t: 'input', cid: CID, seq: 0, bits: '3' },
+    { t: 'hello', cid: CID, name: 12 },
+    { t: 'hello', name: 'x' }, // no cid: there is nobody to answer
+    { t: 'input', cid: 'x'.repeat(100), seq: 0, bits: 0 },
+  ]) {
+    assert.equal(parse(bad), null, `should reject: ${JSON.stringify(bad)}`)
+  }
 
-  assert.deepEqual(parse(JSON.stringify({ t: 'input', seq: 7, bits: C.IN_ALL })), {
+  assert.deepEqual(parse({ t: 'input', cid: CID, seq: 7, bits: C.IN_ALL }), {
     t: 'input',
+    cid: CID,
     seq: 7,
     bits: C.IN_ALL,
   })
-  assert.equal(parse(JSON.stringify({ t: 'join', name: '  bob  ', code: 'abcd' })).code, 'ABCD')
-  assert.equal(parse(JSON.stringify({ t: 'create', name: '\u0007\u0000' })).name, 'player')
+  assert.equal(parse({ t: 'hello', cid: CID, name: '  bob  ' }).name, 'bob')
+  assert.equal(parse({ t: 'hello', cid: CID, name: '\u0007\u0000' }).name, 'player')
   // A side request is optional, and anything that is not a team means "anywhere".
-  assert.equal(parse(JSON.stringify({ t: 'create', name: 'x', team: 1 })).team, 1)
-  assert.equal(parse(JSON.stringify({ t: 'create', name: 'x' })).team, null)
-  assert.equal(parse(JSON.stringify({ t: 'create', name: 'x', team: 7 })).team, null)
-  assert.equal(parse(JSON.stringify({ t: 'create', name: 'x', team: '0' })).team, null)
+  assert.equal(parse({ t: 'hello', cid: CID, name: 'x', team: 1 }).team, 1)
+  assert.equal(parse({ t: 'hello', cid: CID, name: 'x' }).team, null)
+  assert.equal(parse({ t: 'hello', cid: CID, name: 'x', team: 7 }).team, null)
+  assert.equal(parse({ t: 'hello', cid: CID, name: 'x', team: '0' }).team, null)
 })

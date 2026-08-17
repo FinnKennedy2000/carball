@@ -2,7 +2,12 @@
 
 export const TICK_HZ = 60
 export const DT = 1 / TICK_HZ
-export const SNAPSHOT_HZ = 30
+// Snapshots go over Supabase Realtime, whose message allowance is project-wide
+// (100/s on Free, 500/s on Pro), so the rate is a budget decision as much as a
+// smoothness one: every step up here costs one message per second per match.
+// The client interpolates between snapshots, so 12 reads smoothly; INTERP_DELAY_MS
+// in net.js must stay above one interval (1/12 s) or it interpolates off the end.
+export const SNAPSHOT_HZ = 12
 
 // Arena, origin at centre.
 export const ARENA_W = 80

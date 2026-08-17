@@ -1,9 +1,11 @@
-// Supabase auth, entirely client-side. The game does not depend on it: with no
-// credentials configured `enabled` is false, every call is a no-op, and play
-// continues as a guest. Accounts only add a stable name and career stats.
+// Supabase auth, entirely client-side. Signing in stays optional — with no
+// session you play as a guest with a typed-in name — but Supabase itself is no
+// longer optional, because Realtime is now the game's transport too. With
+// nothing configured, `enabled` is false and there is no multiplayer at all.
 //
-// The access token is handed to the game server on join; the server verifies it
-// rather than trusting any name the client claims.
+// The access token is never put on a room channel: the host is another player's
+// browser, and a token there would hand them the session. It only ever goes to
+// Supabase itself, or to our own /api/record-match over HTTPS.
 
 import { createClient } from '@supabase/supabase-js'
 
@@ -12,7 +14,9 @@ const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 export const enabled = Boolean(url && anonKey)
 
-const supabase = enabled ? createClient(url, anonKey) : null
+// Exported because net.js runs the game's Realtime channel on the same client —
+// one connection to Supabase, shared, rather than a second socket per tab.
+export const supabase = enabled ? createClient(url, anonKey) : null
 
 /** Calls back with { user, profile } or null, now and on every auth change. */
 export function watchSession(onChange) {

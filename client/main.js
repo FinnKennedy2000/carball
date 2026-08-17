@@ -1,5 +1,6 @@
 import { initRenderer, setLocalId, draw } from './render.js'
-import { connect, createRoom, joinRoom, startSendingInput, sampleState, handlers } from './net.js'
+import { createRoom, joinRoom, sampleState, handlers, enabled as netEnabled } from './net.js'
+import { reportMyMatch } from './stats.js'
 import { startInput } from './input.js'
 import { initSound, updateSound } from './sound.js'
 import * as auth from './auth.js'
@@ -20,18 +21,26 @@ let localId = null
 initRenderer(el('view'))
 startInput()
 
+let myTeam = null
+
 handlers.onJoined = (msg) => {
   localId = msg.id
+  myTeam = msg.team
   setLocalId(msg.id)
   showGame(msg.code)
-  startSendingInput()
   location.hash = msg.code
 }
 
 handlers.onRoster = showRoster
 handlers.onError = lobbyError
 
-handlers.onMatchOver = showMatchOver
+handlers.onMatchOver = (score, players, matchId) => {
+  showMatchOver(score, players)
+  // Each player writes their own row; see stats.js for why the host does not do
+  // it for everyone.
+  const me = players.find((p) => p.id === localId)
+  if (me) reportMyMatch({ matchId, score, team: me.team ?? myTeam, goals: me.goals })
+}
 
 // The room restarts on its own; these only decide what you look at meanwhile.
 el('over-again').addEventListener('click', hideMatchOver)
@@ -67,8 +76,12 @@ el('create').addEventListener('click', async () => {
   const name = el('name').value
   lobbyError('')
   initSound() // this click is the gesture the AudioContext needs
-  if (!(await ready())) return
-  createRoom(name, wantedTeam, await auth.accessToken())
+  if (!ready()) return
+  try {
+    await createRoom(name, wantedTeam)
+  } catch (err) {
+    lobbyError(err.message)
+  }
 })
 
 el('join').addEventListener('click', async () => {
@@ -80,8 +93,12 @@ el('join').addEventListener('click', async () => {
     return
   }
   initSound()
-  if (!(await ready())) return
-  joinRoom(name, code, wantedTeam, await auth.accessToken())
+  if (!ready()) return
+  try {
+    await joinRoom(name, code, wantedTeam)
+  } catch (err) {
+    lobbyError(err.message)
+  }
 })
 
 el('code').addEventListener('keydown', (e) => {
@@ -108,7 +125,8 @@ if (auth.enabled) {
     el('topbar').hidden = !session
     if (session) {
       el('account-name').textContent = session.username
-      // The server takes the name from the account, so show it and lock it.
+      // Shown and locked so a signed-in player is recognisable to others. It is
+      // only a claim now — see the trust note in host.js.
       el('name').value = session.username
       el('name').disabled = true
       el('play-label').textContent = 'Playing as'
@@ -182,17 +200,14 @@ async function showLeaderboard() {
 // A shared link like http://host:3000/#ABCD prefills the code.
 if (/^#[A-Za-z]{4}$/.test(location.hash)) el('code').value = location.hash.slice(1).toUpperCase()
 
-let connected = null
-async function ready() {
-  if (!connected) connected = connect()
-  try {
-    await connected
-    return true
-  } catch (err) {
-    connected = null
-    lobbyError(err.message)
-    return false
-  }
+/**
+ * Realtime carries the game now, so an unconfigured deployment has no
+ * multiplayer at all — worth saying plainly rather than timing out on a join.
+ */
+function ready() {
+  if (netEnabled) return true
+  lobbyError('Multiplayer is not configured on this deployment')
+  return false
 }
 
 function frame() {
