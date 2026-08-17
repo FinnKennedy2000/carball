@@ -17,9 +17,9 @@ export const GOAL_DEPTH = 5 // visual only; the goal line is the arena wall
 
 export const CAR_R = 1.9
 export const CAR_MASS = 3
-export const CAR_ACCEL = 55
+export const CAR_ACCEL = 42
 export const CAR_REVERSE_ACCEL = 30
-export const CAR_MAX_SPEED = 34
+export const CAR_MAX_SPEED = 24
 export const CAR_BOOST_ACCEL = 65
 export const CAR_BOOST_MAX_SPEED = 48
 export const CAR_DRAG = 0.7 // forward velocity damping rate

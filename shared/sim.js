@@ -254,9 +254,10 @@ function confineBall(ball) {
 
   const inMouth = Math.abs(ball.y) <= C.GOAL_H / 2
   if (inMouth) {
-    // Goal line is the wall itself; the ball's centre crossing it scores.
-    if (ball.x <= C.MIN_X) return C.TEAM_ORANGE
-    if (ball.x >= C.MAX_X) return C.TEAM_BLUE
+    // Goal line is the wall itself, and it takes the *whole* ball: a ball still
+    // sitting on the line is play on, as in the real game.
+    if (ball.x + C.BALL_R <= C.MIN_X) return C.TEAM_ORANGE
+    if (ball.x - C.BALL_R >= C.MAX_X) return C.TEAM_BLUE
     return null
   }
   reflectAxis(ball, 'x', 'vx', C.MIN_X + C.BALL_R, C.MAX_X - C.BALL_R)

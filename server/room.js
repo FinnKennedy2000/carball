@@ -115,9 +115,13 @@ export class Room {
     for (const p of this.players.values()) inputs[p.id] = p.bits
 
     const before = this.state.score[0] + this.state.score[1]
+    const wasOver = this.state.phase === 'OVER'
     step(this.state, inputs)
     if (this.state.score[0] + this.state.score[1] > before) this.creditGoal()
 
+    // Full time is announced the moment it happens, so the panel is up for the
+    // whole OVER phase rather than arriving with the next kickoff.
+    if (!wasOver && this.state.phase === 'OVER') this.announceFullTime()
     // Let the final score sit on screen before the next match starts.
     if (this.state.phase === 'OVER' && this.state.phaseTimer <= 0) this.restart()
 
@@ -134,6 +138,20 @@ export class Room {
     if (scorer) scorer.goals++
   }
 
+  /** The final score plus who scored what, for the full-time panel. */
+  announceFullTime() {
+    this.broadcast({
+      t: 'matchover',
+      score: this.state.score.slice(),
+      players: [...this.players.values()].map((p) => ({
+        id: p.id,
+        name: p.name,
+        team: p.team,
+        goals: p.goals,
+      })),
+    })
+  }
+
   restart() {
     const finalScore = this.state.score.slice()
     // Written before the state is thrown away. Deliberately not awaited: a slow
@@ -143,7 +161,6 @@ export class Room {
     this.state = createState()
     for (const p of this.players.values()) addCar(this.state, p.id, p.team)
     resetPositions(this.state)
-    this.broadcast({ t: 'matchover', score: finalScore })
   }
 
   broadcastRoster() {

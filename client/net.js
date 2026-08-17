@@ -39,7 +39,7 @@ export function connect() {
         handlers.onRoster(msg.players)
         break
       case 'matchover':
-        handlers.onMatchOver(msg.score)
+        handlers.onMatchOver(msg.score, msg.players)
         break
       case 'error':
         handlers.onError(msg.reason)

@@ -70,6 +70,22 @@ export async function accessToken() {
   return data.session?.access_token ?? null
 }
 
+/** One player's career row, or zeroes if they have not finished a match yet. */
+export async function stats(username) {
+  const empty = { goals: 0, wins: 0, matches: 0 }
+  if (!enabled) return empty
+  const { data, error } = await supabase
+    .from('leaderboard')
+    .select('goals, wins, matches')
+    .eq('username', username)
+    .maybeSingle()
+  if (error) {
+    console.warn('could not load stats:', error.message)
+    return empty
+  }
+  return data ?? empty
+}
+
 export async function leaderboard(limit = 5) {
   if (!enabled) return []
   const { data, error } = await supabase

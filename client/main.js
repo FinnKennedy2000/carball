@@ -1,10 +1,17 @@
-import * as C from '../shared/constants.js'
 import { initRenderer, setLocalId, draw } from './render.js'
 import { connect, createRoom, joinRoom, startSendingInput, sampleState, handlers } from './net.js'
 import { startInput } from './input.js'
 import { initSound, updateSound } from './sound.js'
 import * as auth from './auth.js'
-import { showGame, showRoster, lobbyError, updateHud, flashBanner } from './ui.js'
+import {
+  showGame,
+  showRoster,
+  lobbyError,
+  updateHud,
+  flashBanner,
+  showMatchOver,
+  hideMatchOver,
+} from './ui.js'
 
 const el = (id) => document.getElementById(id)
 
@@ -24,10 +31,23 @@ handlers.onJoined = (msg) => {
 handlers.onRoster = showRoster
 handlers.onError = lobbyError
 
-handlers.onMatchOver = ([blue, orange]) => {
-  const verdict = blue === orange ? 'DRAW' : blue > orange ? 'BLUE WINS' : 'ORANGE WINS'
-  flashBanner(`${verdict}  ${blue}\u2013${orange}`, C.OVER_SECONDS)
-}
+handlers.onMatchOver = showMatchOver
+
+// The room restarts on its own; these only decide what you look at meanwhile.
+el('over-again').addEventListener('click', hideMatchOver)
+el('over-copy').addEventListener('click', async () => {
+  const code = el('room-code').textContent
+  try {
+    await navigator.clipboard.writeText(`${location.origin}${location.pathname}#${code}`)
+    el('over-copy').textContent = 'Link copied'
+  } catch {
+    // No clipboard without a secure context — the code is the shareable part.
+    el('over-copy').textContent = `Room code ${code}`
+  }
+})
+el('over-home').addEventListener('click', () => {
+  location.href = location.pathname // dropping the socket leaves the room
+})
 
 handlers.onClosed = () => {
   flashBanner('DISCONNECTED', 9999)
@@ -80,17 +100,23 @@ const accountNote = (text, ok = false) => {
 if (auth.enabled) {
   el('account').hidden = false
 
+  el('account-divider').hidden = false
+
   auth.watchSession(async (session) => {
     el('account-signed-out').hidden = Boolean(session)
     el('account-signed-in').hidden = !session
+    el('topbar').hidden = !session
     if (session) {
       el('account-name').textContent = session.username
       // The server takes the name from the account, so show it and lock it.
       el('name').value = session.username
       el('name').disabled = true
+      el('play-label').textContent = 'Playing as'
       accountNote('')
+      showRecord(session.username)
     } else {
       el('name').disabled = false
+      el('play-label').textContent = 'Play as a guest'
     }
     showLeaderboard()
   })
@@ -125,18 +151,30 @@ if (auth.enabled) {
   })
 }
 
+async function showRecord(username) {
+  const { goals, wins, matches } = await auth.stats(username)
+  el('record-goals').textContent = goals
+  el('record-wins').textContent = wins
+  el('record-matches').textContent = matches
+}
+
 async function showLeaderboard() {
   const rows = await auth.leaderboard()
   el('leaderboard').hidden = rows.length === 0
   el('leaderboard-rows').replaceChildren(
-    ...rows.map((r) => {
-      const li = document.createElement('li')
-      li.textContent = r.username
+    ...rows.map((r, i) => {
+      const row = document.createElement('div')
+      row.className = 'lb-row'
+      const rank = document.createElement('span')
+      rank.className = 'rank'
+      rank.textContent = i + 1
+      const name = document.createElement('span')
+      name.textContent = r.username
       const tally = document.createElement('span')
       tally.className = 'tally'
       tally.textContent = `${r.goals} goals · ${r.wins}W/${r.matches}`
-      li.append(tally)
-      return li
+      row.append(rank, name, tally)
+      return row
     }),
   )
 }

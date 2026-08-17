@@ -73,6 +73,26 @@ test('a ball sitting in the net scores exactly once', () => {
   assert.equal(state.ball.x, 0, 'kickoff resets the ball')
 })
 
+test('a ball resting on the goal line is not yet a goal', () => {
+  const state = twoCarGame()
+  state.phase = 'PLAY'
+  state.phaseTimer = 0
+
+  // Centre past the line but the far edge still short of it: play on.
+  state.ball.x = C.MIN_X - C.BALL_R + 0.1
+  state.ball.y = 0
+  state.ball.vx = 0
+  state.ball.vy = 0
+
+  run(state, 30, () => 0)
+  assert.deepEqual(state.score, [0, 0], 'not over until the whole ball is')
+
+  // A nudge that takes the last of it across does score.
+  state.ball.vx = -5
+  run(state, 30, () => 0)
+  assert.deepEqual(state.score, [0, 1])
+})
+
 test('repeated collisions do not inject energy', () => {
   const state = twoCarGame()
   state.phase = 'PLAY'

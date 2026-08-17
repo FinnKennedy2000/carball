@@ -3,65 +3,162 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Car Soccer</title>
+    <title>Car Football</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="stylesheet" href="./nocturne.css" />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <canvas id="view"></canvas>
 
     <div id="hud" hidden>
-      <div id="scoreboard">
-        <span class="score blue" id="score-blue">0</span>
-        <span id="clock">5:00</span>
-        <span class="score orange" id="score-orange">0</span>
+      <div id="roster"></div>
+
+      <div id="room">
+        <span class="kicker">Room</span>
+        <b id="room-code">----</b>
       </div>
-      <div id="banner"></div>
-      <div id="boost-wrap"><div id="boost"></div></div>
+
+      <div id="scoreboard">
+        <div class="board">
+          <span class="side"><i class="bar blue"></i><span class="score" id="score-blue">0</span></span>
+          <span class="middle">
+            <span id="clock">5:00</span>
+            <span id="clock-label"></span>
+          </span>
+          <span class="side"><span class="score" id="score-orange">0</span><i class="bar orange"></i></span>
+        </div>
+        <div class="board-rule"></div>
+      </div>
+
+      <div id="banner-wrap">
+        <div id="banner"></div>
+        <div id="banner-sub"></div>
+      </div>
+
       <div id="footer">
-        room <b id="room-code">----</b> &nbsp;·&nbsp; WASD drive &nbsp;·&nbsp; space boost
-        &nbsp;·&nbsp; shift drift &nbsp;·&nbsp; M mute
-        <div id="players"></div>
+        <div id="boost-row">
+          <span class="kicker">Boost</span>
+          <div id="boost-wrap"><div id="boost"></div></div>
+          <span id="boost-pct">0</span>
+        </div>
+        <div id="controls-line">WASD drive · space boost · shift drift · M mute</div>
+      </div>
+    </div>
+
+    <div id="over" hidden>
+      <div id="over-inner">
+        <div class="stack">
+          <div class="kicker">Full time · room <span id="over-code"></span></div>
+          <h2 id="over-verdict"></h2>
+          <div id="over-score">
+            <span class="blue" id="over-blue">0</span>
+            <span class="dash">–</span>
+            <span class="orange" id="over-orange">0</span>
+          </div>
+          <div class="accent-rule wide"></div>
+        </div>
+
+        <div id="over-teams"></div>
+
+        <div class="row">
+          <button id="over-again" class="btn btn-primary">Play again</button>
+          <button id="over-copy" class="btn btn-secondary">Copy room link</button>
+          <button id="over-home" class="btn btn-ghost">Back to home</button>
+        </div>
       </div>
     </div>
 
     <div id="lobby">
-      <h1>Car Soccer</h1>
-
-      <div id="account" hidden>
-        <div id="account-signed-out">
-          <div class="row">
-            <input id="email" type="email" placeholder="email" autocomplete="username" />
-            <input id="password" type="password" placeholder="password" autocomplete="current-password" />
-          </div>
-          <div class="row">
-            <button id="sign-in">Sign in</button>
-            <button id="sign-up">Sign up</button>
-          </div>
-          <p id="account-note"></p>
-        </div>
-        <div id="account-signed-in" hidden>
+      <div id="topbar" hidden>
+        <div class="brand">Car Football</div>
+        <div class="who">
           signed in as <b id="account-name"></b>
-          <button id="sign-out" class="link">sign out</button>
+          <button id="sign-out" class="btn btn-ghost">Sign out</button>
         </div>
       </div>
 
-      <input id="name" placeholder="your name" maxlength="16" autocomplete="off" />
-      <div id="teams">
-        <button class="team on" data-team="">Auto</button>
-        <button class="team blue" data-team="0">Blue</button>
-        <button class="team orange" data-team="1">Orange</button>
-      </div>
-      <button id="create">Create room</button>
-      <div class="or">or</div>
-      <div class="row">
-        <input id="code" placeholder="CODE" maxlength="4" autocomplete="off" />
-        <button id="join">Join</button>
-      </div>
-      <p id="lobby-error"></p>
+      <div id="lobby-cols">
+        <section id="col-left">
+          <div class="stack">
+            <div class="kicker accent">Four letters. Six cars. One ball.</div>
+            <h1>Car&nbsp;Football</h1>
+            <div class="accent-rule"></div>
+          </div>
 
-      <div id="leaderboard" hidden>
-        <h2>Top scorers</h2>
-        <ol id="leaderboard-rows"></ol>
+          <div class="stack wide-gap">
+            <div class="kicker" id="play-label">Play as a guest</div>
+            <input id="name" class="input" placeholder="your name" maxlength="16" autocomplete="off" />
+
+            <div class="kicker">Side</div>
+            <div id="teams">
+              <button class="btn btn-secondary team on" data-team="">Auto</button>
+              <button class="btn btn-secondary team blue" data-team="0">Blue</button>
+              <button class="btn btn-secondary team orange" data-team="1">Orange</button>
+            </div>
+
+            <div class="row">
+              <button id="create" class="btn btn-primary">Create room</button>
+              <input id="code" class="input" placeholder="CODE" maxlength="4" autocomplete="off" />
+              <button id="join" class="btn btn-secondary">Join</button>
+            </div>
+
+            <p class="hint">
+              Room codes are four letters. Share the link and the code fills itself in.
+            </p>
+            <p id="lobby-error"></p>
+          </div>
+
+          <div class="stack">
+            <div class="kicker">Controls</div>
+            <dl id="controls">
+              <div><dt>Drive</dt><dd>WASD</dd></div>
+              <div><dt>Boost</dt><dd>Space</dd></div>
+              <div><dt>Drift</dt><dd>Shift</dd></div>
+              <div><dt>Mute</dt><dd>M</dd></div>
+            </dl>
+          </div>
+        </section>
+
+        <aside id="col-right">
+          <div id="account" hidden>
+            <div id="account-signed-out" class="stack wide-gap">
+              <div class="kicker">Sign in to keep your record</div>
+              <div class="field">
+                <label for="email">Email</label>
+                <input id="email" class="input" type="email" autocomplete="username" />
+              </div>
+              <div class="field">
+                <label for="password">Password</label>
+                <input id="password" class="input" type="password" autocomplete="current-password" />
+              </div>
+              <div class="row">
+                <button id="sign-in" class="btn btn-primary">Sign in</button>
+                <button id="sign-up" class="btn btn-ghost">Create account</button>
+              </div>
+              <p class="hint">Optional — guests play with a typed-in name.</p>
+              <p id="account-note"></p>
+            </div>
+
+            <div id="account-signed-in" hidden>
+              <div class="card">
+                <div class="card-kicker">Your record</div>
+                <div id="record">
+                  <div><b id="record-goals">0</b><span>goals</span></div>
+                  <div><b id="record-wins">0</b><span>wins</span></div>
+                  <div><b id="record-matches">0</b><span>matches</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="hr" id="account-divider" hidden></div>
+
+          <div id="leaderboard" hidden class="stack">
+            <div class="kicker">Top scorers</div>
+            <div id="leaderboard-rows"></div>
+          </div>
+        </aside>
       </div>
     </div>
 
