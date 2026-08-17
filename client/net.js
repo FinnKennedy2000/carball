@@ -20,7 +20,10 @@ import { supabase, enabled as supabaseEnabled } from './auth.js'
 // towards and motion stutters at the buffer's edge.
 const INTERP_DELAY_MS = 220
 const BUFFER_MAX = 24
-const JOIN_TIMEOUT_MS = 4000
+// Generous, because giving up early is worse than waiting: the host may already
+// have seated us by the time we stop listening. Measured round trips to a room
+// on the far side of Realtime are well under a second; this is for a bad one.
+const JOIN_TIMEOUT_MS = 10000
 
 const buffer = [] // [{ recvAt, s }], oldest first
 let channel = null
@@ -72,15 +75,21 @@ export async function joinRoom(name, code, team) {
   // single validated entry point rather than a listener per message type.
   send('peer', { t: 'hello', cid, name, team })
   const welcome = await settled
-  if (!welcome) return // the error has already been reported
+  if (!welcome) {
+    // We may have been seated after all, by a welcome that arrived too late to
+    // catch. Leaving it at that parks an undriven car in the match for the rest
+    // of the game, so give the seat back before walking away.
+    await close()
+    return // the error has already been reported
+  }
 
   handlers.onJoined({ id: welcome.id, code, team: welcome.team })
   startSendingInput()
 }
 
 /** Subscribe to the room's channel and wire every event we care about. */
-function open(code) {
-  close()
+async function open(code) {
+  await close()
   channel = supabase.channel(`room:${code}`, {
     // The host must not receive its own snapshots back, and a joiner's own
     // input echo is equally useless: self defaults to false, which is what we want.
@@ -184,24 +193,29 @@ function hostSend(event, payload) {
   }
 }
 
-export function close() {
+export async function close() {
   stopSendingInput()
   const wasHost = Boolean(host)
   host?.postMessage({ type: 'stop' })
   host?.terminate()
   host = null
-  if (channel) {
-    // A joiner frees its seat on the way out. A host has no one to tell: the
-    // room is the host, and it ends with them.
-    if (!wasHost) send('peer', { t: 'bye', cid })
-    supabase.removeChannel(channel)
-    channel = null
-  }
+
+  const leaving = channel
+  channel = null
   buffer.length = 0
+  if (!leaving) return
+
+  // A joiner frees its seat on the way out. A host has no one to tell: the room
+  // is the host, and it ends with them. The send is awaited because removing
+  // the channel first would drop the goodbye and leave a parked car behind.
+  if (!wasHost) await leaving.send({ type: 'broadcast', event: 'peer', payload: { t: 'bye', cid } })
+  supabase.removeChannel(leaving)
 }
 
 // Leaving the tab should free the seat rather than leave a parked car behind.
-addEventListener('pagehide', close)
+// Nothing can be awaited here, so this is best effort: the host also drops a
+// peer that Realtime reports as gone from the channel's presence.
+addEventListener('pagehide', () => void close())
 
 /** Interpolated view of the world, or null until two snapshots have arrived. */
 export function sampleState() {
