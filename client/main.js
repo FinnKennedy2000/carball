@@ -1,6 +1,8 @@
+import * as C from '../shared/constants.js'
 import { initRenderer, setLocalId, draw } from './render.js'
 import { connect, createRoom, joinRoom, startSendingInput, sampleState, handlers } from './net.js'
 import { startInput } from './input.js'
+import { initSound, updateSound } from './sound.js'
 import { showGame, showRoster, lobbyError, updateHud, flashBanner } from './ui.js'
 
 const el = (id) => document.getElementById(id)
@@ -23,18 +25,29 @@ handlers.onError = lobbyError
 
 handlers.onMatchOver = ([blue, orange]) => {
   const verdict = blue === orange ? 'DRAW' : blue > orange ? 'BLUE WINS' : 'ORANGE WINS'
-  flashBanner(`${verdict}  ${blue}–${orange}`, 4)
+  flashBanner(`${verdict}  ${blue}\u2013${orange}`, C.OVER_SECONDS)
 }
 
 handlers.onClosed = () => {
   flashBanner('DISCONNECTED', 9999)
 }
 
+// Team buttons: '' means auto-balance.
+let wantedTeam = null
+for (const btn of document.querySelectorAll('#teams .team')) {
+  btn.addEventListener('click', () => {
+    for (const other of document.querySelectorAll('#teams .team')) other.classList.remove('on')
+    btn.classList.add('on')
+    wantedTeam = btn.dataset.team === '' ? null : Number(btn.dataset.team)
+  })
+}
+
 el('create').addEventListener('click', async () => {
   const name = el('name').value
   lobbyError('')
+  initSound() // this click is the gesture the AudioContext needs
   if (!(await ready())) return
-  createRoom(name)
+  createRoom(name, wantedTeam)
 })
 
 el('join').addEventListener('click', async () => {
@@ -45,8 +58,9 @@ el('join').addEventListener('click', async () => {
     lobbyError('Room codes are 4 letters')
     return
   }
+  initSound()
   if (!(await ready())) return
-  joinRoom(name, code)
+  joinRoom(name, code, wantedTeam)
 })
 
 el('code').addEventListener('keydown', (e) => {
@@ -74,6 +88,7 @@ function frame() {
   if (state) {
     draw(state)
     updateHud(state, localId)
+    updateSound(state, localId)
   }
   requestAnimationFrame(frame)
 }

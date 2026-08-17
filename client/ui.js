@@ -31,10 +31,16 @@ export function flashBanner(text, seconds) {
   bannerUntil = performance.now() + seconds * 1000
 }
 
+let wasOvertime = false
+
 export function updateHud(state, localId) {
+  // Announce sudden death once rather than parking it over the pitch.
+  if (state.overtime && !wasOvertime) flashBanner('SUDDEN DEATH', 3)
+  wasOvertime = state.overtime
+
   el('score-blue').textContent = state.score[C.TEAM_BLUE]
   el('score-orange').textContent = state.score[C.TEAM_ORANGE]
-  el('clock').textContent = formatClock(state.clock)
+  el('clock').textContent = state.overtime ? 'OT' : formatClock(state.clock)
 
   const me = state.cars.find((c) => c.id === localId)
   el('boost').style.width = `${me ? (me.boost / C.BOOST_MAX) * 100 : 0}%`

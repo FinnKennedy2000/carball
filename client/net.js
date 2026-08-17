@@ -60,12 +60,12 @@ export function connect() {
   })
 }
 
-export function createRoom(name) {
-  send({ t: 'create', name })
+export function createRoom(name, team) {
+  send({ t: 'create', name, team })
 }
 
-export function joinRoom(name, code) {
-  send({ t: 'join', name, code })
+export function joinRoom(name, code, team) {
+  send({ t: 'join', name, code, team })
 }
 
 export function startSendingInput() {
@@ -114,6 +114,7 @@ function blend(a, b, t) {
     phase: a.phase,
     phaseTimer: a.phaseTimer,
     clock: a.clock,
+    overtime: a.overtime,
     score: a.score,
     ball: {
       x: lerp(a.ball.x, b.ball.x, t),

@@ -1,7 +1,7 @@
 // The socket is a trust boundary. Everything from a client is parsed here and
 // either returns a known-good message or null. Nothing in here throws.
 
-import { IN_ALL } from '../shared/constants.js'
+import { IN_ALL, TEAM_BLUE, TEAM_ORANGE } from '../shared/constants.js'
 
 const CODE_RE = /^[A-Z]{4}$/
 const CONTROL_RE = /[\u0000-\u001f\u007f]/g
@@ -21,12 +21,13 @@ export function parse(raw) {
   switch (msg.t) {
     case 'create': {
       const name = cleanName(msg.name)
-      return name === null ? null : { t: 'create', name }
+      return name === null ? null : { t: 'create', name, team: cleanTeam(msg.team) }
     }
     case 'join': {
       const name = cleanName(msg.name)
       const code = cleanCode(msg.code)
-      return name === null || code === null ? null : { t: 'join', name, code }
+      if (name === null || code === null) return null
+      return { t: 'join', name, code, team: cleanTeam(msg.team) }
     }
     case 'input': {
       if (!Number.isInteger(msg.seq) || msg.seq < 0) return null
@@ -36,6 +37,11 @@ export function parse(raw) {
     default:
       return null
   }
+}
+
+/** A side request. Anything that is not a valid team means "put me anywhere". */
+export function cleanTeam(team) {
+  return team === TEAM_BLUE || team === TEAM_ORANGE ? team : null
 }
 
 export function cleanCode(code) {

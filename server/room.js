@@ -25,10 +25,13 @@ export class Room {
     return this.players.size >= C.MAX_PLAYERS
   }
 
-  join(socket, name) {
+  join(socket, name, wanted = null) {
     const id = this.nextId++
-    const team = this.smallestTeam()
-    const player = { id, name, socket, bits: 0 }
+    // A requested side is honoured unless it is already full; otherwise balance.
+    const team =
+      wanted !== null && this.teamCount(wanted) < C.MAX_PER_TEAM ? wanted : this.smallestTeam()
+    // team is kept on the player so a rematch does not reshuffle the sides.
+    const player = { id, name, socket, team, bits: 0 }
     this.players.set(id, player)
     addCar(this.state, id, team)
 
@@ -55,9 +58,14 @@ export class Room {
     if (player) player.bits = bits
   }
 
+  teamCount(team) {
+    let n = 0
+    for (const car of this.state.cars) if (car.team === team) n++
+    return n
+  }
+
   smallestTeam() {
-    let blue = 0
-    for (const car of this.state.cars) if (car.team === C.TEAM_BLUE) blue++
+    const blue = this.teamCount(C.TEAM_BLUE)
     return blue <= this.state.cars.length - blue ? C.TEAM_BLUE : C.TEAM_ORANGE
   }
 
@@ -91,7 +99,8 @@ export class Room {
     for (const p of this.players.values()) inputs[p.id] = p.bits
     step(this.state, inputs)
 
-    if (this.state.phase === 'OVER') this.restart()
+    // Let the final score sit on screen before the next match starts.
+    if (this.state.phase === 'OVER' && this.state.phaseTimer <= 0) this.restart()
 
     this.ticksSinceSnapshot++
     if (this.ticksSinceSnapshot >= C.TICK_HZ / C.SNAPSHOT_HZ) {
@@ -103,17 +112,13 @@ export class Room {
   restart() {
     const finalScore = this.state.score.slice()
     this.state = createState()
-    for (const p of this.players.values()) addCar(this.state, p.id, this.smallestTeam())
+    for (const p of this.players.values()) addCar(this.state, p.id, p.team)
     resetPositions(this.state)
     this.broadcast({ t: 'matchover', score: finalScore })
   }
 
   broadcastRoster() {
-    const players = [...this.players.values()].map((p) => ({
-      id: p.id,
-      name: p.name,
-      team: this.state.cars.find((c) => c.id === p.id)?.team ?? C.TEAM_BLUE,
-    }))
+    const players = [...this.players.values()].map((p) => ({ id: p.id, name: p.name, team: p.team }))
     this.broadcast({ t: 'roster', players })
   }
 

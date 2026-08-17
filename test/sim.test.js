@@ -126,6 +126,40 @@ test('steering direction matches the screen, and drift slackens grip', () => {
   assert.ok(slipDeg(C.IN_FWD | C.IN_RIGHT | C.IN_DRIFT) > 30, 'drifting slides')
 })
 
+test('a level clock goes to sudden death, a lead ends the match', () => {
+  // Level at full time: play on, and the next goal wins it.
+  const level = twoCarGame()
+  level.phase = 'PLAY'
+  level.phaseTimer = 0
+  level.clock = 0.5
+  run(level, 60, () => 0)
+  assert.equal(level.overtime, true, 'tied at 0:00 means overtime')
+  assert.equal(level.phase, 'PLAY', 'and play continues')
+
+  level.ball.x = C.MIN_X + 1
+  level.ball.vx = -20
+  run(level, 30, () => 0)
+  assert.deepEqual(level.score, [0, 1])
+  assert.equal(level.phase, 'OVER', 'the first overtime goal ends it')
+
+  // The match holds on OVER long enough to read the score, and nothing moves.
+  const held = level.phaseTimer
+  assert.ok(held > 1, `OVER holds for ${held}s`)
+  run(level, 30, () => 0)
+  assert.equal(level.phase, 'OVER')
+  assert.ok(level.phaseTimer < held)
+
+  // A lead at full time just ends it.
+  const led = twoCarGame()
+  led.phase = 'PLAY'
+  led.phaseTimer = 0
+  led.clock = 0.5
+  led.score = [2, 1]
+  run(led, 60, () => 0)
+  assert.equal(led.phase, 'OVER')
+  assert.equal(led.overtime, false)
+})
+
 test('malformed messages are rejected without throwing', () => {
   const bad = [
     'not json',
@@ -150,4 +184,9 @@ test('malformed messages are rejected without throwing', () => {
   })
   assert.equal(parse(JSON.stringify({ t: 'join', name: '  bob  ', code: 'abcd' })).code, 'ABCD')
   assert.equal(parse(JSON.stringify({ t: 'create', name: '\u0007\u0000' })).name, 'player')
+  // A side request is optional, and anything that is not a team means "anywhere".
+  assert.equal(parse(JSON.stringify({ t: 'create', name: 'x', team: 1 })).team, 1)
+  assert.equal(parse(JSON.stringify({ t: 'create', name: 'x' })).team, null)
+  assert.equal(parse(JSON.stringify({ t: 'create', name: 'x', team: 7 })).team, null)
+  assert.equal(parse(JSON.stringify({ t: 'create', name: 'x', team: '0' })).team, null)
 })

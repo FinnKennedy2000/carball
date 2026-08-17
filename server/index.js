@@ -62,7 +62,7 @@ wss.on('connection', (socket) => {
     if (msg.t === 'create') {
       if (room) return
       room = rooms.create()
-      playerId = room.join(socket, msg.name).id
+      playerId = room.join(socket, msg.name, msg.team).id
       return
     }
 
@@ -78,7 +78,7 @@ wss.on('connection', (socket) => {
         return
       }
       room = target
-      playerId = room.join(socket, msg.name).id
+      playerId = room.join(socket, msg.name, msg.team).id
       return
     }
 

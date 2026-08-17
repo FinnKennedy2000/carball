@@ -44,8 +44,10 @@ export const RESTITUTION_BODY = 0.9
 export const MATCH_SECONDS = 300
 export const KICKOFF_SECONDS = 3
 export const GOAL_SECONDS = 2
+export const OVER_SECONDS = 6 // the final score sits on screen this long
 
 export const MAX_PLAYERS = 6
+export const MAX_PER_TEAM = MAX_PLAYERS / 2
 
 // Input bitmask. One byte on the wire.
 export const IN_FWD = 1

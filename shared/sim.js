@@ -12,6 +12,7 @@ export function createState() {
     phase: 'KICKOFF',
     phaseTimer: C.KICKOFF_SECONDS,
     clock: C.MATCH_SECONDS,
+    overtime: false, // sudden death: the clock ran out level
     score: [0, 0],
     ball: { x: 0, y: 0, vx: 0, vy: 0 },
     cars: [],
@@ -62,7 +63,11 @@ export function step(state, inputs) {
   const dt = C.DT
   state.tick++
 
-  if (state.phase === 'OVER') return state
+  if (state.phase === 'OVER') {
+    // Nothing moves, but the timer runs so the room knows when to reset.
+    state.phaseTimer = Math.max(0, state.phaseTimer - dt)
+    return state
+  }
 
   if (state.phase === 'KICKOFF' || state.phase === 'GOAL') {
     // Bodies are frozen during the countdown; only the timer runs.
@@ -106,14 +111,23 @@ export function step(state, inputs) {
   const scorer = confineBall(state.ball)
   if (scorer !== null) {
     state.score[scorer]++
-    // Entering GOAL freezes the ball, so this cannot re-trigger while it sits in the net.
-    state.phase = 'GOAL'
-    state.phaseTimer = C.GOAL_SECONDS
+    // Entering either phase freezes the ball, so this cannot re-trigger while it
+    // sits in the net. In overtime the first goal is the last one.
+    state.phase = state.overtime ? 'OVER' : 'GOAL'
+    state.phaseTimer = state.overtime ? C.OVER_SECONDS : C.GOAL_SECONDS
   }
 
   if (state.clock <= 0) {
     state.clock = 0
-    state.phase = 'OVER'
+    if (state.score[0] === state.score[1]) {
+      // Level at full time: play on rather than draw. Also covers a goal that
+      // levelled it on the final tick — the GOAL pause runs, then sudden death.
+      state.overtime = true
+    } else {
+      // A goal on the whistle still counts, and ends it either way.
+      state.phase = 'OVER'
+      state.phaseTimer = C.OVER_SECONDS
+    }
   }
   return state
 }
@@ -274,7 +288,7 @@ function wrapAngle(a) {
 
 /** Cheap structural hash, used by the determinism test. */
 export function hashState(state) {
-  const nums = [state.tick, state.phase.length, state.score[0], state.score[1], state.ball.x, state.ball.y, state.ball.vx, state.ball.vy]
+  const nums = [state.tick, state.phase.length, state.overtime ? 1 : 0, state.score[0], state.score[1], state.ball.x, state.ball.y, state.ball.vx, state.ball.vy]
   for (const c of state.cars) nums.push(c.id, c.x, c.y, c.vx, c.vy, c.heading, c.boost)
   let h = 2166136261
   for (const n of nums) {

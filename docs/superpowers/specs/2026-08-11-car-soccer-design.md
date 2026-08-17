@@ -43,6 +43,7 @@ carsoccer/
     net.js           websocket, snapshot buffer, interpolation
     render.js        three.js scene, draw(interpolatedState)
     input.js         keyboard -> input bitmask
+    sound.js         synthesised cues inferred from snapshots, no assets
     ui.js            plain DOM: room code, score, clock, messages
   test/
     sim.test.js      node:test, no framework
@@ -75,6 +76,7 @@ so results are reproducible.
   phase: 'KICKOFF' | 'PLAY' | 'GOAL' | 'OVER',
   phaseTimer: float,      // seconds remaining in the current phase
   clock: float,           // seconds remaining in the match
+  overtime: bool,         // the clock ran out level; next goal wins
   score: [blue, orange],
   ball: { x, y, vx, vy },
   cars: [ { id, team, x, y, vx, vy, heading, boost } ]
@@ -117,11 +119,17 @@ Phases are fields in the state, not separate events:
   movement.
 - `PLAY` — normal simulation, match clock counts down.
 - `GOAL` — brief pause after a goal, then back to `KICKOFF`.
-- `OVER` — the match clock reached zero; final score shown, room returns to
-  lobby.
+- `OVER` — the match is decided. Bodies are frozen and the final score sits on
+  screen for `OVER_SECONDS` before the room resets for a rematch. Sides are
+  preserved across the reset.
 
 A goal fires once when the ball centre crosses the goal line, guarded by the
-phase transition so it cannot re-trigger while the ball sits in the net.
+phase transition so it cannot re-trigger while the ball sits in the net. A goal
+on the final tick counts.
+
+**Overtime.** A level score at full time sets `overtime` rather than ending in a
+draw: play continues with the clock at zero and the next goal wins. This is the
+only place the match can end outside the clock reaching zero.
 
 ### Determinism
 
@@ -140,6 +148,9 @@ deterministic lockstep with rollback (right for 1v1 fighting games, wrong for
 divergence desyncs the room).
 
 ### Client to server
+
+`{ t: 'create' | 'join', name, code?, team? }` to enter a room — `team` is an
+optional side request, and anything that is not a valid team means "anywhere".
 
 `{ t: 'input', seq, bits }` at 60Hz. `bits` is a single byte: throttle forward,
 throttle back, steer left, steer right, boost, drift.
@@ -172,7 +183,9 @@ is poor.
   `O`/`0`, no `I`/`1`). Collisions are retried.
 - A room is created on demand, its tick loop starts when the first player joins,
   and the interval is cleared and the room deleted when the last player leaves.
-- Maximum 6 players. Teams are auto-balanced on join.
+- Maximum 6 players, at most 3 a side. A player may request a side on join; the
+  request is honoured unless that side is full, otherwise teams are
+  auto-balanced. A chosen side survives a rematch.
 - All room state is in memory. Nothing is persisted.
 
 ## Error handling
@@ -210,11 +223,20 @@ occur:
    gain speed without bound.
 5. **Protocol validation** — malformed messages are rejected without throwing.
 
+## Sound
+
+Synthesised in the client with WebAudio, no asset files: a pitched thud on ball
+impacts (volume from the change in ball speed), a looping filtered-noise whoosh
+while the local car boosts, and a two-tone goal horn. The client does not
+simulate, so every cue is inferred by diffing consecutive snapshots rather than
+from events on the wire. `M` mutes. The `AudioContext` is created from the lobby
+button click, since a browser will not start one without a user gesture.
+
 ## Out of scope for v1
 
 Recorded so it does not creep in: client prediction, rollback, WebRTC transport,
 binary wire format, a vertical axis for the ball (aerials), boost pads, car
-customisation, persistent stats, spectators, matchmaking, mobile controls, sound,
+customisation, persistent stats, spectators, matchmaking, mobile controls,
 public deployment.
 
 ## Running
