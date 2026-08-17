@@ -9,9 +9,12 @@
 
 import { createClient } from '@supabase/supabase-js'
 
+// The second name in each pair is what the Supabase Vercel integration writes,
+// so a linked project needs nothing set by hand. SUPABASE_SECRET_KEY is that
+// integration's name for the service role key.
 const url = process.env.SUPABASE_URL
-const anonKey = process.env.SUPABASE_ANON_KEY
-const serviceKey = process.env.SUPABASE_SERVICE_KEY
+const anonKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY
+const serviceKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY
 
 const auth = url && anonKey ? createClient(url, anonKey, { auth: { persistSession: false } }) : null
 const admin =
