@@ -2,3 +2,8 @@ node_modules/
 dist/
 .env
 .env.local
+
+# Agent skills are installed per-repo tooling; skills-lock.json records what to
+# reinstall with `npx skills add`.
+.agents/
+.claude/skills/

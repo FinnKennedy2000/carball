@@ -22,13 +22,17 @@ create policy "profiles are readable by everyone"
   on public.profiles for select using (true);
 
 drop policy if exists "a player may edit only their own profile" on public.profiles;
+-- auth.uid() is wrapped in a select so the planner evaluates it once for the
+-- statement rather than once per row.
 create policy "a player may edit only their own profile"
-  on public.profiles for update using (auth.uid() = id) with check (auth.uid() = id);
+  on public.profiles for update
+  using ((select auth.uid()) = id)
+  with check ((select auth.uid()) = id);
 
 -- The row is created by the trigger below, not by the client.
 drop policy if exists "a player may create only their own profile" on public.profiles;
 create policy "a player may create only their own profile"
-  on public.profiles for insert with check (auth.uid() = id);
+  on public.profiles for insert with check ((select auth.uid()) = id);
 
 -- Sign-up carries the wanted username in user metadata. A collision must not
 -- fail the sign-up, so the name is suffixed until it is free.
@@ -36,7 +40,9 @@ create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
 security definer
-set search_path = public
+-- An empty search_path with fully-qualified names: a security definer function
+-- must not be resolvable against a caller-controlled path.
+set search_path = ''
 as $$
 declare
   wanted text := nullif(trim(new.raw_user_meta_data ->> 'username'), '');
@@ -104,3 +110,22 @@ select
 from public.profiles p
 join public.match_players m on m.user_id = p.id
 group by p.id, p.username;
+
+-- Privileges -----------------------------------------------------------------
+-- RLS decides which rows are visible; these grants decide whether the table is
+-- reachable through the Data API at all, which does not follow from RLS and
+-- depends on project settings. Granted explicitly, and no wider than needed:
+-- clients read everything and write only their own profile, while the server
+-- writes results with the service role key.
+
+grant usage on schema public to anon, authenticated;
+
+grant select on public.profiles to anon, authenticated;
+grant update (username) on public.profiles to authenticated;
+grant insert on public.profiles to authenticated;
+
+grant select on public.match_players to anon, authenticated;
+grant select on public.leaderboard to anon, authenticated;
+
+-- Deliberately absent: any client privilege to write match_players, or to delete
+-- anything. The server holds the service role key, which bypasses all of this.
