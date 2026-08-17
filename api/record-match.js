@@ -23,8 +23,13 @@ const admin =
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' })
   // Unconfigured is not an error: the game is playable without stats, so say so
-  // quietly rather than failing a match that has already finished.
-  if (!auth || !admin) return res.status(200).json({ recorded: false, reason: 'stats disabled' })
+  // quietly rather than failing a match that has already finished. Which piece
+  // is missing goes to the log rather than the response — the caller cannot act
+  // on it and does not need to know how the deployment is configured.
+  if (!auth || !admin) {
+    console.warn('stats disabled, missing:', missingConfig().join(', '))
+    return res.status(200).json({ recorded: false, reason: 'stats disabled' })
+  }
 
   const token = (req.headers.authorization ?? '').replace(/^Bearer /, '').trim()
   if (!token) return res.status(401).json({ error: 'sign in to record a match' })
@@ -41,6 +46,15 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'could not record match' })
   }
   return res.status(200).json({ recorded: true })
+}
+
+/** Names only, never values: enough to fix the deployment, safe in a log. */
+function missingConfig() {
+  const missing = []
+  if (!url) missing.push('SUPABASE_URL')
+  if (!anonKey) missing.push('SUPABASE_ANON_KEY or SUPABASE_PUBLISHABLE_KEY')
+  if (!serviceKey) missing.push('SUPABASE_SERVICE_KEY or SUPABASE_SECRET_KEY')
+  return missing
 }
 
 /**
