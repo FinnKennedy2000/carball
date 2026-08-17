@@ -12,7 +12,10 @@ import { createClient } from '@supabase/supabase-js'
 // The second name in each pair is what the Supabase Vercel integration writes,
 // so a linked project needs nothing set by hand. SUPABASE_SECRET_KEY is that
 // integration's name for the service role key.
-const url = process.env.SUPABASE_URL
+// NEXT_PUBLIC_SUPABASE_URL is not a leftover: the integration writes the URL
+// under that name only, with no unprefixed SUPABASE_URL alongside the keys.
+// A project URL is public anyway — it is in the browser bundle.
+const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
 const anonKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY
 const serviceKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY
 
@@ -51,7 +54,7 @@ export default async function handler(req, res) {
 /** Names only, never values: enough to fix the deployment, safe in a log. */
 function missingConfig() {
   const missing = []
-  if (!url) missing.push('SUPABASE_URL')
+  if (!url) missing.push('SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL')
   if (!anonKey) missing.push('SUPABASE_ANON_KEY or SUPABASE_PUBLISHABLE_KEY')
   if (!serviceKey) missing.push('SUPABASE_SERVICE_KEY or SUPABASE_SECRET_KEY')
   return missing
