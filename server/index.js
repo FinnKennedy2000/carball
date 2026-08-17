@@ -1,0 +1,107 @@
+import http from 'node:http'
+import fs from 'node:fs'
+import path from 'node:path'
+import { networkInterfaces } from 'node:os'
+import { fileURLToPath } from 'node:url'
+import { WebSocketServer } from 'ws'
+
+import { Rooms } from './room.js'
+import { parse } from './protocol.js'
+
+const PORT = Number(process.env.PORT ?? 3000)
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const DIST = path.join(ROOT, 'dist')
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.ico': 'image/x-icon',
+}
+
+const server = http.createServer((req, res) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405).end()
+    return
+  }
+
+  const urlPath = decodeURIComponent(new URL(req.url, 'http://localhost').pathname)
+  // Resolve then verify the result is still inside dist — this is what stops
+  // ../../etc/passwd, not the string check.
+  let file = path.resolve(DIST, '.' + urlPath)
+  if (!file.startsWith(DIST + path.sep) && file !== DIST) {
+    res.writeHead(403).end()
+    return
+  }
+  if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(DIST, 'index.html')
+
+  if (!fs.existsSync(file)) {
+    res.writeHead(404, { 'content-type': 'text/plain' }).end('Run `pnpm build` first.')
+    return
+  }
+  res.writeHead(200, { 'content-type': MIME[path.extname(file)] ?? 'application/octet-stream' })
+  fs.createReadStream(file).pipe(res)
+})
+
+const rooms = new Rooms()
+const wss = new WebSocketServer({ server, path: '/ws' })
+
+wss.on('connection', (socket) => {
+  // A socket belongs to no room until it creates or joins one.
+  let room = null
+  let playerId = null
+
+  socket.on('message', (data) => {
+    const msg = parse(data.toString())
+    if (!msg) return // malformed input is dropped, never thrown
+
+    if (msg.t === 'create') {
+      if (room) return
+      room = rooms.create()
+      playerId = room.join(socket, msg.name).id
+      return
+    }
+
+    if (msg.t === 'join') {
+      if (room) return
+      const target = rooms.get(msg.code)
+      if (!target) {
+        socket.send(JSON.stringify({ t: 'error', reason: 'No room with that code' }))
+        return
+      }
+      if (target.full) {
+        socket.send(JSON.stringify({ t: 'error', reason: 'Room is full' }))
+        return
+      }
+      room = target
+      playerId = room.join(socket, msg.name).id
+      return
+    }
+
+    if (msg.t === 'input' && room) room.setInput(playerId, msg.bits)
+  })
+
+  const drop = () => {
+    if (room && playerId !== null) room.leave(playerId)
+    room = null
+    playerId = null
+  }
+  socket.on('close', drop)
+  socket.on('error', drop)
+})
+
+server.listen(PORT, () => {
+  for (const addr of localAddresses()) console.log(`  http://${addr}:${PORT}`)
+})
+
+function localAddresses() {
+  const out = ['localhost']
+  for (const list of Object.values(networkInterfaces())) {
+    for (const ni of list ?? []) if (ni.family === 'IPv4' && !ni.internal) out.push(ni.address)
+  }
+  return out
+}

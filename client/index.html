@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Car Soccer</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+
+    <div id="hud" hidden>
+      <div id="scoreboard">
+        <span class="score blue" id="score-blue">0</span>
+        <span id="clock">5:00</span>
+        <span class="score orange" id="score-orange">0</span>
+      </div>
+      <div id="banner"></div>
+      <div id="boost-wrap"><div id="boost"></div></div>
+      <div id="footer">
+        room <b id="room-code">----</b> &nbsp;·&nbsp; WASD drive &nbsp;·&nbsp; space boost
+        &nbsp;·&nbsp; shift drift
+        <div id="players"></div>
+      </div>
+    </div>
+
+    <div id="lobby">
+      <h1>Car Soccer</h1>
+      <input id="name" placeholder="your name" maxlength="16" autocomplete="off" />
+      <button id="create">Create room</button>
+      <div class="or">or</div>
+      <div class="row">
+        <input id="code" placeholder="CODE" maxlength="4" autocomplete="off" />
+        <button id="join">Join</button>
+      </div>
+      <p id="lobby-error"></p>
+    </div>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
