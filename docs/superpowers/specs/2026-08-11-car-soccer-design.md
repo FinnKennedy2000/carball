@@ -305,7 +305,12 @@ customisation, spectators, matchmaking, mobile controls, public deployment.
   Supabase URL and keys to switch accounts on. `VITE_`-prefixed values are
   bundled into the browser build, so only the anon key belongs there — the
   service role key is server-side.
-- `pnpm db:push` applies `supabase/schema.sql` (or paste it into the SQL editor).
+- Apply `supabase/schema.sql`. Pasting it into the dashboard SQL editor is the
+  path of least resistance. `pnpm db:push` does the same over Postgres, but note
+  that `db.<ref>.supabase.co` is IPv6-only — unreachable from WSL2 and many
+  networks — so it goes via the IPv4 pooler, and a verified TLS connection needs
+  the CA from Project settings > Database > SSL configuration in
+  `SUPABASE_DB_CA`. The script never skips verification silently.
 - `pnpm dev` — Vite dev server with hot reload for the client, `node --watch` for
   the server, Vite proxying the WebSocket.
 - `pnpm build && pnpm start` — a single process serving `dist/` and the
