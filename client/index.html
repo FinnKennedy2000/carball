@@ -10,70 +10,6 @@
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <canvas id="view"></canvas>
-
-    <div id="hud" hidden>
-      <div id="roster"></div>
-
-      <div id="room">
-        <span class="kicker">Room</span>
-        <b id="room-code">----</b>
-      </div>
-
-      <div id="scoreboard">
-        <div class="board">
-          <span class="side"><i class="bar blue"></i><span class="score" id="score-blue">0</span></span>
-          <span class="middle">
-            <span id="clock">5:00</span>
-            <span id="clock-label"></span>
-          </span>
-          <span class="side"><span class="score" id="score-orange">0</span><i class="bar orange"></i></span>
-        </div>
-        <div class="board-rule"></div>
-      </div>
-
-      <div id="banner-wrap">
-        <div id="banner"></div>
-        <div id="banner-sub"></div>
-        <div class="row">
-          <button id="start" class="btn btn-primary" hidden>Start match</button>
-          <button id="invite" class="btn btn-secondary" hidden>Copy invite link</button>
-        </div>
-      </div>
-
-      <div id="footer">
-        <div id="boost-row">
-          <span class="kicker">Boost</span>
-          <div id="boost-wrap"><div id="boost"></div></div>
-          <span id="boost-pct">0</span>
-        </div>
-        <div id="controls-line">WASD drive · space boost · shift drift · M mute</div>
-      </div>
-    </div>
-
-    <div id="over" hidden>
-      <div id="over-inner">
-        <div class="stack">
-          <div class="kicker">Full time · room <span id="over-code"></span></div>
-          <h2 id="over-verdict"></h2>
-          <div id="over-score">
-            <span class="blue" id="over-blue">0</span>
-            <span class="dash">–</span>
-            <span class="orange" id="over-orange">0</span>
-          </div>
-          <div class="accent-rule wide"></div>
-        </div>
-
-        <div id="over-teams"></div>
-
-        <div class="row">
-          <button id="over-again" class="btn btn-primary">Play again</button>
-          <button id="over-copy" class="btn btn-secondary">Copy room link</button>
-          <button id="over-home" class="btn btn-ghost">Back to home</button>
-        </div>
-      </div>
-    </div>
-
     <div id="lobby">
       <div id="topbar" hidden>
         <div class="brand">Car Football</div>
@@ -167,6 +103,6 @@
       </div>
     </div>
 
-    <script type="module" src="./main.js"></script>
+    <script type="module" src="./lobby.js"></script>
   </body>
 </html>

@@ -7,10 +7,26 @@ let bannerUntil = 0
 let roster = [] // the latest roster, kept for the HUD and the full-time panel
 
 export function showGame(code) {
-  el('lobby').hidden = true
+  el('gate').hidden = true
   el('hud').hidden = false
   el('room-code').textContent = code
+  el('waiting-code').textContent = code
   el('over-code').textContent = code
+}
+
+/** Why we are not in a room yet. Blank clears it. */
+export function gateNote(reason) {
+  el('gate-note').textContent = reason
+}
+
+/** Ask for a name and a press: the only way in, and the only way to retry. */
+export function gatePrompt(label, reason = '') {
+  el('gate-title').textContent = 'Join the match'
+  el('gate-name-field').hidden = false
+  el('gate-go').hidden = false
+  el('gate-go').textContent = label
+  gateNote(reason)
+  el('gate-name').focus()
 }
 
 let iAmHost = false
@@ -56,10 +72,6 @@ function teamBlock(label, team, players) {
   return block
 }
 
-export function lobbyError(reason) {
-  el('lobby-error').textContent = reason
-}
-
 export function flashBanner(text, seconds) {
   bannerOverride = text
   bannerUntil = performance.now() + seconds * 1000
@@ -90,9 +102,17 @@ export function updateHud(state, localId) {
 
   el('banner').textContent = bannerText(state)
   el('banner-sub').textContent = bannerSub(state)
-  el('start').hidden = !(iAmHost && state.phase === 'WAITING')
+  // Before kickoff the strip is the HUD: it carries the code, who is in, and the
+  // only two things worth pressing. Boost and the top-right code chip are noise
+  // until the cars move.
+  const waiting = state.phase === 'WAITING'
+  el('waiting').hidden = !waiting
+  el('footer').hidden = waiting
+  el('room').hidden = waiting
+  el('start').hidden = !(iAmHost && waiting)
   // Anyone in a waiting room can pull someone else in, host or not.
-  el('invite').hidden = state.phase !== 'WAITING'
+  el('invite').hidden = !waiting
+  if (waiting) showWaiting()
 
   // The panel belongs to the OVER phase, but the announcement arrives ahead of
   // the snapshot that carries the phase (the view runs INTERP_DELAY_MS behind).
@@ -105,14 +125,26 @@ export function updateHud(state, localId) {
   }
 }
 
-function nameOf(id) {
+/** The strip's tallies and its one line of guidance, which differ by role. */
+function showWaiting() {
+  const blue = roster.filter((p) => p.team === C.TEAM_BLUE).length
+  el('count-blue').textContent = blue
+  el('count-orange').textContent = roster.length - blue
+  el('count-total').textContent = `${roster.length} of ${C.MAX_PLAYERS}`
+  el('waiting-hint').textContent = iAmHost
+    ? 'Anyone with the link drops straight into this room · WASD drive · space boost'
+    : 'The host starts the match · WASD drive · space boost'
+}
+
+/** A car's player name, or null — the labels over the cars and the goal credit. */
+export function nameOf(id) {
   return roster.find((p) => p.id === id)?.name ?? null
 }
 
 function bannerText(state) {
   if (performance.now() < bannerUntil) return bannerOverride
-  // The host gets a button instead; a peer gets told who they are waiting for.
-  if (state.phase === 'WAITING') return iAmHost ? '' : 'WAITING'
+  // The waiting strip carries this now, so the pitch stays clear.
+  if (state.phase === 'WAITING') return ''
   if (state.phase === 'GOAL') return 'GOAL'
   if (state.phase === 'KICKOFF') return String(Math.max(1, Math.ceil(state.phaseTimer)))
   return ''
@@ -121,7 +153,7 @@ function bannerText(state) {
 /** Under a goal, who earned it — blank for an own goal, which is nobody's. */
 function bannerSub(state) {
   if (performance.now() < bannerUntil) return ''
-  if (state.phase === 'WAITING') return iAmHost ? '' : 'the host starts the match'
+  if (state.phase === 'WAITING') return ''
   if (state.phase !== 'GOAL') return ''
   return nameOf(state.lastScorer) ?? ''
 }

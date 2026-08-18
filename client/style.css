@@ -89,6 +89,33 @@ body {
   color: var(--color-text);
 }
 
+#labels {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+/* Subtle by design: the roster is where names are read, this is only so you can
+   tell at a glance who you just hit. */
+.car-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  opacity: 0.6;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.95);
+}
+
+.car-label.blue {
+  color: var(--blue-text);
+}
+
+.car-label.orange {
+  color: var(--orange-text);
+}
+
 #roster {
   position: absolute;
   top: var(--space-8);
@@ -249,8 +276,7 @@ body {
   color: var(--color-accent-300);
 }
 
-#start,
-#invite {
+#waiting-strip {
   pointer-events: auto;
 }
 
@@ -258,6 +284,101 @@ body {
 #start[hidden],
 #invite[hidden] {
   display: none;
+}
+
+/* Waiting room ------------------------------------------------------------ */
+
+#waiting {
+  position: absolute;
+  bottom: var(--space-8);
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* Each of these sets a display, which beats the UA rule for [hidden]. */
+#waiting[hidden],
+#footer[hidden],
+#room[hidden] {
+  display: none;
+}
+
+.waiting-rule {
+  width: min(560px, 80vw);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
+}
+
+#waiting-strip {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  padding: var(--space-4) var(--space-6);
+  border-radius: var(--radius-md);
+  background: rgba(22, 24, 38, 0.88);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 0 1px var(--color-neutral-900), var(--shadow-md);
+  white-space: nowrap;
+}
+
+#waiting-strip .stack {
+  gap: var(--space-2);
+}
+
+#waiting-code {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 30px;
+  line-height: 1;
+  letter-spacing: 0.26em;
+  color: var(--color-accent-300);
+}
+
+.waiting-divider {
+  width: 1px;
+  height: 44px;
+  background: var(--color-neutral-900);
+}
+
+#waiting-counts {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+#waiting-counts span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#waiting-counts .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+}
+
+#waiting-counts .dot.blue {
+  background: var(--blue);
+}
+
+#waiting-counts .dot.orange {
+  background: var(--orange);
+}
+
+#waiting-counts .of {
+  font-size: 13px;
+  color: var(--color-neutral-600);
+}
+
+#waiting-hint {
+  font-size: 12px;
+  color: var(--color-neutral-600);
 }
 
 #footer {
@@ -397,6 +518,41 @@ body {
 #over-teams .line .tally {
   color: var(--color-neutral-400);
   font-variant-numeric: tabular-nums;
+}
+
+/* Gate -------------------------------------------------------------------- */
+
+#gate {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8);
+  background: rgba(11, 14, 20, 0.92);
+}
+
+#gate[hidden] {
+  display: none;
+}
+
+#gate-card {
+  width: 100%;
+  max-width: 340px;
+  padding: var(--space-8);
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+  box-shadow: 0 0 0 1px var(--color-neutral-900);
+}
+
+#gate-card h2 {
+  margin: 0;
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+
+#gate-card .row .btn {
+  flex: 1;
 }
 
 /* Lobby ------------------------------------------------------------------- */
@@ -551,6 +707,7 @@ body {
   color: var(--color-text);
 }
 
+#gate-note,
 #lobby-error {
   margin: 0;
   min-height: 1.2em;

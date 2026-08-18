@@ -1,75 +1,22 @@
-import { initRenderer, setLocalId, draw } from './render.js'
-import { createRoom, joinRoom, beginMatch, sampleState, handlers, enabled as netEnabled } from './net.js'
-import { reportMyMatch } from './stats.js'
-import { startInput } from './input.js'
-import { initSound, updateSound } from './sound.js'
+// The home page: a name, a side, an optional account, and the two ways into a
+// match. The match itself lives on game.html, which this page hands off to with
+// the room in the hash — see game.js.
+
+import { cleanCode } from '../shared/protocol.js'
 import * as auth from './auth.js'
-import {
-  showGame,
-  showRoster,
-  lobbyError,
-  updateHud,
-  flashBanner,
-  showMatchOver,
-  hideMatchOver,
-  setHost,
-} from './ui.js'
 
 const el = (id) => document.getElementById(id)
 
-let localId = null
+// Read back by game.js. sessionStorage rather than the URL: a name has no
+// business in a link people paste to each other.
+const STORED_NAME = 'carball.name'
+const STORED_TEAM = 'carball.team'
 
-initRenderer(el('view'))
-startInput()
+// Invite links used to point here. Keep the old ones working.
+if (/^#[A-Za-z]{4}$/.test(location.hash)) location.replace(`./game.html${location.hash}`)
 
-let myTeam = null
-
-handlers.onJoined = (msg) => {
-  localId = msg.id
-  myTeam = msg.team
-  setLocalId(msg.id)
-  showGame(msg.code)
-  location.hash = msg.code
-}
-
-handlers.onRoster = showRoster
-handlers.onError = lobbyError
-
-handlers.onMatchOver = (score, players, matchId) => {
-  showMatchOver(score, players)
-  // Each player writes their own row; see stats.js for why the host does not do
-  // it for everyone.
-  const me = players.find((p) => p.id === localId)
-  if (me) reportMyMatch({ matchId, score, team: me.team ?? myTeam, goals: me.goals })
-}
-
-// The room resets itself to waiting, and the host starts the next one; these
-// only decide what you look at meanwhile.
-// It stays up until the snapshot that leaves WAITING arrives, a moment behind.
-// A second press in that window is a no-op: only a waiting room can kick off.
-el('start').addEventListener('click', beginMatch)
-
-el('over-again').addEventListener('click', hideMatchOver)
-/** The link fills the code in for whoever opens it — see the hash below. */
-async function copyInvite(btn) {
-  const code = el('room-code').textContent
-  try {
-    await navigator.clipboard.writeText(`${location.origin}${location.pathname}#${code}`)
-    btn.textContent = 'Link copied'
-  } catch {
-    // No clipboard without a secure context — the code is the shareable part.
-    btn.textContent = `Room code ${code}`
-  }
-}
-
-el('over-copy').addEventListener('click', () => copyInvite(el('over-copy')))
-el('invite').addEventListener('click', () => copyInvite(el('invite')))
-el('over-home').addEventListener('click', () => {
-  location.href = location.pathname // dropping the socket leaves the room
-})
-
-handlers.onClosed = () => {
-  flashBanner('DISCONNECTED', 9999)
+const lobbyError = (reason) => {
+  el('lobby-error').textContent = reason
 }
 
 // Team buttons: '' means auto-balance.
@@ -82,34 +29,29 @@ for (const btn of document.querySelectorAll('#teams .team')) {
   })
 }
 
-el('create').addEventListener('click', async () => {
-  const name = el('name').value
+/** Hand the choice to the game page. A room is only ever opened there. */
+function play(hash) {
+  const name = el('name').value.trim()
+  if (name) sessionStorage.setItem(STORED_NAME, name)
+  sessionStorage.setItem(STORED_TEAM, String(wantedTeam))
+  location.href = `./game.html#${hash}`
+}
+
+el('create').addEventListener('click', () => {
   lobbyError('')
-  initSound() // this click is the gesture the AudioContext needs
   if (!ready()) return
-  try {
-    await createRoom(name, wantedTeam)
-    setHost(true)
-  } catch (err) {
-    lobbyError(err.message)
-  }
+  play('NEW')
 })
 
-el('join').addEventListener('click', async () => {
-  const name = el('name').value
-  const code = el('code').value.trim().toUpperCase()
+el('join').addEventListener('click', () => {
   lobbyError('')
-  if (code.length !== 4) {
+  const code = cleanCode(el('code').value)
+  if (!code) {
     lobbyError('Room codes are 4 letters')
     return
   }
-  initSound()
   if (!ready()) return
-  try {
-    await joinRoom(name, code, wantedTeam)
-  } catch (err) {
-    lobbyError(err.message)
-  }
+  play(code)
 })
 
 el('code').addEventListener('keydown', (e) => {
@@ -208,26 +150,13 @@ async function showLeaderboard() {
   )
 }
 
-// A shared link like http://host:3000/#ABCD prefills the code.
-if (/^#[A-Za-z]{4}$/.test(location.hash)) el('code').value = location.hash.slice(1).toUpperCase()
-
 /**
  * Realtime carries the game now, so an unconfigured deployment has no
- * multiplayer at all — worth saying plainly rather than timing out on a join.
+ * multiplayer at all — worth saying plainly here rather than on the way in.
  */
 function ready() {
-  if (netEnabled) return true
+  // Realtime is the transport, so the same flag governs the game and accounts.
+  if (auth.enabled) return true
   lobbyError('Multiplayer is not configured on this deployment')
   return false
 }
-
-function frame() {
-  const state = sampleState()
-  if (state) {
-    draw(state)
-    updateHud(state, localId)
-    updateSound(state, localId)
-  }
-  requestAnimationFrame(frame)
-}
-requestAnimationFrame(frame)

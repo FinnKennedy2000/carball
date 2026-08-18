@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 
 export default defineConfig({
@@ -12,5 +13,12 @@ export default defineConfig({
   build: {
     outDir: '../dist',
     emptyOutDir: true,
+    // Two pages: the lobby, and the match the invite link opens.
+    rollupOptions: {
+      input: {
+        index: fileURLToPath(new URL('client/index.html', import.meta.url)),
+        game: fileURLToPath(new URL('client/game.html', import.meta.url)),
+      },
+    },
   },
 })

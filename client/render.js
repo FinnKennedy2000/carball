@@ -15,8 +15,14 @@ let localId = null
 const carMeshes = new Map() // id -> Group
 let ballMesh
 let localRing
+let labelBox
+const carLabels = new Map() // id -> span, tracking carMeshes
+// Above the roof, and above the ball, so a label never sits on what it names.
+const LABEL_Y = 5.5
+const LABEL_AT = new THREE.Vector3()
 
 export function initRenderer(canvas) {
+  labelBox = document.getElementById('labels')
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
   renderer.shadowMap.enabled = true
@@ -175,7 +181,8 @@ function makeCar(team) {
   return group
 }
 
-export function draw(state) {
+/** `nameOf` maps a car id to a player name, or null while the roster is unknown. */
+export function draw(state, nameOf = () => null) {
   const seen = new Set()
   for (const car of state.cars) {
     seen.add(car.id)
@@ -187,6 +194,7 @@ export function draw(state) {
     }
     mesh.position.set(car.x, 0, car.y)
     mesh.rotation.y = -car.heading
+    drawLabel(car, nameOf(car.id))
     if (car.id === localId) {
       localRing.visible = true
       localRing.position.x = car.x
@@ -197,6 +205,8 @@ export function draw(state) {
     if (seen.has(id)) continue
     scene.remove(mesh)
     carMeshes.delete(id)
+    carLabels.get(id)?.remove()
+    carLabels.delete(id)
   }
   if (!seen.has(localId)) localRing.visible = false
 
@@ -206,6 +216,31 @@ export function draw(state) {
   ballMesh.rotation.x += (state.ball.vy / C.BALL_R) * 0.016
 
   renderer.render(scene, camera)
+}
+
+/**
+ * The name over a car, as DOM rather than a sprite: it costs no texture, and it
+ * picks up the HUD's own type. Projected each frame, which is nothing at six cars.
+ */
+function drawLabel(car, name) {
+  let label = carLabels.get(car.id)
+  if (!name) {
+    label?.remove()
+    carLabels.delete(car.id)
+    return
+  }
+  if (!label) {
+    label = document.createElement('span')
+    // The side never changes once a car is seated, so the class is set once.
+    label.className = `car-label ${car.team === C.TEAM_BLUE ? 'blue' : 'orange'}`
+    labelBox.append(label)
+    carLabels.set(car.id, label)
+  }
+  if (label.textContent !== name) label.textContent = name
+  const p = LABEL_AT.set(car.x, LABEL_Y, car.y).project(camera)
+  const x = (p.x * 0.5 + 0.5) * innerWidth
+  const y = (0.5 - p.y * 0.5) * innerHeight
+  label.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`
 }
 
 function resize() {
