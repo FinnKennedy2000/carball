@@ -28,11 +28,14 @@ export const CAR_MAX_SPEED = 18
 export const CAR_BOOST_ACCEL = 65
 export const CAR_BOOST_MAX_SPEED = 48
 export const CAR_DRAG = 0.7 // forward velocity damping rate
-export const GRIP = 11 // lateral velocity damping rate — the main feel knob
+export const GRIP = 14 // lateral velocity damping rate — the main feel knob
 export const GRIP_DRIFT = 4 // lateral damping while drifting: the car slides
 export const TURN_DRIFT_FACTOR = 1.4 // extra steering authority while drifting
-export const TURN_RATE = 3.2 // rad/s at speed
-export const TURN_MIN_FACTOR = 0.35 // fraction of TURN_RATE available at a standstill
+export const TURN_RATE = 4.4 // rad/s at speed
+export const TURN_MIN_FACTOR = 0.55 // fraction of TURN_RATE available at a standstill
+// Fraction of CAR_MAX_SPEED at which steering reaches full authority. Low, so a
+// turn bites as soon as you are moving rather than only at the top end.
+export const TURN_FULL_SPEED_FRACTION = 0.3
 
 export const BOOST_MAX = 100
 export const BOOST_DRAIN = 34 // per second
@@ -45,6 +48,12 @@ export const BALL_MAX_SPEED = 70
 
 export const RESTITUTION_WALL = 0.75
 export const RESTITUTION_BODY = 0.9
+// Car on car is arcade rather than elastic: the faster you drive into someone,
+// the further they go. This much restitution on top of RESTITUTION_BODY at a
+// closing speed of CAR_MAX_SPEED, scaling linearly from nothing at rest. Above 1
+// in total, so a ram does inject energy — the speed clamp after collisions is
+// what keeps a pile-up bounded.
+export const RAM_BONUS = 1
 
 export const MATCH_SECONDS = 300
 export const KICKOFF_SECONDS = 3

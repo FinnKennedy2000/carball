@@ -134,6 +134,45 @@ test('repeated collisions do not inject energy', () => {
   }
 })
 
+test('driving into someone harder sends them further', () => {
+  // Park a target, hit it at a given closing speed, take the worst it suffers.
+  const ram = (speed) => {
+    const state = twoCarGame()
+    state.phase = 'PLAY'
+    state.phaseTimer = 0
+    // Clear of the cars and outside the goal mouth, so no goal freezes the sim.
+    state.ball.x = 30
+    state.ball.y = 20
+
+    const [hitter, target] = state.cars
+    hitter.x = -6
+    hitter.y = 0
+    hitter.heading = 0
+    hitter.vx = speed
+    target.x = 0
+    target.y = 0
+    target.heading = 0
+    target.vx = 0
+    target.vy = 0
+
+    let peak = 0
+    for (let t = 0; t < 60; t++) {
+      step(state, { 1: 0, 2: 0 })
+      peak = Math.max(peak, Math.hypot(target.vx, target.vy))
+    }
+    return peak
+  }
+
+  const nudge = ram(5)
+  const shunt = ram(12)
+  const clout = ram(C.CAR_MAX_SPEED)
+  assert.ok(shunt > nudge * 2, `${shunt} should dwarf a ${nudge} nudge`)
+  assert.ok(clout > shunt * 1.5, `${clout} should dwarf a ${shunt} shunt`)
+  // Faster than you were going: that is the arcade part, and it stays bounded.
+  assert.ok(clout > C.CAR_MAX_SPEED)
+  assert.ok(clout <= C.CAR_BOOST_MAX_SPEED * 1.5)
+})
+
 test('steering direction matches the screen, and drift slackens grip', () => {
   // Start from a straight run at speed, then turn for half a second.
   const drive = (bits) => {

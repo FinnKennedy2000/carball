@@ -105,7 +105,7 @@ export function step(state, inputs) {
 
   for (let i = 0; i < state.cars.length; i++) {
     for (let j = i + 1; j < state.cars.length; j++) {
-      collide(state.cars[i], state.cars[j], C.CAR_R, C.CAR_R, C.CAR_MASS, C.CAR_MASS)
+      collide(state.cars[i], state.cars[j], C.CAR_R, C.CAR_R, C.CAR_MASS, C.CAR_MASS, C.RAM_BONUS)
     }
   }
   for (const car of state.cars) {
@@ -158,7 +158,9 @@ function stepCar(car, bits, dt) {
 
   // Steering authority scales with speed, with a floor so you can still pivot slowly.
   const turnScale =
-    (C.TURN_MIN_FACTOR + (1 - C.TURN_MIN_FACTOR) * Math.min(1, speed / (C.CAR_MAX_SPEED * 0.5))) *
+    (C.TURN_MIN_FACTOR +
+      (1 - C.TURN_MIN_FACTOR) *
+        Math.min(1, speed / (C.CAR_MAX_SPEED * C.TURN_FULL_SPEED_FRACTION))) *
     (drifting ? C.TURN_DRIFT_FACTOR : 1)
   // Left steers clockwise on screen: the camera looks down the -z axis, which
   // mirrors the sim's y, so a positive heading change reads as a right turn.
@@ -206,9 +208,10 @@ function stepBall(ball, dt) {
 
 /**
  * Resolve a circle/circle overlap: separate by mass, then apply a normal impulse.
- * Restitution is below 1 so repeated collisions cannot inject energy.
+ * `ramBonus` adds restitution in proportion to closing speed — see RAM_BONUS.
+ * Without it restitution is below 1, so repeated collisions cannot inject energy.
  */
-function collide(a, b, ra, rb, ma, mb) {
+function collide(a, b, ra, rb, ma, mb, ramBonus = 0) {
   const dx = b.x - a.x
   const dy = b.y - a.y
   const r = ra + rb
@@ -241,7 +244,8 @@ function collide(a, b, ra, rb, ma, mb) {
   const vn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny
   if (vn > 0) return true // already separating
 
-  const j = (-(1 + C.RESTITUTION_BODY) * vn) / invSum
+  const e = C.RESTITUTION_BODY + ramBonus * Math.min(1, -vn / C.CAR_MAX_SPEED)
+  const j = (-(1 + e) * vn) / invSum
   a.vx -= j * invA * nx
   a.vy -= j * invA * ny
   b.vx += j * invB * nx
