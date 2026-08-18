@@ -334,7 +334,12 @@ export function step(state, inputs) {
   }
 
   for (const kart of state.karts) {
-    const bits = kart.ai ? aiBits(state, kart, dt) : inputs[kart.id] | 0
+    // A kart that is home drives itself down the road on the AI's line. Left on
+    // the player's input it either parks on the racing line or, with the
+    // throttle pinned as it used to be, ploughs straight into the barrier —
+    // neither of which reads as having finished.
+    const driven = kart.ai || kart.finished !== null
+    const bits = driven ? aiBits(state, kart, dt) : inputs[kart.id] | 0
     useItem(state, kart, bits)
     stepKart(state, kart, bits, dt)
   }
@@ -368,10 +373,6 @@ function stepKart(state, kart, bits, dt) {
     }
     return
   }
-
-  // Home already: it drives itself off the throttle so it does not park on the
-  // line, and nothing it does counts any more.
-  if (kart.finished !== null) bits = IN_FWD
 
   const spinning = kart.spin > 0
   if (spinning) kart.spin = Math.max(0, kart.spin - dt)

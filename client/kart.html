@@ -274,6 +274,18 @@
         color: var(--color-neutral-500);
       }
 
+      /* Under the banner: what the banner does not have room to say. */
+      #banner-sub {
+        position: absolute;
+        top: 32%;
+        left: 50%;
+        transform: translate(-50%, 44px);
+        font-size: 13px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--color-accent-300);
+        text-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
+      }
       #banner {
         position: absolute;
         top: 32%;
@@ -583,6 +595,7 @@
       </div>
 
       <div id="banner" hidden>3</div>
+      <div id="banner-sub" hidden></div>
       <div id="controls-line">WASD steer · shift drift · space use item</div>
     </div>
 

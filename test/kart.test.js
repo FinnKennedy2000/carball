@@ -373,3 +373,30 @@ test('the end of a Turbo bleeds off rather than cutting', () => {
   // And the speed is carried out of the boost rather than left behind in it.
   assert.ok(last > 40, `only doing ${last.toFixed(1)} a third of a second later`)
 })
+
+test('a kart that is home drives on down the road rather than into the barrier', () => {
+  const state = started(2, 23)
+  run(state, 190) // the lights, during which nothing moves
+  const me = state.karts[0]
+  const p = pointAt(TRACK.length - 4)
+  me.x = p.x
+  me.y = p.y
+  me.s = TRACK.length - 4
+  me.prog = state.laps * TRACK.length - 4
+  me.heading = Math.atan2(p.ty, p.tx)
+  me.vx = Math.cos(me.heading) * 20
+  me.vy = Math.sin(me.heading) * 20
+  // The other kart is an AI, so the race does not end the moment this one is
+  // home and there is something to watch it do afterwards.
+  state.karts[1].ai = true
+
+  run(state, 30, { 1: IN_FWD })
+  assert.notEqual(me.finished, null, 'never crossed the line')
+
+  // Five seconds of nobody driving it: it should still be on the tarmac and
+  // still moving, not parked against the wall with the throttle pinned.
+  run(state, 60 * 5, {})
+  const hit = project(me.x, me.y)
+  assert.ok(Math.abs(hit.lateral) < HALF_WIDTH, `off the road at ${hit.lateral.toFixed(1)}m`)
+  assert.ok(Math.hypot(me.vx, me.vy) > 5, 'parked')
+})

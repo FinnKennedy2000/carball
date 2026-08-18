@@ -89,6 +89,10 @@ let accumulator = 0
 // rebuilt on a frame where nothing about them changed.
 let shownItem
 let shownEffects = ''
+// The lap the banner last called, and when the final-lap flash started: a lap
+// turning over is a moment, and the banner has to be told to stop showing it.
+let calledLap = -1
+let flashUntil = 0
 
 configure({
   makeWorker: () => new Worker(new URL('./kart-sim-worker.js', import.meta.url), { type: 'module' }),
@@ -222,6 +226,8 @@ function startSolo() {
   myId = SOLO_ID
   results = null
   shownItem = undefined
+  calledLap = -1
+  flashUntil = 0
   el('gate').hidden = true
   el('room-strip').hidden = true
   const racers = [{ id: SOLO_ID, name, ai: false }]
@@ -383,16 +389,7 @@ function buildTrack() {
     scene.add(wall((i) => side * (half(i) + K.KERB), 2.4, solid))
   }
 
-  // Start/finish, a stripe across the road at s = 0.
-  const p = K.pointAt(0)
-  const line = new THREE.Mesh(
-    new THREE.PlaneGeometry(K.halfWidthAt(0) * 2, 2.5),
-    new THREE.MeshBasicMaterial({ color: 0xf3f5fe, transparent: true, opacity: 0.75 }),
-  )
-  line.rotation.x = -Math.PI / 2
-  line.rotation.z = -Math.atan2(p.ty, p.tx)
-  line.position.set(p.x, 0.07, p.y)
-  scene.add(line)
+  buildFinish()
 
   // Item boxes: one mesh per spot, hidden while that box is on its cooldown.
   const geo = new THREE.BoxGeometry(2.6, 2.6, 2.6)
@@ -409,6 +406,58 @@ function buildTrack() {
     scene.add(mesh)
     boxMeshes.push(mesh)
   }
+}
+
+/**
+ * The line, as something you can see coming: a chequered band across the road
+ * under a gantry over it. A painted stripe is invisible until you are on top of
+ * it, which is no way to know where a race ends.
+ */
+function buildFinish() {
+  const p = K.pointAt(0)
+  const half = K.halfWidthAt(0)
+  // Along the road, and across it. Everything below is placed in those two.
+  const ax = p.tx
+  const az = p.ty
+  const bx = -p.ty
+  const bz = p.tx
+
+  const squares = 14
+  const size = (half * 2) / squares
+  const light = new THREE.MeshBasicMaterial({ color: 0xf3f5fe })
+  const dark = new THREE.MeshBasicMaterial({ color: 0x11151d })
+  const tile = new THREE.PlaneGeometry(size, size)
+  for (let row = 0; row < 2; row++) {
+    for (let col = 0; col < squares; col++) {
+      const mesh = new THREE.Mesh(tile, (row + col) % 2 === 0 ? light : dark)
+      const across = -half + size * (col + 0.5)
+      const along = size * (row - 0.5)
+      mesh.rotation.x = -Math.PI / 2
+      mesh.position.set(p.x + bx * across + ax * along, 0.07, p.y + bz * across + az * along)
+      scene.add(mesh)
+    }
+  }
+
+  // The gantry: a post either side of the road and a beam across the top, so
+  // the finish is a thing on the horizon rather than a mark on the floor.
+  const postH = 9
+  const postGeo = new THREE.BoxGeometry(1.2, postH, 1.2)
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x596b8c, flatShading: true })
+  for (const side of [1, -1]) {
+    const post = new THREE.Mesh(postGeo, postMat)
+    const across = side * (half + 1.6)
+    post.position.set(p.x + bx * across, postH / 2, p.y + bz * across)
+    scene.add(post)
+  }
+  const beam = new THREE.Mesh(
+    new THREE.BoxGeometry((half + 2.2) * 2, 2.2, 1),
+    new THREE.MeshStandardMaterial({ color: 0x9184d9, emissive: 0x2b2741, flatShading: true }),
+  )
+  beam.position.set(p.x, postH - 1, p.y)
+  // Its length runs across the road, not along it: a turn about y maps the
+  // box's own +x onto the across vector.
+  beam.rotation.y = Math.atan2(-bz, bx)
+  scene.add(beam)
 }
 
 /**
@@ -672,16 +721,35 @@ function updateHud() {
   showItem(me.item === undefined ? null : me.item)
   showEffects(me)
 
+  // The last lap is worth calling, and so is crossing the line: both are
+  // moments rather than states, so they are flashed for a couple of seconds.
+  if (me.lap !== calledLap) {
+    if (calledLap !== -1 && me.lap === race.laps - 1) flashUntil = performance.now() + 2500
+    calledLap = me.lap
+  }
+  const flashing = performance.now() < flashUntil
+
   const banner = el('banner')
+  const sub = el('banner-sub')
+  let sublabel = ''
   if (race.phase === 'COUNT') {
     const n = Math.ceil(race.timer)
     banner.textContent = n > 0 ? String(n) : 'GO'
     banner.hidden = false
+  } else if (me.finished !== null) {
+    // Home, with the rest of the field still out there. The card comes up when
+    // the flag falls; until then this is the only thing saying you are done.
+    banner.textContent = 'FINISHED'
+    banner.hidden = false
+    sublabel = `${ordinal(me.place)} · ${clock(me.finished)} · waiting for the flag`
   } else if (me.respawn > 0) {
     banner.textContent = `RESCUE ${me.respawn.toFixed(1)}`
     banner.hidden = false
   } else if (me.spin > 0) {
     banner.textContent = 'SPUN OUT'
+    banner.hidden = false
+  } else if (flashing) {
+    banner.textContent = 'FINAL LAP'
     banner.hidden = false
   } else if (race.time < 1.5) {
     banner.textContent = 'GO'
@@ -689,6 +757,13 @@ function updateHud() {
   } else {
     banner.hidden = true
   }
+  // The card covers the screen at the flag; nothing belongs under it.
+  if (race.phase === 'OVER') {
+    banner.hidden = true
+    sublabel = ''
+  }
+  sub.hidden = sublabel === ''
+  if (sublabel) sub.textContent = sublabel
 
   el('standings').innerHTML = [...race.karts]
     .sort((a, b) => a.place - b.place)
