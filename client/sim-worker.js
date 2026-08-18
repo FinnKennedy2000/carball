@@ -19,6 +19,7 @@ onmessage = ({ data }) => {
       host = startHost({
         code: data.code,
         send: (event, payload) => postMessage({ type: 'send', event, payload }),
+        live: (state) => postMessage({ type: 'live', s: state }),
         hostName: data.hostName,
         hostTeam: data.hostTeam,
       })

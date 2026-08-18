@@ -15,6 +15,22 @@ const KEYS = {
 }
 
 let bits = 0
+let notify = () => {}
+
+/**
+ * Called whenever the pressed keys change, so the send can go at once instead of
+ * waiting up to a poll interval. The poll stays: it is what catches a key held
+ * across a tab switch, which produces no event here at all.
+ */
+export function onInputChange(fn) {
+  notify = fn ?? (() => {})
+}
+
+function setBits(next) {
+  if (next === bits) return
+  bits = next
+  notify()
+}
 
 /**
  * Whether a key belongs to a field rather than to the car. The driving keys are
@@ -32,22 +48,22 @@ export function startInput() {
     const bit = KEYS[e.code]
     if (bit === undefined || isTyping(e.target)) return
     e.preventDefault()
-    bits |= bit
+    setBits(bits | bit)
   })
   addEventListener('keyup', (e) => {
     const bit = KEYS[e.code]
     if (bit === undefined || isTyping(e.target)) return
     e.preventDefault()
-    bits &= ~bit
+    setBits(bits & ~bit)
   })
   // A field taking focus mid-drive must not leave a held key stuck down: the
   // keyup lands on the field and is ignored above.
   addEventListener('focusin', (e) => {
-    if (isTyping(e.target)) bits = 0
+    if (isTyping(e.target)) setBits(0)
   })
   // Releasing keys while unfocused would otherwise leave the car driving itself.
   addEventListener('blur', () => {
-    bits = 0
+    setBits(0)
   })
 }
 

@@ -12,13 +12,16 @@
 // interpolates between the two snapshots straddling that moment.
 
 import * as C from '../shared/constants.js'
-import { currentBits } from './input.js'
+import { currentBits, onInputChange } from './input.js'
 import { randomCode } from './host.js'
 import { supabase, enabled as supabaseEnabled } from './auth.js'
 
 // Above one snapshot interval (1/12 s) or there is nothing to interpolate
-// towards and motion stutters at the buffer's edge.
-const INTERP_DELAY_MS = 220
+// towards and motion stutters at the buffer's edge. Every millisecond here is a
+// millisecond of input lag, so it sits just far enough clear of that floor to
+// absorb ordinary jitter: raise it if Realtime is stuttering, lower it and the
+// view starts running off the end of the buffer.
+const INTERP_DELAY_MS = 120
 const BUFFER_MAX = 24
 // Generous, because giving up early is worse than waiting: the host may already
 // have seated us by the time we stop listening. Measured round trips to a room
@@ -26,6 +29,9 @@ const BUFFER_MAX = 24
 const JOIN_TIMEOUT_MS = 10000
 
 const buffer = [] // [{ recvAt, s }], oldest first
+// The host's own sim, handed over every tick by the worker. Present rather than
+// interpolated, so the host plays with no buffer delay at all.
+let liveState = null
 let channel = null
 let host = null // the sim worker, in the tab that created the room
 let seq = 0
@@ -56,6 +62,7 @@ export async function createRoom(name, team) {
   const started = new Promise((resolve) => {
     host.onmessage = ({ data }) => {
       if (data.type === 'send') hostSend(data.event, data.payload)
+      else if (data.type === 'live') liveState = data.s
       else if (data.type === 'started') resolve(data)
     }
   })
@@ -156,21 +163,29 @@ export function beginMatch() {
   host?.postMessage({ type: 'begin' })
 }
 
+/** Send the pressed keys if they have changed since the last time we looked. */
+function flushInput() {
+  const bits = currentBits()
+  if (bits === lastBits) return
+  lastBits = bits
+  if (host) host.postMessage({ type: 'localBits', bits })
+  else send('peer', { t: 'input', cid, seq: seq++, bits })
+}
+
 export function startSendingInput() {
   if (inputTimer) return
-  // Polled rather than driven off keydown so a key held across a tab switch, or
-  // a bit cleared by input.js's blur handler, still gets noticed. Only a change
-  // costs a message.
-  inputTimer = setInterval(() => {
-    const bits = currentBits()
-    if (bits === lastBits) return
-    lastBits = bits
-    if (host) host.postMessage({ type: 'localBits', bits })
-    else send('peer', { t: 'input', cid, seq: seq++, bits })
-  }, 1000 / C.TICK_HZ)
+  // Driven off the key change, so a press goes out on the spot rather than
+  // waiting up to a poll interval. Costs no extra messages: the same changes
+  // are sent, just sooner.
+  onInputChange(flushInput)
+  // The poll stays as the backstop, for a bit that changes without a key event
+  // of its own — a key held across a tab switch, or the blur handler clearing
+  // one. Only a change costs a message, so an idle poll is free.
+  inputTimer = setInterval(flushInput, 1000 / C.TICK_HZ)
 }
 
 function stopSendingInput() {
+  onInputChange(null)
   clearInterval(inputTimer)
   inputTimer = null
   lastBits = -1
@@ -182,16 +197,13 @@ function send(event, payload) {
 
 /**
  * What the host sends. Realtime does not echo a message back to its sender, so
- * the host's own tab has to be handed everything it broadcasts or it would
- * render nothing: no snapshots, no roster, no full-time panel.
+ * the host's own tab has to be handed everything it broadcasts or it would miss
+ * its own roster and full-time panel. Snapshots are the exception: the host
+ * renders liveState, which is the same sim five times fresher.
  */
 function hostSend(event, payload) {
   send(event, payload)
-  if (event === 'snap') {
-    // Already a copy: it crossed the worker boundary, which clones.
-    buffer.push({ recvAt: performance.now(), s: payload.s })
-    while (buffer.length > BUFFER_MAX) buffer.shift()
-  } else if (event === 'roster') {
+  if (event === 'roster') {
     handlers.onRoster(payload.players)
   } else if (event === 'matchover') {
     handlers.onMatchOver(payload.score, payload.players, payload.matchId)
@@ -208,6 +220,7 @@ export async function close() {
   const leaving = channel
   channel = null
   buffer.length = 0
+  liveState = null
   if (!leaving) return
 
   // A joiner frees its seat on the way out. A host has no one to tell: the room
@@ -224,6 +237,8 @@ addEventListener('pagehide', () => void close())
 
 /** Interpolated view of the world, or null until two snapshots have arrived. */
 export function sampleState() {
+  // The host is the authority and its sim is right here, a tick old at most.
+  if (liveState) return liveState
   if (buffer.length === 0) return null
   const renderAt = performance.now() - INTERP_DELAY_MS
 
