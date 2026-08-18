@@ -253,6 +253,11 @@ body {
   pointer-events: auto;
 }
 
+/* .btn sets a display, which beats the UA rule for [hidden] — as with #over. */
+#start[hidden] {
+  display: none;
+}
+
 #footer {
   position: absolute;
   bottom: var(--space-8);
