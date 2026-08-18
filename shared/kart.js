@@ -44,6 +44,8 @@ const TURN_MIN = 0.4
 const OFFROAD_MAX = 0.45 // fraction of top speed the grass allows
 const OFFROAD_DRAG = 2.6
 const WALL_BOUNCE = 0.3
+// How fast speed above the current cap is given up, per second.
+const OVERSPEED_BLEED = 6
 
 const COUNTDOWN = 3
 const FINISH_GRACE = 45 // seconds the race runs on after the winner is home
@@ -420,7 +422,12 @@ function stepKart(state, kart, bits, dt) {
   if (kart.star > 0) max *= STAR_SPEED
   if (kart.shrink > 0) max *= SHRINK_SPEED
   if (offroad) max *= OFFROAD_MAX
-  clampSpeed(kart, max)
+  // Two halves of the same rule: the cap is a hard ceiling on speed you can
+  // gain, and a soft one on speed you already had. Without the first the engine
+  // simply pushes through the cap; without the second the end of a Turbo cuts
+  // 56 m/s to 38 in one tick, which reads as driving into a wall.
+  clampSpeed(kart, Math.max(max, speed))
+  bleedTo(kart, max, dt)
 
   kart.x += kart.vx * dt
   kart.y += kart.vy * dt
@@ -533,6 +540,11 @@ function useItem(state, kart, bits) {
   kart.item = null
   const fx = Math.cos(kart.heading)
   const fy = Math.sin(kart.heading)
+  // A shell leaves at its own speed plus whatever the kart was already doing.
+  // Flat SHELL_SPEED is slower than a boosting kart, which then drives into the
+  // shell it just fired the moment its own immunity lapses — fire while your
+  // Turbo is running and you spin yourself out.
+  const launchSpeed = SHELL_SPEED + Math.max(0, kart.vx * fx + kart.vy * fy)
 
   if (item === 'boost') kart.boost = BOOST_SECONDS
   else if (item === 'star') kart.star = STAR_SECONDS
@@ -542,8 +554,9 @@ function useItem(state, kart, bits) {
     state.shells.push({
       x: kart.x + fx * (KART_R + 1.5),
       y: kart.y + fy * (KART_R + 1.5),
-      vx: fx * SHELL_SPEED,
-      vy: fy * SHELL_SPEED,
+      vx: fx * launchSpeed,
+      vy: fy * launchSpeed,
+      speed: launchSpeed,
       life: SHELL_LIFE,
       owner: kart.id,
       // A red shell chases whoever is one place ahead. Nobody ahead means it
@@ -581,8 +594,8 @@ function stepShells(state, dt) {
         const have = Math.atan2(shell.vy, shell.vx)
         const turn = clamp(wrap(want - have), -SHELL_TURN * dt, SHELL_TURN * dt)
         const a = have + turn
-        shell.vx = Math.cos(a) * SHELL_SPEED
-        shell.vy = Math.sin(a) * SHELL_SPEED
+        shell.vx = Math.cos(a) * shell.speed
+        shell.vy = Math.sin(a) * shell.speed
       }
     }
     shell.x += shell.vx * dt
@@ -734,6 +747,19 @@ function clampSpeed(body, max) {
     body.vx *= max / s
     body.vy *= max / s
   }
+}
+
+/**
+ * Give up speed above the cap rather than cutting to it. A hard clamp is what
+ * made the end of a Turbo feel like driving into a wall: 56 m/s to 38 in a
+ * single tick, with none of the momentum carried out of it.
+ */
+function bleedTo(body, max, dt) {
+  const s = Math.hypot(body.vx, body.vy)
+  if (s <= max) return
+  const next = max + (s - max) * damp(OVERSPEED_BLEED, dt)
+  body.vx *= next / s
+  body.vy *= next / s
 }
 
 function clamp(v, lo, hi) {

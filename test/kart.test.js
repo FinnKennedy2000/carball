@@ -11,6 +11,10 @@ import {
   project,
   pointAt,
   boxSpots,
+  halfWidthAt,
+  overVoid,
+  VOIDS,
+  RESPAWN_SECONDS,
   ITEMS,
   TRACK,
   LAPS,
@@ -93,9 +97,86 @@ test('nothing leaves the circuit, however hard it is driven at the barrier', () 
   const state = started(2, 3)
   run(state, 60 * 30, { 1: IN_FWD | IN_LEFT })
   for (const kart of state.karts) {
+    // A kart being fished out is off the road by definition; everyone else is
+    // held inside the barrier, at whatever width the road is there.
+    if (kart.respawn > 0) continue
     const hit = project(kart.x, kart.y)
-    assert.ok(Math.abs(hit.lateral) <= HALF_WIDTH + KERB - KART_R + 0.5, `off track: ${hit.lateral}`)
+    const limit = halfWidthAt(hit.s) + KERB - KART_R + 0.5
+    assert.ok(Math.abs(hit.lateral) <= limit, `off track: ${hit.lateral} at ${hit.s}`)
   }
+})
+
+test('the road is not the same width all the way round', () => {
+  const widths = []
+  for (let i = 0; i < 40; i++) widths.push(halfWidthAt((i / 40) * TRACK.length))
+  assert.ok(Math.max(...widths) - Math.min(...widths) > 3, 'the circuit is a constant-width loop')
+  // The grid needs the full width: six karts line up across the start line.
+  assert.equal(halfWidthAt(0), Math.max(...widths))
+})
+
+test('driving off a void is a fall, a wait, and a drop back onto the road', () => {
+  const state = started(1, 3)
+  run(state, 200) // the lights, which the karts sit still through
+  const kart = state.karts[0]
+  // Into the middle of the first drop, pointed straight at the edge.
+  const s = TRACK.length * ((VOIDS[0][0] + VOIDS[0][1]) / 2)
+  const p = pointAt(s)
+  assert.ok(overVoid(s))
+  kart.x = p.x
+  kart.y = p.y
+  kart.s = s
+  kart.prog = s
+  kart.heading = Math.atan2(p.ny, p.nx)
+  const before = kart.prog
+
+  for (let i = 0; i < 180 && kart.respawn === 0; i++) step(state, { 1: IN_FWD })
+  assert.equal(kart.respawn, RESPAWN_SECONDS, 'never went over the edge')
+
+  // Held: the throttle does nothing while it waits.
+  const [x, y] = [kart.x, kart.y]
+  run(state, 30, { 1: IN_FWD | IN_LEFT })
+  assert.equal(kart.x, x)
+  assert.equal(kart.y, y)
+  assert.ok(kart.respawn > 0)
+
+  for (let i = 0; i < 300 && kart.respawn > 0; i++) step(state, {})
+  const hit = project(kart.x, kart.y)
+  assert.ok(Math.abs(hit.lateral) <= halfWidthAt(hit.s), `dropped off the road: ${hit.lateral}`)
+  // The fall costs the metres it was worth, rather than crediting them.
+  assert.ok(kart.prog < before, `progress went up: ${before} -> ${kart.prog}`)
+})
+
+test('a fall cannot happen where there is a barrier', () => {
+  const state = started(1, 3)
+  run(state, 200)
+  const kart = state.karts[0]
+  // A stretch with kerb and wall, driven straight at the edge for a good while.
+  const s = TRACK.length * 0.4
+  assert.equal(overVoid(s), false)
+  const p = pointAt(s)
+  kart.x = p.x
+  kart.y = p.y
+  kart.s = s
+  kart.prog = s
+  kart.heading = Math.atan2(p.ny, p.nx)
+  run(state, 60 * 5, { 1: IN_FWD })
+  assert.equal(kart.respawn, 0)
+})
+
+test('a kart being fished out is out of the game while it waits', () => {
+  const state = started(2, 3)
+  run(state, 200)
+  const [kart, other] = state.karts
+  kart.respawn = RESPAWN_SECONDS
+  kart.recoverAt = 40
+  other.x = kart.x
+  other.y = kart.y
+  other.item = ITEMS.findIndex((i) => i.key === 'green')
+  other.heading = 0
+  step(state, { 2: IN_ITEM })
+  run(state, 30, {})
+  assert.equal(kart.spin, 0, 'a held kart was hit by a shell')
+  assert.equal(kart.item, null, 'a held kart collected a box')
 })
 
 test('a box hands out an item, then goes on cooldown', () => {
@@ -237,4 +318,58 @@ test('the flag falls as soon as every person is home', () => {
   // The AI are still out there, and are placed on how far they got.
   assert.equal(ai.finished, null)
   assert.ok(ai.place > 1)
+})
+
+test('a shell fired on a Turbo does not run its own kart over', () => {
+  const state = started(1, 8)
+  state.phase = 'RACE' // past the lights
+  const me = state.karts[0]
+  // Up to boost pace, pointed down the road, with a green shell in hand.
+  const p = pointAt(40)
+  me.x = p.x
+  me.y = p.y
+  me.s = 40
+  me.heading = Math.atan2(p.ty, p.tx)
+  me.vx = p.tx * 56
+  me.vy = p.ty * 56
+  me.boost = 1.6
+  me.item = ITEMS.findIndex((i) => i.key === 'green')
+
+  step(state, { 1: IN_FWD | IN_ITEM })
+  assert.equal(state.shells.length, 1)
+  // The shell has to be quicker than the kart that fired it, or the kart drives
+  // into it the moment its own immunity lapses.
+  assert.ok(Math.hypot(state.shells[0].vx, state.shells[0].vy) > 56)
+  run(state, 120, { 1: IN_FWD })
+  assert.equal(me.spin, 0, 'spun itself out on its own shell')
+})
+
+test('the end of a Turbo bleeds off rather than cutting', () => {
+  const state = started(1, 9)
+  state.phase = 'RACE'
+  const me = state.karts[0]
+  const p = pointAt(40)
+  me.x = p.x
+  me.y = p.y
+  me.s = 40
+  me.heading = Math.atan2(p.ty, p.tx)
+  me.vx = p.tx * 56
+  me.vy = p.ty * 56
+  me.boost = 0.02 // about to run out
+
+  let last = Math.hypot(me.vx, me.vy)
+  let worst = 0
+  // Only the moment the Turbo runs out, and only for as long as the kart is
+  // still on the tarmac: the grass has its own much harder cap, and drifting
+  // onto it is not what this is about.
+  for (let i = 0; i < 20; i++) {
+    step(state, { 1: IN_FWD })
+    const now = Math.hypot(me.vx, me.vy)
+    worst = Math.max(worst, last - now)
+    last = now
+  }
+  // No single tick may take a big bite: the old hard clamp took 18 m/s in one.
+  assert.ok(worst < 3, `lost ${worst.toFixed(1)} m/s in a tick`)
+  // And the speed is carried out of the boost rather than left behind in it.
+  assert.ok(last > 40, `only doing ${last.toFixed(1)} a third of a second later`)
 })
