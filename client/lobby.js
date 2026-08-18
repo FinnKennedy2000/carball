@@ -16,6 +16,9 @@ const STORED_TEAM = 'carball.team'
 // The car outlives the tab, unlike the side and the name: it is a preference
 // rather than a decision about this match, so localStorage.
 const STORED_CAR = 'carball.car'
+// A decision about this match rather than a standing preference, so it sits
+// beside the side rather than with the car.
+const STORED_MODE = 'carball.mode'
 
 // Invite links used to point here. Keep the old ones working.
 if (/^#[A-Za-z]{4}$/.test(location.hash)) location.replace(`./game.html${location.hash}`)
@@ -32,6 +35,21 @@ for (const btn of document.querySelectorAll('#teams .team')) {
     btn.classList.add('on')
     wantedTeam = btn.dataset.team === '' ? null : Number(btn.dataset.team)
     paintCar() // the car below wears the side you just picked
+  })
+}
+
+// Mode buttons. Only the room's creator is asked: joining a code takes the mode
+// the host already chose, which arrives in the snapshot.
+let wantedMode = 'normal'
+for (const btn of document.querySelectorAll('#modes .mode')) {
+  btn.addEventListener('click', () => {
+    for (const other of document.querySelectorAll('#modes .mode')) other.classList.remove('on')
+    btn.classList.add('on')
+    wantedMode = btn.dataset.mode
+    el('mode-hint').textContent =
+      wantedMode === 'rumble'
+        ? 'Random powerups every ten seconds · E to fire · joining a code uses that room\u2019s mode'
+        : 'Football, plainly.'
   })
 }
 
@@ -56,6 +74,7 @@ function play(hash) {
   const name = el('name').value.trim()
   if (name) sessionStorage.setItem(STORED_NAME, name)
   sessionStorage.setItem(STORED_TEAM, String(wantedTeam))
+  sessionStorage.setItem(STORED_MODE, wantedMode)
   localStorage.setItem(STORED_CAR, String(wantedCar))
   location.href = `./game.html#${hash}`
 }

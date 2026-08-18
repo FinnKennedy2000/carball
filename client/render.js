@@ -231,6 +231,9 @@ export function draw(state, nameOf = () => null, carOf = () => null) {
   // Roll the ball in its direction of travel so it does not look like it is sliding.
   ballMesh.rotation.z -= (state.ball.vx / C.BALL_R) * 0.016
   ballMesh.rotation.x += (state.ball.vy / C.BALL_R) * 0.016
+  // A held ball hangs perfectly still, which reads as a bug unless it is lit as
+  // something someone did. Rumble only; in a normal match freeze is never set.
+  ballMesh.material.emissive.setHex(state.ball.freeze > 0 ? 0x2b6cff : 0x000000)
 
   renderer.render(scene, camera)
 }

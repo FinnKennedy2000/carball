@@ -23,6 +23,7 @@ onmessage = ({ data }) => {
         hostName: data.hostName,
         hostTeam: data.hostTeam,
         hostCar: data.hostCar,
+        mode: data.mode,
       })
       postMessage({ type: 'started', hostId: host.hostId, hostTeam: host.hostTeam, roster: host.roster() })
       break

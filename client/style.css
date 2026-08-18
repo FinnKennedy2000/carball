@@ -427,6 +427,44 @@ body {
   color: var(--color-neutral-600);
 }
 
+/* The Rumble slot. Lit while something is in it, so a glance is enough. */
+
+#item-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px var(--space-3);
+  border-radius: 99px;
+  box-shadow: inset 0 0 0 1px var(--color-neutral-800);
+}
+
+#item-chip.armed {
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+
+#item-name {
+  font-size: 12px;
+  color: var(--color-neutral-400);
+}
+
+#item-chip.armed #item-name {
+  color: var(--color-accent-300);
+}
+
+#item-hint {
+  font-size: 12px;
+  color: var(--color-neutral-600);
+}
+
+/* The mode a joiner landed in, named while the room waits. */
+#waiting-mode:not(:empty) {
+  margin-top: var(--space-2);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-accent-300);
+}
+
 /* The lobby's way into the garage: the car you are in, as a row. */
 
 /* Portraits from silhouette.js. Sized by whatever holds them. */
@@ -914,6 +952,27 @@ body {
 #teams .team.orange.on {
   border-color: var(--orange);
   color: var(--orange-text);
+}
+
+#modes {
+  display: flex;
+  gap: var(--space-2);
+}
+
+#modes .mode {
+  flex: 1;
+  color: var(--color-neutral-500);
+}
+
+#modes .mode.on {
+  border-color: var(--color-accent);
+  color: var(--color-accent-300);
+}
+
+.kicker-note {
+  color: var(--color-neutral-600);
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 #create {

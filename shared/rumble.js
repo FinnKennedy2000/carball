@@ -1,0 +1,169 @@
+// Rumble: every player is dealt a random item on a timer and fires it with one
+// key. This module owns the item table, the roll, and every effect; sim.js calls
+// stepRumble once a tick and otherwise knows nothing about any of it.
+//
+// DETERMINISM: sim.js is pure by contract — no Math.random, no Date — and this
+// must not be the thing that breaks it. The randomness is injected instead: the
+// host draws one seed when it opens the room, it travels in state.seed, and a
+// roll advances it here. Same starting state plus same inputs, same items.
+
+import * as C from './constants.js'
+
+/**
+ * The five items, in roll order. The index is what travels on the wire and what
+ * the HUD looks up, so appending is safe and reordering is not.
+ */
+export const ITEMS = [
+  { key: 'haymaker', name: 'Haymaker', hint: 'punches the ball' },
+  { key: 'boot', name: 'Boot', hint: 'punts the nearest opponent' },
+  { key: 'freeze', name: 'Freeze', hint: 'holds the ball in place' },
+  { key: 'hook', name: 'Grappling Hook', hint: 'reels you to the ball' },
+  { key: 'magnet', name: 'Magnetizer', hint: 'pulls the ball to you' },
+]
+
+/** Give a car the fields the mode needs. Called only in a Rumble match. */
+export function initCarItems(car) {
+  car.item = null
+  car.itemTimer = C.ITEM_COOLDOWN
+  // Whether the item key was held on the previous tick. The item fires on the
+  // rising edge, so holding the key cannot also spend whatever arrives next.
+  car.itemDown = false
+  car.hook = 0
+  car.magnet = 0
+}
+
+/**
+ * One tick of the item mode, run before the cars and the ball are integrated so
+ * an effect's acceleration lands in the same step as the engine's.
+ * `inputs` maps car id -> input bitmask, exactly as step() receives it.
+ */
+export function stepRumble(state, inputs, dt) {
+  if (state.ball.freeze > 0) {
+    state.ball.freeze = Math.max(0, state.ball.freeze - dt)
+    // Held, not slowed: the ball keeps no memory of the shot it was in.
+    state.ball.vx = 0
+    state.ball.vy = 0
+  }
+
+  // Cars are kept id-sorted by addCar, so rolls come off the seed in a fixed
+  // order however the room filled up.
+  for (const car of state.cars) {
+    const bits = inputs[car.id] | 0
+    deal(state, car, dt)
+
+    const down = (bits & C.IN_ITEM) !== 0
+    if (down && !car.itemDown && car.item !== null) {
+      fire(state, car, car.item)
+      car.item = null
+      car.itemTimer = C.ITEM_COOLDOWN
+    }
+    car.itemDown = down
+
+    hold(state, car, dt)
+  }
+}
+
+/** Count down to the next item, but only while the slot is empty. */
+function deal(state, car, dt) {
+  if (car.item !== null) return
+  car.itemTimer -= dt
+  if (car.itemTimer > 0) return
+  car.itemTimer = 0
+  car.item = roll(state)
+}
+
+/**
+ * The next item off the seed. A plain LCG: integer-only, so it cannot drift
+ * between engines the way a float-based generator can.
+ */
+function roll(state) {
+  state.seed = (Math.imul(state.seed, 1664525) + 1013904223) >>> 0
+  // The high bits of an LCG are the well-behaved ones; the low ones cycle short.
+  return Math.floor((state.seed >>> 16) / 65536 * ITEMS.length) % ITEMS.length
+}
+
+/** Spend an item. One-shot items act here; timed ones just start their clock. */
+function fire(state, car, item) {
+  switch (ITEMS[item].key) {
+    case 'haymaker': {
+      const d = toward(car, state.ball)
+      if (d.dist <= C.ITEM_RANGE) {
+        state.ball.vx += d.nx * C.HAYMAKER_IMPULSE
+        state.ball.vy += d.ny * C.HAYMAKER_IMPULSE
+        // A punch is a touch for the purposes of goal credit, and it frees a
+        // ball someone else froze — you cannot punch something and have it hang.
+        state.ball.lastTouch = car.id
+        state.ball.freeze = 0
+      }
+      break
+    }
+    case 'boot': {
+      const target = nearestOpponent(state, car)
+      if (target) {
+        const d = toward(car, target)
+        target.vx += d.nx * C.BOOT_IMPULSE
+        target.vy += d.ny * C.BOOT_IMPULSE
+      }
+      break
+    }
+    case 'freeze':
+      // Only worth spending on a ball in play; a frozen one is already held.
+      state.ball.vx = 0
+      state.ball.vy = 0
+      state.ball.freeze = C.FREEZE_SECONDS
+      break
+    case 'hook':
+      car.hook = C.HOOK_SECONDS
+      break
+    case 'magnet':
+      car.magnet = C.MAGNET_SECONDS
+      break
+  }
+}
+
+/** The timed items, for as long as their clocks run. */
+function hold(state, car, dt) {
+  if (car.hook > 0) {
+    car.hook = Math.max(0, car.hook - dt)
+    const d = toward(car, state.ball)
+    // No range limit: the hook's whole point is closing a gap you could not.
+    car.vx += d.nx * C.HOOK_ACCEL * dt
+    car.vy += d.ny * C.HOOK_ACCEL * dt
+  }
+
+  if (car.magnet > 0) {
+    car.magnet = Math.max(0, car.magnet - dt)
+    const d = toward(car, state.ball)
+    // Pulled the other way — toward the car — and only from inside its reach,
+    // so a magnet cannot drag the ball the length of the pitch.
+    if (d.dist <= C.MAGNET_RANGE && state.ball.freeze <= 0) {
+      state.ball.vx -= d.nx * C.MAGNET_ACCEL * dt
+      state.ball.vy -= d.ny * C.MAGNET_ACCEL * dt
+    }
+  }
+}
+
+/** The nearest car on the other side within reach, or null. */
+function nearestOpponent(state, car) {
+  let best = null
+  let bestDist = C.ITEM_RANGE
+  for (const other of state.cars) {
+    if (other.team === car.team) continue // which also rules out the car itself
+    const { dist } = toward(car, other)
+    if (dist <= bestDist) {
+      bestDist = dist
+      best = other
+    }
+  }
+  return best
+}
+
+/** Unit vector from `from` to `to`, plus the distance. Never divides by zero. */
+function toward(from, to) {
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  const dist = Math.hypot(dx, dy)
+  // Coincident centres have no direction. Push along +x, deterministically.
+  if (dist < 1e-6) return { nx: 1, ny: 0, dist: 0 }
+  return { nx: dx / dist, ny: dy / dist, dist }
+}

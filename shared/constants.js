@@ -81,7 +81,36 @@ export const IN_LEFT = 4
 export const IN_RIGHT = 8
 export const IN_BOOST = 16
 export const IN_DRIFT = 32
-export const IN_ALL = 63
+export const IN_ITEM = 64
+export const IN_ALL = 127
+
+// Rumble --------------------------------------------------------------------
+// Every knob the item mode needs. Nothing here is read unless state.mode is
+// 'rumble', so a normal match is untouched by any of it.
+
+// Seconds from an empty slot to the next item. One slot, so the wait only ever
+// starts once you have spent what you were holding.
+export const ITEM_COOLDOWN = 10
+// How far a Haymaker or a Boot reaches. Roughly a fifth of the pitch's length:
+// far enough to be worth firing from open play, short enough to need position.
+export const ITEM_RANGE = 14
+// A punch on the ball, in metres per second added along the line from the car.
+// Well under BALL_MAX_SPEED, which still bounds the total after a good touch.
+export const HAYMAKER_IMPULSE = 45
+// The same, on a car rather than the ball. Lower, because a car is heavier and
+// being launched off the pitch is less fun than being shoved out of a challenge.
+export const BOOT_IMPULSE = 34
+// How long the ball hangs. A touch ends it early — see stepRumble.
+export const FREEZE_SECONDS = 4
+export const HOOK_SECONDS = 2.5
+// Above CAR_BOOST_ACCEL: the hook is a winch, not a nudge, and it fights the
+// car's own drag and grip on the way in.
+export const HOOK_ACCEL = 70
+export const MAGNET_SECONDS = 3.5
+export const MAGNET_ACCEL = 26
+// The magnet reaches further than a punch — it is a pull, and needs to be worth
+// holding rather than firing the moment the ball is close.
+export const MAGNET_RANGE = 24
 
 export const TEAM_BLUE = 0
 export const TEAM_ORANGE = 1

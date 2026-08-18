@@ -50,6 +50,15 @@
               <span class="chassis-mark">Garage</span>
             </button>
 
+            <!-- The mode belongs to the room, so it is only the host's to pick;
+                 a joiner inherits it from the first snapshot. -->
+            <div class="kicker">Mode <span class="kicker-note">· the room you create</span></div>
+            <div id="modes">
+              <button class="btn btn-secondary mode on" data-mode="normal">Normal</button>
+              <button class="btn btn-secondary mode" data-mode="rumble">Rumble</button>
+            </div>
+            <p class="hint" id="mode-hint">Football, plainly.</p>
+
             <div class="row">
               <button id="create" class="btn btn-primary">Create room</button>
               <input id="code" class="input" placeholder="CODE" maxlength="4" autocomplete="off" />
@@ -68,6 +77,7 @@
               <div><dt>Drive</dt><dd>WASD</dd></div>
               <div><dt>Boost</dt><dd>Space</dd></div>
               <div><dt>Drift</dt><dd>Shift</dd></div>
+              <div><dt>Item <span class="kicker-note">rumble</span></dt><dd>E</dd></div>
               <div><dt>Mute</dt><dd>M</dd></div>
             </dl>
           </div>

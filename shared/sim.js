@@ -5,10 +5,18 @@
 // depend on a JS engine's transcendental function accuracy.
 
 import * as C from './constants.js'
+import { initCarItems, stepRumble } from './rumble.js'
 
-export function createState() {
+/**
+ * `mode` is 'normal' or 'rumble', and `seed` is the item PRNG's starting value —
+ * drawn once by the host, because nothing in here may call Math.random. Both
+ * travel in the snapshot, so a joiner inherits the mode without asking for it.
+ */
+export function createState(mode = 'normal', seed = 1) {
   const state = {
     tick: 0,
+    mode: mode === 'rumble' ? 'rumble' : 'normal',
+    seed: seed >>> 0,
     // Nothing moves until the host starts the match, so a room can fill up first.
     phase: 'WAITING',
     phaseTimer: 0,
@@ -17,7 +25,7 @@ export function createState() {
     lastScorer: null, // car id credited with the most recent goal, or null
     score: [0, 0],
     // lastTouch: the car that hit the ball most recently, for goal credit.
-    ball: { x: 0, y: 0, vx: 0, vy: 0, lastTouch: null },
+    ball: { x: 0, y: 0, vx: 0, vy: 0, lastTouch: null, freeze: 0 },
     cars: [],
   }
   return state
@@ -25,6 +33,9 @@ export function createState() {
 
 export function addCar(state, id, team) {
   const car = { id, team, x: 0, y: 0, vx: 0, vy: 0, heading: 0, boost: C.BOOST_MAX }
+  // Only a Rumble car carries item state: a normal match should not pay for the
+  // mode in every snapshot it sends.
+  if (state.mode === 'rumble') initCarItems(car)
   state.cars.push(car)
   // Cars are kept sorted by id so the collision iteration order never depends on
   // join order. Determinism, and it makes snapshots diff-friendly.
@@ -52,9 +63,14 @@ export function resetPositions(state) {
   state.ball.vx = 0
   state.ball.vy = 0
   state.ball.lastTouch = null
+  state.ball.freeze = 0
 
   const perTeam = [0, 0]
-  for (const car of state.cars) placeCar(car, perTeam[car.team]++)
+  for (const car of state.cars) {
+    placeCar(car, perTeam[car.team]++)
+    // A kickoff clears whatever anyone was holding, and restarts the wait.
+    if (state.mode === 'rumble') initCarItems(car)
+  }
 }
 
 function placeCar(car, slot) {
@@ -100,6 +116,10 @@ export function step(state, inputs) {
 
   state.clock -= dt
 
+  // Before the bodies are integrated, so an item's acceleration lands in the
+  // same tick as the engine's rather than a frame behind it.
+  if (state.mode === 'rumble') stepRumble(state, inputs, dt)
+
   for (const car of state.cars) stepCar(car, inputs[car.id] | 0, dt)
   stepBall(state.ball, dt)
 
@@ -111,6 +131,9 @@ export function step(state, inputs) {
   for (const car of state.cars) {
     if (collide(car, state.ball, C.CAR_R, C.BALL_R, C.CAR_MASS, C.BALL_MASS)) {
       state.ball.lastTouch = car.id
+      // A held ball is freed by anyone reaching it, as in the real game — and it
+      // must be, or the impulse just applied would be zeroed on the next tick.
+      state.ball.freeze = 0
       pinch(state.ball, car)
     }
   }
@@ -207,6 +230,8 @@ function stepCar(car, bits, dt) {
 }
 
 function stepBall(ball, dt) {
+  // Frozen: stepRumble already emptied its velocity, and it must not drift.
+  if (ball.freeze > 0) return
   const d = damp(C.BALL_DRAG, dt)
   ball.vx *= d
   ball.vy *= d
@@ -409,7 +434,10 @@ function wrapAngle(a) {
 /** Cheap structural hash, used by the determinism test. */
 export function hashState(state) {
   const nums = [state.tick, state.phase.length, state.overtime ? 1 : 0, state.score[0], state.score[1], state.ball.x, state.ball.y, state.ball.vx, state.ball.vy]
-  for (const c of state.cars) nums.push(c.id, c.x, c.y, c.vx, c.vy, c.heading, c.boost)
+  // The seed and the items are hashed too, so the determinism test covers a
+  // Rumble match rather than only the physics underneath it.
+  nums.push(state.seed, state.ball.freeze ?? 0)
+  for (const c of state.cars) nums.push(c.id, c.x, c.y, c.vx, c.vy, c.heading, c.boost, c.item ?? -1, c.itemTimer ?? -1)
   let h = 2166136261
   for (const n of nums) {
     const s = String(Math.round(n * 1e6))

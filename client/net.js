@@ -54,7 +54,7 @@ export const handlers = {
  */
 export const enabled = supabaseEnabled
 
-export async function createRoom(name, team, car) {
+export async function createRoom(name, team, car, mode) {
   const code = randomCode()
   await open(code)
 
@@ -66,7 +66,7 @@ export async function createRoom(name, team, car) {
       else if (data.type === 'started') resolve(data)
     }
   })
-  host.postMessage({ type: 'start', code, hostName: name, hostTeam: team, hostCar: car })
+  host.postMessage({ type: 'start', code, hostName: name, hostTeam: team, hostCar: car, mode })
 
   const { hostId, hostTeam, roster } = await started
   handlers.onJoined({ id: hostId, code, team: hostTeam })
@@ -266,6 +266,9 @@ function blend(a, b, t) {
     // Discrete fields come from the older snapshot so the banner and the score
     // change at the same moment the bodies do.
     tick: a.tick,
+    // Named explicitly, like everything else here: a field this function does
+    // not mention is a field a joiner never sees.
+    mode: a.mode,
     phase: a.phase,
     phaseTimer: a.phaseTimer,
     clock: a.clock,
@@ -277,6 +280,7 @@ function blend(a, b, t) {
       y: lerp(a.ball.y, b.ball.y, t),
       vx: b.ball.vx,
       vy: b.ball.vy,
+      freeze: b.ball.freeze,
     },
     cars: b.cars.map((cb) => {
       const ca = carsA.get(cb.id)

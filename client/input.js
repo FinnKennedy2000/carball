@@ -12,6 +12,9 @@ const KEYS = {
   Space: C.IN_BOOST,
   ShiftLeft: C.IN_DRIFT,
   ShiftRight: C.IN_DRIFT,
+  // Rumble's one action. Bound in every mode: a normal match simply ignores it,
+  // which is cheaper than rebinding the keyboard when the mode changes.
+  KeyE: C.IN_ITEM,
 }
 
 let bits = 0

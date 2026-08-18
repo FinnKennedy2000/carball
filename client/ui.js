@@ -1,4 +1,5 @@
 import * as C from '../shared/constants.js'
+import { ITEMS } from '../shared/rumble.js'
 
 const el = (id) => document.getElementById(id)
 
@@ -79,6 +80,9 @@ export function flashBanner(text, seconds) {
 
 let wasOvertime = false
 let sawOver = false
+// Read by the waiting strip, which is drawn from the roster rather than the
+// snapshot and so has no state of its own to ask.
+let waitingMode = false
 
 export function updateHud(state, localId) {
   // Announce sudden death once rather than parking it over the pitch.
@@ -94,6 +98,7 @@ export function updateHud(state, localId) {
   const boost = me ? me.boost / C.BOOST_MAX : 0
   el('boost').style.width = `${boost * 100}%`
   el('boost-pct').textContent = Math.round(boost * 100)
+  showItem(state, me)
 
   // The local player's own name is the one that reads at full strength.
   for (const span of el('roster').querySelectorAll('.who')) {
@@ -106,6 +111,11 @@ export function updateHud(state, localId) {
   // only two things worth pressing. Boost and the top-right code chip are noise
   // until the cars move.
   const waiting = state.phase === 'WAITING'
+  waitingMode = state.mode === 'rumble'
+  el('controls-line').textContent =
+    state.mode === 'rumble'
+      ? 'WASD drive · space boost · shift drift · E item · M mute'
+      : 'WASD drive · space boost · shift drift · M mute'
   el('waiting').hidden = !waiting
   el('footer').hidden = waiting
   el('room').hidden = waiting
@@ -125,12 +135,29 @@ export function updateHud(state, localId) {
   }
 }
 
+/**
+ * The item slot. The mode comes from the snapshot rather than from what this
+ * tab picked in the lobby, so a joiner on someone else's link is told the truth
+ * about the room they landed in.
+ */
+function showItem(state, me) {
+  const rumble = state.mode === 'rumble'
+  el('item-chip').hidden = !rumble
+  if (!rumble || !me) return
+
+  const item = me.item === null || me.item === undefined ? null : ITEMS[me.item]
+  el('item-chip').classList.toggle('armed', item !== null)
+  el('item-name').textContent = item ? item.name : `${Math.ceil(me.itemTimer ?? 0)}s`
+  el('item-hint').textContent = item ? `E · ${item.hint}` : 'waiting'
+}
+
 /** The strip's tallies and its one line of guidance, which differ by role. */
 function showWaiting() {
   const blue = roster.filter((p) => p.team === C.TEAM_BLUE).length
   el('count-blue').textContent = blue
   el('count-orange').textContent = roster.length - blue
   el('count-total').textContent = `${roster.length} of ${C.MAX_PLAYERS}`
+  el('waiting-mode').textContent = waitingMode ? 'Rumble' : ''
   el('waiting-hint').textContent = iAmHost
     ? 'Anyone with the link drops straight into this room · WASD drive · space boost'
     : 'The host starts the match · WASD drive · space boost'

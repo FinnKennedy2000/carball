@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import * as C from '../shared/constants.js'
 import { createState, addCar, step, kickoff, hashState } from '../shared/sim.js'
+import { ITEMS } from '../shared/rumble.js'
 import { parse } from '../shared/protocol.js'
 import { CARS, DEFAULT_CAR } from '../shared/cars.js'
 import { buildRow } from '../api/record-match.js'
@@ -18,6 +19,36 @@ function twoCarGame() {
   addCar(state, 1, C.TEAM_BLUE)
   addCar(state, 2, C.TEAM_ORANGE)
   return state
+}
+
+/** A Rumble match in PLAY, with the two cars parked where the test puts them. */
+function rumbleGame(seed = 12345) {
+  const state = createState('rumble', seed)
+  addCar(state, 1, C.TEAM_BLUE)
+  addCar(state, 2, C.TEAM_ORANGE)
+  state.phase = 'PLAY'
+  state.phaseTimer = 0
+  return state
+}
+
+/** Put a named item in a car's hand, whatever the roll would have given it. */
+function hand(car, key) {
+  car.item = ITEMS.findIndex((i) => i.key === key)
+  car.itemTimer = 0
+  car.itemDown = false
+}
+
+/** One tick with `bits` for car `id` and nothing for anyone else. */
+function tickWith(state, id, bits) {
+  const inputs = {}
+  for (const car of state.cars) inputs[car.id] = car.id === id ? bits : 0
+  step(state, inputs)
+}
+
+/** Press the item key: one tick down (the rising edge), one tick up. */
+function fireItem(state, id) {
+  tickWith(state, id, C.IN_ITEM)
+  tickWith(state, id, 0)
 }
 
 function run(state, ticks, inputFn) {
@@ -464,4 +495,240 @@ test('malformed peer messages are rejected without throwing', () => {
   assert.equal(parse({ t: 'hello', cid: CID, name: 'x' }).team, null)
   assert.equal(parse({ t: 'hello', cid: CID, name: 'x', team: 7 }).team, null)
   assert.equal(parse({ t: 'hello', cid: CID, name: 'x', team: '0' }).team, null)
+})
+
+// Rumble --------------------------------------------------------------------
+
+test('a rumble match is as reproducible as a normal one', () => {
+  const a = run(rumbleGame(), 900, scriptedBits)
+  const b = run(rumbleGame(), 900, scriptedBits)
+  assert.equal(hashState(a), hashState(b))
+  // And it really did deal items, or the hash above proves nothing about them.
+  assert.ok(a.cars.some((c) => c.item !== null) || a.seed !== rumbleGame().seed)
+})
+
+test('a different seed deals a different sequence of items', () => {
+  const seen = (seed) => {
+    const state = rumbleGame(seed)
+    const items = []
+    // Take each item out of the slot by hand rather than firing it: what is
+    // under test is the roll, not what the items do.
+    while (items.length < 12) {
+      run(state, 1, () => 0)
+      if (state.cars[0].item !== null) {
+        items.push(state.cars[0].item)
+        state.cars[0].item = null
+        state.cars[0].itemTimer = C.ITEM_COOLDOWN
+      }
+    }
+    return items.join('')
+  }
+  assert.notEqual(seen(1), seen(999999))
+})
+
+test('a normal match deals nothing at all', () => {
+  const state = twoCarGame()
+  state.phase = 'PLAY'
+  run(state, C.ITEM_COOLDOWN * C.TICK_HZ + 60, () => C.IN_ITEM)
+  assert.ok(state.cars.every((c) => c.item === undefined))
+  assert.equal(state.ball.freeze, 0)
+})
+
+test('an item lands on a timer and is spent by one press', () => {
+  const state = rumbleGame()
+  const me = state.cars[0]
+  assert.equal(me.item, null)
+
+  run(state, Math.ceil(C.ITEM_COOLDOWN * C.TICK_HZ) - 2, () => 0)
+  assert.equal(me.item, null, 'nothing before the cooldown is up')
+  run(state, 4, () => 0)
+  assert.notEqual(me.item, null, 'dealt once it is')
+
+  fireItem(state, me.id)
+  assert.equal(me.item, null, 'and the press spends it')
+  assert.ok(me.itemTimer > C.ITEM_COOLDOWN - 1, 'the wait starts over')
+})
+
+test('holding the item key does not spend the next item too', () => {
+  const state = rumbleGame()
+  const me = state.cars[0]
+  hand(me, 'freeze')
+
+  tickWith(state, me.id, C.IN_ITEM) // the rising edge spends it
+  assert.equal(me.item, null)
+
+  // Held down through a whole cooldown: the next item must survive.
+  me.itemTimer = 0.05
+  for (let t = 0; t < 30; t++) tickWith(state, me.id, C.IN_ITEM)
+  assert.notEqual(me.item, null, 'a held key must not burn what arrives next')
+})
+
+test('a haymaker punches the ball away without touching it', () => {
+  const state = rumbleGame()
+  const me = state.cars[0]
+  hand(me, 'haymaker')
+  me.x = -10
+  me.y = 0
+  me.vx = 0
+  me.vy = 0
+  state.ball.x = 0
+  state.ball.y = 0
+  state.ball.vx = 0
+  state.ball.vy = 0
+
+  fireItem(state, me.id)
+  assert.ok(state.ball.vx > C.HAYMAKER_IMPULSE * 0.9, 'driven away from the car')
+  assert.ok(Math.abs(state.ball.vy) < 1e-6, 'and straight down the line')
+  assert.equal(state.ball.lastTouch, me.id, 'a punch counts for goal credit')
+})
+
+test('a haymaker out of range does nothing but spend the item', () => {
+  const state = rumbleGame()
+  const me = state.cars[0]
+  hand(me, 'haymaker')
+  me.x = -C.ITEM_RANGE - 12
+  me.y = 0
+  state.ball.x = 0
+  state.ball.y = 0
+  state.ball.vx = 0
+  state.ball.vy = 0
+
+  fireItem(state, me.id)
+  assert.ok(Math.abs(state.ball.vx) < 1e-6)
+  assert.equal(me.item, null)
+})
+
+test('a boot punts the nearest opponent, never a team-mate', () => {
+  const state = rumbleGame()
+  addCar(state, 3, C.TEAM_BLUE)
+  const me = state.cars.find((c) => c.id === 1)
+  const mate = state.cars.find((c) => c.id === 3)
+  const foe = state.cars.find((c) => c.id === 2)
+  hand(me, 'boot')
+
+  me.x = 0
+  me.y = 0
+  // The team-mate is closer than the opponent, and must still be ignored.
+  mate.x = 4
+  mate.y = 0
+  mate.vx = 0
+  mate.vy = 0
+  foe.x = 9
+  foe.y = 0
+  foe.vx = 0
+  foe.vy = 0
+  // Nothing must reach the ball and confuse the reading.
+  state.ball.x = 0
+  state.ball.y = C.MAX_Y - C.BALL_R
+
+  fireItem(state, me.id)
+  assert.ok(foe.vx > C.BOOT_IMPULSE * 0.5, 'the opponent is sent away')
+  assert.ok(Math.abs(mate.vx) < 1, 'the team-mate is left alone')
+})
+
+test('a frozen ball hangs, and a touch frees it', () => {
+  const state = rumbleGame()
+  const me = state.cars[0]
+  hand(me, 'freeze')
+  me.x = -20
+  me.y = 0
+  state.ball.x = 0
+  state.ball.y = 0
+  state.ball.vx = 30
+  state.ball.vy = 0
+
+  fireItem(state, me.id)
+  assert.equal(state.ball.vx, 0, 'stopped dead')
+
+  run(state, 60, () => 0)
+  assert.ok(Math.abs(state.ball.x) < 1e-6, 'and it stays where it was held')
+  assert.ok(state.ball.freeze > 0)
+
+  // A car reaching it breaks the hold rather than bouncing off a fixed ball.
+  const foe = state.cars[1]
+  foe.x = C.BALL_R + C.CAR_R - 0.2
+  foe.y = 0
+  foe.vx = -20
+  foe.vy = 0
+  step(state, {})
+  assert.equal(state.ball.freeze, 0, 'a touch frees it')
+  step(state, {})
+  assert.ok(state.ball.vx < 0, 'and the touch moves it')
+})
+
+test('a freeze wears off on its own', () => {
+  const state = rumbleGame()
+  const me = state.cars[0]
+  hand(me, 'freeze')
+  me.x = -20
+  me.y = -20
+  state.ball.x = 0
+  state.ball.y = 0
+
+  fireItem(state, me.id)
+  run(state, Math.ceil(C.FREEZE_SECONDS * C.TICK_HZ) + 5, () => 0)
+  assert.equal(state.ball.freeze, 0)
+})
+
+test('a grappling hook pulls the car toward the ball', () => {
+  const state = rumbleGame()
+  const me = state.cars[0]
+  hand(me, 'hook')
+  me.x = -30
+  me.y = 0
+  me.heading = Math.PI // pointed away, so only the hook can close the gap
+  me.vx = 0
+  me.vy = 0
+  state.ball.x = 0
+  state.ball.y = 0
+  state.ball.vx = 0
+  state.ball.vy = 0
+
+  const before = Math.abs(state.ball.x - me.x)
+  fireItem(state, me.id)
+  run(state, Math.ceil(C.HOOK_SECONDS * C.TICK_HZ), () => 0)
+  assert.ok(Math.abs(state.ball.x - me.x) < before - 5, 'reeled in')
+})
+
+test('a magnetizer drags the ball toward the car, but only in range', () => {
+  const state = rumbleGame()
+  const me = state.cars[0]
+  hand(me, 'magnet')
+  me.x = 0
+  me.y = 0
+  state.ball.x = C.MAGNET_RANGE + 6
+  state.ball.y = 0
+  state.ball.vx = 0
+  state.ball.vy = 0
+
+  fireItem(state, me.id)
+  run(state, 30, () => 0)
+  assert.ok(Math.abs(state.ball.vx) < 1e-6, 'out of reach, so nothing moves')
+
+  state.ball.x = 10
+  run(state, 30, () => 0)
+  assert.ok(state.ball.vx < -1, 'in reach, so it comes to you')
+})
+
+test('kickoff clears whatever anyone was holding', () => {
+  const state = rumbleGame()
+  const me = state.cars[0]
+  hand(me, 'magnet')
+  me.magnet = C.MAGNET_SECONDS
+
+  // Score, which resets positions on the way back to kickoff.
+  state.ball.x = C.MAX_X - C.BALL_R - 0.1
+  state.ball.y = 0
+  state.ball.vx = 40
+  run(state, Math.ceil((C.GOAL_SECONDS + 0.5) * C.TICK_HZ), () => 0)
+
+  assert.equal(me.item, null)
+  assert.equal(me.magnet, 0)
+  assert.equal(state.ball.freeze, 0)
+})
+
+test('the item bit survives the protocol', () => {
+  const msg = parse({ t: 'input', cid: 'x', seq: 1, bits: C.IN_ITEM })
+  assert.equal(msg.bits, C.IN_ITEM)
+  assert.equal(parse({ t: 'input', cid: 'x', seq: 1, bits: C.IN_ALL + 1 }), null)
 })

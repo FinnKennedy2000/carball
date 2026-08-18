@@ -35,6 +35,10 @@ const STORED_TEAM = 'carball.team'
 // Set by the lobby, and in localStorage rather than sessionStorage: a car is a
 // standing preference, so an invite link opened cold still uses it.
 const STORED_CAR = 'carball.car'
+// Only read when opening a room. A joiner's copy is whatever they last picked
+// here and means nothing: the host's mode is the room's, and it comes down in
+// the snapshot.
+const STORED_MODE = 'carball.mode'
 
 let localId = null
 let myTeam = null
@@ -144,7 +148,7 @@ async function join(name) {
   // it to resolve would leave the first frames thinking they are not the host.
   setHost(opening)
   try {
-    if (opening) await createRoom(name, team, car)
+    if (opening) await createRoom(name, team, car, sessionStorage.getItem(STORED_MODE))
     else await joinRoom(name, code, team, car)
   } catch (err) {
     gatePrompt('Try again', err.message)
