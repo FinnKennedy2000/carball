@@ -18,7 +18,7 @@ export const MIN_Y = -ARENA_H / 2
 export const MAX_Y = ARENA_H / 2
 
 export const GOAL_H = 16 // height of the goal mouth
-export const GOAL_DEPTH = 5 // visual only; the goal line is the arena wall
+export const GOAL_DEPTH = 9 // cars can drive in this far behind the goal line
 
 export const CAR_R = 1.9
 export const CAR_MASS = 3

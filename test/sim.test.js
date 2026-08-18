@@ -110,6 +110,44 @@ test('a ball resting on the goal line is not yet a goal', () => {
   assert.deepEqual(state.score, [0, 1])
 })
 
+test('a car can drive into the goal, but not out the back of it', () => {
+  const state = twoCarGame()
+  state.phase = 'PLAY'
+  state.phaseTimer = 0
+  state.ball.x = 30 // clear of the cars and outside the goal mouth
+  state.ball.y = 20
+
+  // Straight at the blue goal, dead centre, boost held.
+  const car = state.cars[0]
+  car.x = C.MIN_X + 10
+  car.y = 0
+  car.heading = Math.PI
+  for (let t = 0; t < 180; t++) {
+    step(state, { 1: C.IN_FWD | C.IN_BOOST })
+    assert.ok(car.x >= C.MIN_X - C.GOAL_DEPTH + C.CAR_R - 1e-9, `left the net at ${car.x}`)
+  }
+  assert.ok(car.x < C.MIN_X, `should be behind the line, was ${car.x}`)
+
+  // And once inside, the mouth is the wall: no driving out through the side.
+  car.heading = Math.PI / 2
+  for (let t = 0; t < 120; t++) {
+    step(state, { 1: C.IN_FWD | C.IN_BOOST })
+    if (car.x < C.MIN_X) {
+      assert.ok(Math.abs(car.y) <= C.GOAL_H / 2 - C.CAR_R + 1e-9, `out the side at ${car.y}`)
+    }
+  }
+
+  // A car on the posts is stopped at the line, with the pitch still its limit.
+  const post = state.cars[1]
+  post.x = C.MIN_X + 4
+  post.y = C.GOAL_H / 2 // straddling a post
+  post.vx = 0
+  post.vy = 0
+  post.heading = Math.PI
+  for (let t = 0; t < 120; t++) step(state, { 2: C.IN_FWD | C.IN_BOOST })
+  assert.ok(post.x >= C.MIN_X + C.CAR_R - 1e-9, `squeezed past a post to ${post.x}`)
+})
+
 test('repeated collisions do not inject energy', () => {
   const state = twoCarGame()
   state.phase = 'PLAY'

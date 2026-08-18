@@ -253,10 +253,21 @@ function collide(a, b, ra, rb, ma, mb, ramBonus = 0) {
   return true
 }
 
-/** Cars are confined to the full rectangle — they cannot drive into the goals. */
+/** Cars are confined to the pitch, plus the two goals they can drive into. */
 function confineCar(car) {
-  reflectAxis(car, 'x', 'vx', C.MIN_X + C.CAR_R, C.MAX_X - C.CAR_R)
-  reflectAxis(car, 'y', 'vy', C.MIN_Y + C.CAR_R, C.MAX_Y - C.CAR_R)
+  // Clearing the posts is what earns the extra depth: a car overlapping one is
+  // stopped at the goal line like the end wall it is part of.
+  const inMouth = Math.abs(car.y) <= C.GOAL_H / 2 - C.CAR_R
+  const lo = C.MIN_X + C.CAR_R - (inMouth ? C.GOAL_DEPTH : 0)
+  const hi = C.MAX_X - C.CAR_R + (inMouth ? C.GOAL_DEPTH : 0)
+  reflectAxis(car, 'x', 'vx', lo, hi)
+
+  // Past the line the mouth is the wall, or the car drives out through the side
+  // of the net. Checked after the x clamp, so a car held on the line is on the
+  // pitch's walls and only one actually in the goal gets the narrow ones.
+  const inNet = car.x < C.MIN_X || car.x > C.MAX_X
+  const yLimit = inNet ? C.GOAL_H / 2 - C.CAR_R : C.MAX_Y - C.CAR_R
+  reflectAxis(car, 'y', 'vy', -yLimit, yLimit)
 }
 
 /**
