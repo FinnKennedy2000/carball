@@ -722,13 +722,14 @@ test('a freeze wears off on its own', () => {
   assert.equal(state.ball.freeze, 0)
 })
 
-test('a grappling hook pulls the car toward the ball', () => {
+test('a grappling hook winches the car into the ball at full speed', () => {
   const state = rumbleGame()
   const me = state.cars[0]
+  state.cars[1].y = C.MAX_Y - C.CAR_R // out of the way
   hand(me, 'hook')
   me.x = -30
   me.y = 0
-  me.heading = Math.PI // pointed away, so only the hook can close the gap
+  me.heading = Math.PI // pointed away: the winch must not care
   me.vx = 0
   me.vy = 0
   state.ball.x = 0
@@ -736,10 +737,26 @@ test('a grappling hook pulls the car toward the ball', () => {
   state.ball.vx = 0
   state.ball.vy = 0
 
-  const before = Math.abs(state.ball.x - me.x)
+  const gap = Math.abs(state.ball.x - me.x)
   fireItem(state, me.id)
-  run(state, Math.ceil(C.HOOK_SECONDS * C.TICK_HZ), () => 0)
-  assert.ok(Math.abs(state.ball.x - me.x) < before - 5, 'reeled in')
+  run(state, 10, () => 0)
+  // Full boost pace from a standing start, facing the wrong way: an
+  // accelerating pull could not do this, grip would eat most of it.
+  assert.ok(Math.hypot(me.vx, me.vy) > C.HOOK_SPEED * 0.9, 'winched at full speed')
+
+  // It arrives, and lets go on arrival. Measured by when the hook clears rather
+  // than by the gap at the end: reaching the ball at boost pace launches it, so
+  // the distance between the two opens up again straight afterwards.
+  let ticks = 10
+  while (me.hook > 0 && ticks < C.HOOK_SECONDS * C.TICK_HZ * 2) {
+    run(state, 1, () => 0)
+    ticks++
+  }
+  assert.equal(me.hook, 0, 'it lets go once it gets there')
+  assert.equal(state.ball.lastTouch, me.id, 'because it got there')
+  // Thirty metres at boost pace is well under a second.
+  assert.ok(ticks < C.TICK_HZ, `arrived in ${ticks} ticks`)
+  assert.ok(gap > 25, 'from across the pitch')
 })
 
 test('a magnetizer drags the ball toward the car, but only in range', () => {

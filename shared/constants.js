@@ -102,10 +102,12 @@ export const HAYMAKER_IMPULSE = 45
 export const BOOT_IMPULSE = 34
 // How long the ball hangs. A touch ends it early — see stepRumble.
 export const FREEZE_SECONDS = 4
+// A maximum, not a duration: the hook lets go the moment you reach the ball.
 export const HOOK_SECONDS = 2.5
-// Above CAR_BOOST_ACCEL: the hook is a winch, not a nudge, and it fights the
-// car's own drag and grip on the way in.
-export const HOOK_ACCEL = 70
+// The hook does not accelerate you, it puts you on a line straight at the ball
+// at this speed until you get there. Boost pace, so being winched is faster
+// than anything you could drive.
+export const HOOK_SPEED = CAR_BOOST_MAX_SPEED
 export const MAGNET_SECONDS = 3.5
 export const MAGNET_ACCEL = 26
 // The magnet reaches further than a punch — it is a pull, and needs to be worth

@@ -5,7 +5,7 @@
 // depend on a JS engine's transcendental function accuracy.
 
 import * as C from './constants.js'
-import { initCarItems, stepRumble, carrySpikedBall } from './rumble.js'
+import { initCarItems, stepRumble, afterBodies } from './rumble.js'
 
 /**
  * `mode` is 'normal' or 'rumble', and `seed` is the item PRNG's starting value —
@@ -140,9 +140,9 @@ export function step(state, inputs) {
 
   for (const car of state.cars) stepCar(car, inputs[car.id] | 0, dt)
   stepBall(state.ball, dt)
-  // After the bodies have moved: a carried ball rides its carrier, wherever the
-  // tick has just put it.
-  if (state.mode === 'rumble') carrySpikedBall(state)
+  // After the bodies have moved: a winched car and a carried ball, both of
+  // which set their own velocity and must not then be damped.
+  if (state.mode === 'rumble') afterBodies(state)
 
   for (let i = 0; i < state.cars.length; i++) {
     for (let j = i + 1; j < state.cars.length; j++) {
@@ -157,6 +157,9 @@ export function step(state, inputs) {
       state.ball.freeze = 0
       // An armed Spike welds the ball on contact; anyone else reaching a carried
       // ball knocks it loose, which is how a carry is defended against.
+      // Reaching the ball is what the hook was for, so it lets go there rather
+      // than dragging you through it for the rest of its clock.
+      if (car.hook > 0) car.hook = 0
       if (car.spike > 0) state.ball.stuckTo = car.id
       else if (state.ball.stuckTo !== null && state.ball.stuckTo !== car.id) {
         state.ball.stuckTo = null
@@ -250,7 +253,11 @@ function stepCar(car, bits, dt) {
   car.vx = fx * newFwd - fy * newLat
   car.vy = fy * newFwd + fx * newLat
 
-  clampSpeed(car, boosting ? C.CAR_BOOST_MAX_SPEED : C.CAR_MAX_SPEED)
+  // A winched car is allowed boost pace: afterBodies puts it on HOOK_SPEED, and
+  // the engine ceiling would otherwise cut that straight back to CAR_MAX_SPEED
+  // before it moved an inch.
+  const winched = car.hook > 0
+  clampSpeed(car, boosting || winched ? C.CAR_BOOST_MAX_SPEED : C.CAR_MAX_SPEED)
 
   car.x += car.vx * dt
   car.y += car.vy * dt

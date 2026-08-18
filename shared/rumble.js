@@ -89,14 +89,29 @@ export function stepRumble(state, inputs, dt) {
 }
 
 /**
- * Carry a spiked ball. Run after the bodies have moved, so the ball is put where
- * its carrier has actually ended up rather than a tick behind it.
- *
- * The ball is parked exactly one radius clear of the car's nose rather than on
- * top of it: at that distance the two are touching without overlapping, so the
+ * The parts of the mode that have to run after the bodies have moved, because
+ * they set velocity or position outright and stepCar's drag and grip would eat
+ * either of them if this ran first.
+ */
+export function afterBodies(state) {
+  for (const car of state.cars) {
+    if (!(car.hook > 0)) continue
+    const d = toward(car, state.ball)
+    // A winch, not a nudge. An accelerating hook was feeble whenever the car
+    // was not already pointed at the ball, because grip damps sideways motion
+    // at GRIP per second — most of the pull was spent fighting the tyres.
+    car.vx = d.nx * C.HOOK_SPEED
+    car.vy = d.ny * C.HOOK_SPEED
+  }
+  carrySpikedBall(state)
+}
+
+/**
+ * Carry a spiked ball, one radius clear of the car's nose rather than on top of
+ * it: at that distance the two are touching without overlapping, so the
  * ordinary car/ball collision has nothing to resolve and does not fight this.
  */
-export function carrySpikedBall(state) {
+function carrySpikedBall(state) {
   if (state.ball.stuckTo === null || state.ball.stuckTo === undefined) return
 
   const carrier = state.cars.find((c) => c.id === state.ball.stuckTo)
@@ -217,13 +232,9 @@ function fire(state, car, item) {
 
 /** The timed items, for as long as their clocks run. */
 function hold(state, car, dt) {
-  if (car.hook > 0) {
-    car.hook = Math.max(0, car.hook - dt)
-    const d = toward(car, state.ball)
-    // No range limit: the hook's whole point is closing a gap you could not.
-    car.vx += d.nx * C.HOOK_ACCEL * dt
-    car.vy += d.ny * C.HOOK_ACCEL * dt
-  }
+  // Only the clock here; the pull itself is in afterBodies. No range limit:
+  // the hook's whole point is closing a gap you could not.
+  if (car.hook > 0) car.hook = Math.max(0, car.hook - dt)
 
   if (car.spike > 0) {
     car.spike = Math.max(0, car.spike - dt)
