@@ -18,6 +18,7 @@ export default defineConfig({
       input: {
         index: fileURLToPath(new URL('client/index.html', import.meta.url)),
         game: fileURLToPath(new URL('client/game.html', import.meta.url)),
+        garage: fileURLToPath(new URL('client/garage.html', import.meta.url)),
       },
     },
   },

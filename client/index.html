@@ -39,9 +39,16 @@
             </div>
 
             <div class="kicker">Car</div>
-            <!-- Filled from shared/cars.js, so the list cannot drift from the
-                 models the renderer actually knows how to build. -->
-            <div id="cars"></div>
+            <!-- The silhouette and its numbers come from shared/cars.js, so this
+                 cannot drift from the model the renderer builds. -->
+            <button id="garage-link" class="car-pick">
+              <span id="car-thumb" class="thumb"></span>
+              <span class="chassis-label">
+                <span id="car-name" class="chassis-name"></span>
+                <span id="car-dims" class="chassis-dims tabular"></span>
+              </span>
+              <span class="chassis-mark">Garage</span>
+            </button>
 
             <div class="row">
               <button id="create" class="btn btn-primary">Create room</button>

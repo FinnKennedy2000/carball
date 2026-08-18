@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Garage · Car Football</title>
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="stylesheet" href="./nocturne.css" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div id="garage">
+      <section id="garage-stage">
+        <div class="stack">
+          <div class="kicker accent">Garage</div>
+          <h2>Pick a silhouette</h2>
+          <div class="accent-rule"></div>
+        </div>
+
+        <div class="stack wide-gap">
+          <div id="garage-preview"></div>
+          <div id="garage-facts">
+            <div class="stack">
+              <span id="garage-name"></span>
+              <span id="garage-dims" class="tabular"></span>
+            </div>
+            <div id="garage-paint"><i></i><span></span></div>
+          </div>
+        </div>
+
+        <p class="hint">
+          Cosmetic only: every car has the same hitbox. Your side picks the paint, so a silhouette is
+          the part that is yours.
+        </p>
+      </section>
+
+      <aside id="garage-list">
+        <div class="list-head">
+          <span class="kicker">Chassis</span>
+          <span id="garage-count" class="tabular"></span>
+        </div>
+
+        <!-- Filled from shared/cars.js, so the list cannot drift from the models
+             the renderer actually knows how to build. -->
+        <div id="chassis"></div>
+
+        <div id="garage-actions">
+          <p class="hint">Kept for next time on this device.</p>
+          <button id="garage-use" class="btn btn-primary btn-block">Use this car</button>
+          <button id="garage-back" class="btn btn-ghost btn-block">Back to home</button>
+        </div>
+      </aside>
+    </div>
+
+    <script type="module" src="./garage.js"></script>
+  </body>
+</html>

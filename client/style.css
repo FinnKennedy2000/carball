@@ -427,6 +427,246 @@ body {
   color: var(--color-neutral-600);
 }
 
+/* The lobby's way into the garage: the car you are in, as a row. */
+
+/* Portraits from silhouette.js. Sized by whatever holds them. */
+.car-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.car-pick {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  padding: var(--space-2) var(--space-4);
+  text-align: left;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  box-shadow: 0 0 0 1px var(--color-neutral-900);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.car-pick:hover {
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.car-pick:hover .chassis-mark {
+  color: var(--color-accent-300);
+}
+
+/* Garage ------------------------------------------------------------------ */
+/* The redesign's garage artboard: the chosen car on a lit stage, the list of
+   chassis in a panel down the right. */
+
+/* The page fits the viewport rather than running off it: the app sets
+   overflow: hidden on the body, so anything past the fold is simply lost. The
+   chassis list is what gives, since the actions under it are the point. */
+#garage {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
+  background: var(--color-bg);
+}
+
+#garage-stage {
+  position: relative;
+  padding: var(--space-8) var(--space-8) var(--space-8) 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+/* The light the car stands in. */
+#garage-stage::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.55;
+  background: radial-gradient(70% 60% at 30% 62%, var(--color-accent-900) 0%, transparent 64%);
+  pointer-events: none;
+}
+
+#garage-stage > * {
+  position: relative;
+}
+
+#garage-stage h2 {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 38px;
+  letter-spacing: -0.02em;
+}
+
+#garage-preview {
+  width: 100%;
+  max-width: 430px;
+}
+
+/* Tall enough to be the subject, never tall enough to push the page over. */
+#garage-preview .car-svg {
+  max-height: 42vh;
+  width: auto;
+  max-width: 100%;
+}
+
+#garage-facts {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-6);
+  max-width: 430px;
+}
+
+#garage-name {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+
+#garage-dims {
+  font-size: 12px;
+  color: var(--color-neutral-500);
+}
+
+#garage-paint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-neutral-400);
+}
+
+#garage-paint i {
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+}
+
+#garage-stage .hint {
+  max-width: 430px;
+  line-height: 1.55;
+}
+
+#garage-list {
+  padding: var(--space-8) 44px var(--space-8) var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+  background: var(--color-surface);
+  box-shadow: inset 1px 0 0 var(--color-neutral-900);
+}
+
+#garage-list .list-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+#garage-count {
+  font-size: 11px;
+  color: var(--color-neutral-700);
+}
+
+#chassis {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.chassis-row {
+  display: grid;
+  grid-template-columns: 96px 1fr auto;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  box-shadow: 0 0 0 1px var(--color-neutral-900);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.chassis-row:hover {
+  box-shadow: 0 0 0 1px var(--color-neutral-800);
+}
+
+.chassis-row.on {
+  background: color-mix(in oklab, var(--color-accent) 12%, transparent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.chassis-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.chassis-name {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 16px;
+  letter-spacing: -0.01em;
+}
+
+.chassis-dims {
+  font-size: 11px;
+  color: var(--color-neutral-500);
+}
+
+.chassis-mark {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-neutral-700);
+}
+
+.chassis-row.on .chassis-mark {
+  color: var(--color-accent-300);
+}
+
+#garage-actions {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* One column when there is no room for two — the list first, since that is what
+   the page is for. */
+@media (max-width: 860px) {
+  #garage {
+    grid-template-columns: 1fr;
+    height: auto;
+    /* One column is taller than the viewport, so this page scrolls where the
+       rest of the app does not. */
+    overflow-y: auto;
+  }
+
+  #garage-list {
+    box-shadow: inset 0 1px 0 var(--color-neutral-900);
+  }
+}
+
 /* Match over -------------------------------------------------------------- */
 
 #over {
@@ -651,25 +891,17 @@ body {
   box-shadow: inset 1px 0 0 var(--color-neutral-900);
 }
 
-#teams,
-#cars {
+#teams {
   display: flex;
   gap: var(--space-2);
 }
 
-/* Five models do not fit a row at the lobby's width. */
-#cars {
-  flex-wrap: wrap;
-}
-
-#teams .team,
-#cars .car {
+#teams .team {
   flex: 1;
   color: var(--color-neutral-500);
 }
 
-#teams .team.on,
-#cars .car.on {
+#teams .team.on {
   border-color: var(--color-accent);
   color: var(--color-accent-300);
 }

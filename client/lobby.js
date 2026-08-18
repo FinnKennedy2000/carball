@@ -4,6 +4,7 @@
 
 import { cleanCode, cleanCar } from '../shared/protocol.js'
 import { CARS } from '../shared/cars.js'
+import { carSvg, dimensions } from './silhouette.js'
 import * as auth from './auth.js'
 
 const el = (id) => document.getElementById(id)
@@ -30,25 +31,25 @@ for (const btn of document.querySelectorAll('#teams .team')) {
     for (const other of document.querySelectorAll('#teams .team')) other.classList.remove('on')
     btn.classList.add('on')
     wantedTeam = btn.dataset.team === '' ? null : Number(btn.dataset.team)
+    paintCar() // the car below wears the side you just picked
   })
 }
 
-// Car buttons, built from the model list itself.
-let wantedCar = cleanCar(Number.parseInt(localStorage.getItem(STORED_CAR), 10))
-el('cars').replaceChildren(
-  ...CARS.map((spec, i) => {
-    const btn = document.createElement('button')
-    btn.className = `btn btn-secondary car${i === wantedCar ? ' on' : ''}`
-    btn.textContent = spec.name
-    btn.addEventListener('click', () => {
-      for (const other of el('cars').children) other.classList.remove('on')
-      btn.classList.add('on')
-      wantedCar = i
-      localStorage.setItem(STORED_CAR, String(i))
-    })
-    return btn
-  }),
-)
+// The car you are in, and the way through to the garage that changes it. Five
+// models did not fit a row here, and picking one is worth a page of its own.
+const wantedCar = cleanCar(Number.parseInt(localStorage.getItem(STORED_CAR), 10))
+el('car-name').textContent = CARS[wantedCar].name
+el('car-dims').textContent = dimensions(CARS[wantedCar])
+
+function paintCar() {
+  el('car-thumb').innerHTML = carSvg(CARS[wantedCar], wantedTeam ?? 0)
+}
+paintCar()
+el('garage-link').addEventListener('click', () => {
+  // The side goes with us: the garage paints the preview in it.
+  sessionStorage.setItem(STORED_TEAM, String(wantedTeam))
+  location.href = './garage.html'
+})
 
 /** Hand the choice to the game page. A room is only ever opened there. */
 function play(hash) {
