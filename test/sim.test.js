@@ -72,6 +72,39 @@ test('the ball cannot escape through a wall', () => {
   }
 })
 
+test('a shot off the post comes back out', () => {
+  // Fire the ball at the goal from open play, aimed at a given y on the line.
+  const shootAt = (y) => {
+    const state = twoCarGame()
+    state.phase = 'PLAY'
+    state.phaseTimer = 0
+    // Cars out of the way, so only the ball and the woodwork are in play.
+    for (const car of state.cars) {
+      car.x = 0
+      car.y = 20
+      car.vx = 0
+      car.vy = 0
+    }
+    state.ball.x = C.MIN_X + 14
+    state.ball.y = y
+    state.ball.vx = -30
+    state.ball.vy = 0
+    run(state, 60, () => 0)
+    return state
+  }
+
+  const post = shootAt(C.GOAL_H / 2)
+  assert.deepEqual(post.score, [0, 0], 'off the woodwork is not a goal')
+  assert.ok(post.ball.x > C.MIN_X, `came back out, not in (x ${post.ball.x})`)
+  // Separated cleanly rather than left sitting inside the post.
+  const gap = Math.hypot(post.ball.x - C.MIN_X, post.ball.y - C.GOAL_H / 2)
+  assert.ok(gap >= C.BALL_R + C.POST_R - 1e-6, `clear of the post (${gap})`)
+  assert.ok(Math.hypot(post.ball.vx, post.ball.vy) > 5, 'and it rebounds, not stops')
+
+  // The mouth is still a mouth: a shot with room to spare goes in.
+  assert.deepEqual(shootAt(3).score, [0, 1], 'inside the post still scores')
+})
+
 test('a ball sitting in the net scores exactly once', () => {
   const state = twoCarGame()
   state.phase = 'PLAY'

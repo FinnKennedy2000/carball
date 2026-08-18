@@ -18,6 +18,10 @@ export const MIN_Y = -ARENA_H / 2
 export const MAX_Y = ARENA_H / 2
 
 export const GOAL_H = 16 // height of the goal mouth
+// The posts stand at the mouth's corners and are round, so a ball that clips one
+// deflects off it — a shot can come back out instead of counting because its
+// centre happened to be a hair inside the line.
+export const POST_R = 0.4
 export const GOAL_DEPTH = 9 // cars can drive in this far behind the goal line
 
 export const CAR_R = 1.9

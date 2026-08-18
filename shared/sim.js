@@ -123,6 +123,13 @@ export function step(state, inputs) {
   // but a pile-up cannot accumulate speed without bound.
   for (const car of state.cars) clampSpeed(car, C.CAR_BOOST_MAX_SPEED * 1.5)
 
+  // Posts before the goal line: a ball that catches one is deflected first, and
+  // may well end up outside the mouth and rebound off the end wall instead.
+  for (const py of [-C.GOAL_H / 2, C.GOAL_H / 2]) {
+    collidePost(state.ball, C.MIN_X, py)
+    collidePost(state.ball, C.MAX_X, py)
+  }
+
   const scorer = confineBall(state.ball)
   if (scorer !== null) {
     state.score[scorer]++
@@ -250,6 +257,33 @@ function collide(a, b, ra, rb, ma, mb, ramBonus = 0) {
   a.vy -= j * invA * ny
   b.vx += j * invB * nx
   b.vy += j * invB * ny
+  return true
+}
+
+/**
+ * A post is a static circle: nothing moves it, so this separates the ball and
+ * reflects the normal component rather than exchanging an impulse.
+ */
+function collidePost(ball, px, py) {
+  const dx = ball.x - px
+  const dy = ball.y - py
+  const r = C.BALL_R + C.POST_R
+  const d2 = dx * dx + dy * dy
+  // Dead centre on the post has no normal, and cannot be reached from open play.
+  if (d2 >= r * r || d2 < 1e-12) return false
+
+  const d = Math.sqrt(d2)
+  const nx = dx / d
+  const ny = dy / d
+  ball.x = px + nx * r
+  ball.y = py + ny * r
+
+  const vn = ball.vx * nx + ball.vy * ny
+  if (vn < 0) {
+    // Coming in, not already leaving: take the rebound off the woodwork.
+    ball.vx -= (1 + C.RESTITUTION_BODY) * vn * nx
+    ball.vy -= (1 + C.RESTITUTION_BODY) * vn * ny
+  }
   return true
 }
 
