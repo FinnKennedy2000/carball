@@ -72,6 +72,51 @@ test('the ball cannot escape through a wall', () => {
   }
 })
 
+test('a ball pinched against a wall is fired along it', () => {
+  // Coast a car into a ball resting on the top wall. No throttle: the speed
+  // under test is the speed that actually lands.
+  const pinch = ({ vy = 0, vx = 0, offset = -0.6 }) => {
+    const state = twoCarGame()
+    state.phase = 'PLAY'
+    state.phaseTimer = 0
+    const [car, spare] = state.cars
+    spare.x = 0
+    spare.y = -20
+    spare.vx = 0
+    spare.vy = 0
+
+    state.ball.x = 0
+    state.ball.y = C.MAX_Y - C.BALL_R
+    state.ball.vx = 0
+    state.ball.vy = 0
+
+    car.x = offset
+    car.y = C.MAX_Y - C.BALL_R - C.CAR_R - 1
+    car.heading = Math.atan2(vy, vx)
+    car.vx = vx
+    car.vy = vy
+
+    let peak = 0
+    for (let t = 0; t < 90; t++) {
+      step(state, {})
+      peak = Math.max(peak, Math.hypot(state.ball.vx, state.ball.vy))
+    }
+    return { peak, ball: state.ball }
+  }
+
+  const hard = pinch({ vy: C.CAR_MAX_SPEED })
+  assert.ok(hard.peak > C.CAR_MAX_SPEED * 3, `squeezing it out fast (${hard.peak})`)
+  assert.ok(hard.peak <= C.BALL_MAX_SPEED + 1e-6, 'and still capped')
+
+  // Proportional: a crawl is a nudge, not a rocket.
+  const soft = pinch({ vy: 4 })
+  assert.ok(soft.peak < hard.peak / 2, `${soft.peak} from a crawl vs ${hard.peak}`)
+
+  // Brushing along the wall is not a pinch — nothing is being squeezed.
+  const brush = pinch({ vx: C.CAR_MAX_SPEED, offset: -3.2 })
+  assert.ok(brush.peak < C.CAR_MAX_SPEED * 1.5, `an ordinary touch (${brush.peak})`)
+})
+
 test('a shot off the post comes back out', () => {
   // Fire the ball at the goal from open play, aimed at a given y on the line.
   const shootAt = (y) => {

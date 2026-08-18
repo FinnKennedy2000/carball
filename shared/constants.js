@@ -50,6 +50,13 @@ export const BALL_MASS = 1
 export const BALL_DRAG = 0.35
 export const BALL_MAX_SPEED = 70
 
+// A pinch: the ball trapped between a car and a wall cannot give way through the
+// wall, so the squeeze leaves along it instead. This much of the car's speed
+// into the wall is added to the ball's speed along it — the energy comes from
+// nowhere, and BALL_MAX_SPEED is what bounds it.
+export const PINCH_GAIN = 2
+export const PINCH_SKIN = 0.3 // how close to a wall counts as trapped against it
+
 export const RESTITUTION_WALL = 0.75
 export const RESTITUTION_BODY = 0.9
 // Car on car is arcade rather than elastic: the faster you drive into someone,

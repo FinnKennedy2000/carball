@@ -111,6 +111,7 @@ export function step(state, inputs) {
   for (const car of state.cars) {
     if (collide(car, state.ball, C.CAR_R, C.BALL_R, C.CAR_MASS, C.BALL_MASS)) {
       state.ball.lastTouch = car.id
+      pinch(state.ball, car)
     }
   }
 
@@ -258,6 +259,56 @@ function collide(a, b, ra, rb, ma, mb, ramBonus = 0) {
   b.vx += j * invB * nx
   b.vy += j * invB * ny
   return true
+}
+
+/**
+ * The wall the ball is pressed against, as the normal pointing back into the
+ * pitch, or null. An end wall only counts outside the goal mouth, where there is
+ * one to be pinned against.
+ */
+function pinnedTo(ball) {
+  if (ball.y <= C.MIN_Y + C.BALL_R + C.PINCH_SKIN) return [0, 1]
+  if (ball.y >= C.MAX_Y - C.BALL_R - C.PINCH_SKIN) return [0, -1]
+  if (Math.abs(ball.y) > C.GOAL_H / 2) {
+    if (ball.x <= C.MIN_X + C.BALL_R + C.PINCH_SKIN) return [1, 0]
+    if (ball.x >= C.MAX_X - C.BALL_R - C.PINCH_SKIN) return [-1, 0]
+  }
+  return null
+}
+
+/**
+ * Squeeze the ball out along a wall it is trapped against. Left to the ordinary
+ * collision the wall simply returns RESTITUTION_WALL of whatever the car put in,
+ * which is a tap: the ball is free to move back through the car, so nothing
+ * converts the squeeze into speed. A real pinch works because the ball cannot
+ * give way, and the only way out is along the wall.
+ *
+ * So the component driving the ball into the wall is dropped rather than bounced,
+ * and the car's speed into the wall is paid out along it instead. Called only on
+ * a tick where the car and ball actually touched.
+ */
+function pinch(ball, car) {
+  const wall = pinnedTo(ball)
+  if (wall === null) return
+  const [nx, ny] = wall
+
+  // How hard the car is driving into that wall. Away from it is not a pinch.
+  const press = -(car.vx * nx + car.vy * ny)
+  if (press <= 0) return
+
+  // Along the wall, in the direction the contact already points the ball.
+  const tx = -ny
+  const ty = nx
+  let side = (ball.x - car.x) * tx + (ball.y - car.y) * ty
+  if (Math.abs(side) < 1e-6) side = ball.vx * tx + ball.vy * ty
+  const dir = side >= 0 ? 1 : -1
+
+  const away = ball.vx * nx + ball.vy * ny
+  const along = ball.vx * tx + ball.vy * ty + dir * press * C.PINCH_GAIN
+  // Motion off the wall survives; motion into it does not, since it cannot.
+  const kept = Math.max(0, away)
+  ball.vx = nx * kept + tx * along
+  ball.vy = ny * kept + ty * along
 }
 
 /**
