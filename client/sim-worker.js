@@ -27,6 +27,9 @@ onmessage = ({ data }) => {
     case 'peer':
       host?.onPeerMessage(data.payload)
       break
+    case 'begin':
+      host?.begin()
+      break
     case 'localBits':
       host?.setLocalBits(data.bits)
       break

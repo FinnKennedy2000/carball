@@ -9,8 +9,9 @@ import * as C from './constants.js'
 export function createState() {
   const state = {
     tick: 0,
-    phase: 'KICKOFF',
-    phaseTimer: C.KICKOFF_SECONDS,
+    // Nothing moves until the host starts the match, so a room can fill up first.
+    phase: 'WAITING',
+    phaseTimer: 0,
     clock: C.MATCH_SECONDS,
     overtime: false, // sudden death: the clock ran out level
     lastScorer: null, // car id credited with the most recent goal, or null
@@ -36,6 +37,13 @@ export function addCar(state, id, team) {
 export function removeCar(state, id) {
   const i = state.cars.findIndex((c) => c.id === id)
   if (i !== -1) state.cars.splice(i, 1)
+}
+
+/** Leave WAITING and run the kickoff countdown. The host's call to make. */
+export function kickoff(state) {
+  if (state.phase !== 'WAITING') return
+  state.phase = 'KICKOFF'
+  state.phaseTimer = C.KICKOFF_SECONDS
 }
 
 export function resetPositions(state) {
@@ -65,6 +73,8 @@ function placeCar(car, slot) {
 export function step(state, inputs) {
   const dt = C.DT
   state.tick++
+
+  if (state.phase === 'WAITING') return state
 
   if (state.phase === 'OVER') {
     // Nothing moves, but the timer runs so the room knows when to reset.

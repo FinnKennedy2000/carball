@@ -249,6 +249,10 @@ body {
   color: var(--color-accent-300);
 }
 
+#start {
+  pointer-events: auto;
+}
+
 #footer {
   position: absolute;
   bottom: var(--space-8);

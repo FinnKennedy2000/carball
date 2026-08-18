@@ -13,6 +13,12 @@ export function showGame(code) {
   el('over-code').textContent = code
 }
 
+let iAmHost = false
+
+export function setHost(isHost) {
+  iAmHost = isHost
+}
+
 export function showRoster(players) {
   roster = players
   el('roster').replaceChildren(
@@ -84,6 +90,7 @@ export function updateHud(state, localId) {
 
   el('banner').textContent = bannerText(state)
   el('banner-sub').textContent = bannerSub(state)
+  el('start').hidden = !(iAmHost && state.phase === 'WAITING')
 
   // The panel belongs to the OVER phase, but the announcement arrives ahead of
   // the snapshot that carries the phase (the view runs INTERP_DELAY_MS behind).
@@ -102,6 +109,8 @@ function nameOf(id) {
 
 function bannerText(state) {
   if (performance.now() < bannerUntil) return bannerOverride
+  // The host gets a button instead; a peer gets told who they are waiting for.
+  if (state.phase === 'WAITING') return iAmHost ? '' : 'WAITING'
   if (state.phase === 'GOAL') return 'GOAL'
   if (state.phase === 'KICKOFF') return String(Math.max(1, Math.ceil(state.phaseTimer)))
   return ''
@@ -110,6 +119,7 @@ function bannerText(state) {
 /** Under a goal, who earned it — blank for an own goal, which is nobody's. */
 function bannerSub(state) {
   if (performance.now() < bannerUntil) return ''
+  if (state.phase === 'WAITING') return iAmHost ? '' : 'the host starts the match'
   if (state.phase !== 'GOAL') return ''
   return nameOf(state.lastScorer) ?? ''
 }

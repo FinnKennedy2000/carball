@@ -1,5 +1,5 @@
 import { initRenderer, setLocalId, draw } from './render.js'
-import { createRoom, joinRoom, sampleState, handlers, enabled as netEnabled } from './net.js'
+import { createRoom, joinRoom, beginMatch, sampleState, handlers, enabled as netEnabled } from './net.js'
 import { reportMyMatch } from './stats.js'
 import { startInput } from './input.js'
 import { initSound, updateSound } from './sound.js'
@@ -12,6 +12,7 @@ import {
   flashBanner,
   showMatchOver,
   hideMatchOver,
+  setHost,
 } from './ui.js'
 
 const el = (id) => document.getElementById(id)
@@ -42,7 +43,12 @@ handlers.onMatchOver = (score, players, matchId) => {
   if (me) reportMyMatch({ matchId, score, team: me.team ?? myTeam, goals: me.goals })
 }
 
-// The room restarts on its own; these only decide what you look at meanwhile.
+// The room resets itself to waiting, and the host starts the next one; these
+// only decide what you look at meanwhile.
+// It stays up until the snapshot that leaves WAITING arrives, a moment behind.
+// A second press in that window is a no-op: only a waiting room can kick off.
+el('start').addEventListener('click', beginMatch)
+
 el('over-again').addEventListener('click', hideMatchOver)
 el('over-copy').addEventListener('click', async () => {
   const code = el('room-code').textContent
@@ -79,6 +85,7 @@ el('create').addEventListener('click', async () => {
   if (!ready()) return
   try {
     await createRoom(name, wantedTeam)
+    setHost(true)
   } catch (err) {
     lobbyError(err.message)
   }

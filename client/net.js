@@ -151,6 +151,11 @@ function waitForWelcome() {
   })
 }
 
+/** Host only: leave the waiting phase. A peer has no host worker to tell. */
+export function beginMatch() {
+  host?.postMessage({ type: 'begin' })
+}
+
 export function startSendingInput() {
   if (inputTimer) return
   // Polled rather than driven off keydown so a key held across a tab switch, or

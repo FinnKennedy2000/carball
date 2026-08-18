@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import * as C from '../shared/constants.js'
-import { createState, addCar, step, hashState } from '../shared/sim.js'
+import { createState, addCar, step, kickoff, hashState } from '../shared/sim.js'
 import { parse } from '../shared/protocol.js'
 import { buildRow } from '../api/record-match.js'
 
@@ -32,6 +32,23 @@ test('the same inputs produce the same state', () => {
   const a = run(twoCarGame(), 600, scriptedBits)
   const b = run(twoCarGame(), 600, scriptedBits)
   assert.equal(hashState(a), hashState(b))
+})
+
+test('a room waits, frozen, until the host kicks off', () => {
+  const state = twoCarGame()
+  assert.equal(state.phase, 'WAITING')
+
+  const clock = state.clock
+  run(state, 120, () => C.IN_ALL) // everyone flooring it changes nothing
+  assert.equal(state.phase, 'WAITING')
+  assert.equal(state.clock, clock)
+  assert.ok(state.cars.every((c) => c.vx === 0 && c.vy === 0))
+
+  kickoff(state)
+  assert.equal(state.phase, 'KICKOFF')
+  run(state, Math.ceil(C.KICKOFF_SECONDS * C.TICK_HZ) + 5, () => 0)
+  assert.equal(state.phase, 'PLAY')
+  assert.ok(state.clock < clock)
 })
 
 test('the ball cannot escape through a wall', () => {
