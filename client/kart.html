@@ -77,6 +77,18 @@
       /* Streaks down the left and right edges, faded in by speed from kart.js.
          Peripheral blur is what the eye actually reads speed from — the number
          in the corner is a readout, not a sensation. */
+      /* Ink: blobs over the middle of the view that thin as they clear. */
+      #ink {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.25s linear;
+        background:
+          radial-gradient(30% 34% at 34% 42%, #0a0c12 0%, #0a0c12 62%, transparent 74%),
+          radial-gradient(26% 30% at 66% 56%, #0a0c12 0%, #0a0c12 60%, transparent 74%),
+          radial-gradient(20% 24% at 52% 28%, #0a0c12 0%, #0a0c12 58%, transparent 76%);
+      }
       #speed-lines {
         position: absolute;
         inset: 0;
@@ -222,6 +234,28 @@
         height: 14px;
         border-radius: 3px;
         background: var(--color-neutral-800);
+      }
+      /* How many uses are left, for a triple or a golden mushroom. */
+      #item-icon {
+        position: relative;
+      }
+      #item-icon .count {
+        position: absolute;
+        right: -2px;
+        bottom: -2px;
+        min-width: 17px;
+        padding: 0 4px;
+        border-radius: 9px;
+        background: var(--item);
+        color: #10131c;
+        font-size: 11px;
+        font-weight: 700;
+        text-align: center;
+        line-height: 17px;
+      }
+      .item-card .name em {
+        font-style: normal;
+        color: var(--item);
       }
       #item-icon svg {
         width: 38px;
@@ -452,8 +486,13 @@
         gap: var(--space-8);
       }
       #items-grid {
+        /* Nineteen cards is a long page: the set scrolls inside its own card so
+           the way in stays where it was. */
+        max-height: 56vh;
+        overflow-y: auto;
+        padding-right: var(--space-3);
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
         gap: var(--space-4);
       }
       .item-card {
@@ -557,6 +596,8 @@
     <div id="hud" hidden>
       <div id="vignette"></div>
       <div id="speed-lines"></div>
+      <!-- A Blooper's ink, over the world and under the HUD. -->
+      <div id="ink"></div>
 
       <div id="race-info" class="panel">
         <div>
@@ -678,7 +719,7 @@
       <div id="items-card">
         <div class="over-head">
           <span class="kicker accent">Items</span>
-          <h2>Six things to find in a box</h2>
+          <h2>Nineteen things to find in a box</h2>
           <div class="over-rule"></div>
         </div>
         <div id="items-grid"></div>

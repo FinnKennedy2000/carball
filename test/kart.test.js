@@ -249,6 +249,149 @@ test('a bolt shrinks everyone else and leaves a star alone', () => {
   assert.equal(me.shrink, 0)
 })
 
+const holding = (kart, key) => {
+  kart.item = ITEMS.findIndex((i) => i.key === key)
+  kart.itemCount = ITEMS[kart.item].count ?? 1
+}
+
+test('a triple is one item spent three times', () => {
+  const state = started(1, 21)
+  state.phase = 'RACE'
+  const me = state.karts[0]
+  holding(me, 'banana3')
+  for (let i = 1; i <= 3; i++) {
+    step(state, { 1: IN_ITEM })
+    step(state, {})
+    assert.equal(state.hazards.length, i, `throw ${i}`)
+    if (i < 3) assert.ok(me.item !== null, 'the slot emptied early')
+  }
+  assert.equal(me.item, null, 'the slot held on past the third')
+})
+
+test('a bob-omb catches everything standing near it', () => {
+  const state = started(3, 22)
+  state.phase = 'RACE'
+  const [me, near, far] = state.karts
+  holding(me, 'bomb')
+  step(state, { 1: IN_ITEM })
+  const bomb = state.hazards[0]
+  // Parked either side of it, so this is the blast reaching them rather than
+  // the AI driving into it.
+  near.ai = false
+  far.ai = false
+  let hitNear = false
+  let hitFar = false
+  for (let i = 0; i < 250 && state.hazards.length; i++) {
+    near.x = bomb.x + 6
+    near.y = bomb.y
+    far.x = bomb.x + 40
+    far.y = bomb.y
+    step(state, {})
+    hitNear ||= near.spin > 0
+    hitFar ||= far.spin > 0
+  }
+  assert.equal(state.hazards.length, 0, 'the bomb never went off')
+  assert.ok(hitNear, 'the blast missed a kart beside it')
+  assert.ok(!hitFar, 'the blast reached across the circuit')
+})
+
+test('a POW spins everyone ahead and nobody behind', () => {
+  const state = started(3, 23)
+  state.phase = 'RACE'
+  const [me, ahead, behind] = state.karts
+  me.prog = 100
+  ahead.prog = 200
+  behind.prog = 50
+  holding(me, 'pow')
+  step(state, { 1: IN_ITEM })
+  assert.ok(ahead.spin > 0)
+  assert.equal(behind.spin, 0)
+  assert.equal(me.spin, 0)
+})
+
+test('a spiny shell goes for the leader, not the kart in front of you', () => {
+  const state = started(3, 24)
+  state.phase = 'RACE'
+  const [me, next, leader] = state.karts
+  me.prog = 10
+  next.prog = 60
+  leader.prog = 400
+  holding(me, 'blue')
+  step(state, { 1: IN_ITEM })
+  assert.equal(state.shells[0].target, leader.id)
+})
+
+test('a thundercloud is passed on by a bump, and shrinks whoever is left with it', () => {
+  const state = started(2, 25)
+  state.phase = 'RACE'
+  const [me, other] = state.karts
+  holding(me, 'cloud')
+  step(state, { 1: IN_ITEM })
+  assert.ok(me.cloud > 0)
+  other.x = me.x + KART_R
+  other.y = me.y
+  step(state, {})
+  assert.equal(me.cloud, 0, 'the cloud stayed put')
+  assert.ok(other.cloud > 0)
+  // Left holding it: it goes off, and shrinks them.
+  other.cloud = 0.02
+  run(state, 3, {})
+  assert.ok(other.shrink > 0)
+})
+
+test('a mega mushroom squashes what it touches and shrugs off a shell', () => {
+  const state = started(2, 26)
+  state.phase = 'RACE'
+  const [me, other] = state.karts
+  holding(me, 'mega')
+  step(state, { 1: IN_ITEM })
+  assert.ok(me.mega > 0)
+  other.x = me.x + KART_R
+  other.y = me.y
+  other.vx = 0
+  other.vy = 0
+  step(state, {})
+  assert.ok(other.spin > 0, 'a mega drove through a kart and left it alone')
+  holding(other, 'green')
+  other.heading = Math.atan2(me.y - other.y, me.x - other.x)
+  for (let i = 0; i < 20; i++) step(state, { 2: IN_ITEM })
+  assert.equal(me.spin, 0, 'a shell stopped a mega')
+})
+
+test('a bullet bill flies the line at a speed nothing else has', () => {
+  const state = started(1, 27)
+  state.phase = 'RACE'
+  const me = state.karts[0]
+  holding(me, 'bullet')
+  step(state, { 1: IN_ITEM })
+  run(state, 60, {})
+  assert.ok(Math.hypot(me.vx, me.vy) > 70, `speed ${Math.hypot(me.vx, me.vy)}`)
+  // On the road, not through the barrier: it holds the racing line for you.
+  const hit = project(me.x, me.y)
+  assert.ok(Math.abs(hit.lateral) < halfWidthAt(hit.s), `lateral ${hit.lateral}`)
+})
+
+test('the leader never rolls a comeback item', () => {
+  const state = started(6, 28)
+  state.phase = 'RACE'
+  const me = state.karts[0]
+  const seen = new Set()
+  for (let i = 0; i < 400; i++) {
+    me.place = 1
+    me.item = null
+    const spot = boxSpots()[i % boxSpots().length]
+    state.boxes.forEach((b) => (b.cooldown = 0))
+    me.x = spot.x
+    me.y = spot.y
+    step(state, {})
+    if (me.item !== null) seen.add(ITEMS[me.item].key)
+  }
+  for (const key of ['star', 'bullet', 'bolt', 'gold', 'blue', 'red']) {
+    assert.ok(!seen.has(key), `the leader was handed a ${key}`)
+  }
+  assert.ok(seen.has('banana') && seen.has('green'), [...seen].join(','))
+})
+
 test('the roll favours the back of the field', () => {
   const front = { 1: 0, 2: 0 }
   const back = { 1: 0, 2: 0 }

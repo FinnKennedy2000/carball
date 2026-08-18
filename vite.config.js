@@ -13,13 +13,15 @@ export default defineConfig({
   build: {
     outDir: '../dist',
     emptyOutDir: true,
-    // The lobby, the match an invite link opens, the garage, and the kart race.
+    // The lobby, the match an invite link opens, the garage, the kart race, and
+    // the workbench its item models are looked at on.
     rollupOptions: {
       input: {
         index: fileURLToPath(new URL('client/index.html', import.meta.url)),
         game: fileURLToPath(new URL('client/game.html', import.meta.url)),
         garage: fileURLToPath(new URL('client/garage.html', import.meta.url)),
         kart: fileURLToPath(new URL('client/kart.html', import.meta.url)),
+        kartItems: fileURLToPath(new URL('client/kart-items.html', import.meta.url)),
       },
     },
   },

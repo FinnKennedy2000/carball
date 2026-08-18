@@ -12,6 +12,7 @@
 import * as THREE from 'three'
 import * as K from '../shared/kart.js'
 import { IN_ITEM, IN_BOOST } from '../shared/constants.js'
+import { buildItem } from './kart-items.js'
 import { cleanCode } from '../shared/protocol.js'
 import { startInput, currentBits, isTyping } from './input.js'
 import {
@@ -32,35 +33,105 @@ const COLORS = ['#3b82f6', '#f97316', '#22c55e', '#ef4444', '#a855f7', '#eab308'
 const kartColor = (id) => COLORS[(id - 1) % COLORS.length]
 
 /**
- * The item marks, from the design: one flat glyph per item in its own colour.
+ * The item marks. Each is drawn rather than lettered — a mushroom is a
+ * mushroom, a shell is a shell — because the slot is read at a glance at speed,
+ * and a coloured blob tells you nothing about what pressing space will do.
  * Keyed by ITEMS' key rather than its index, which is a wire format.
  */
+const DARK = 'rgba(0,0,0,0.32)'
+
+/** A cap, its spots and a stem: mushroom, golden and mega all come from here. */
+const mushroom = (cap, spot = '#fff6e8') => `
+  <path d="M5 22 A15 13 0 0 1 35 22 Z" fill="${cap}"/>
+  <circle cx="13" cy="16" r="3.1" fill="${spot}"/>
+  <circle cx="24" cy="13.5" r="3.8" fill="${spot}"/>
+  <circle cx="30" cy="19" r="2.4" fill="${spot}"/>
+  <path d="M14 22 H26 V28 A6 5 0 0 1 14 28 Z" fill="#ffeccc"/>
+  <path d="M5 22 H35" stroke="${DARK}" stroke-width="1.4" fill="none"/>`
+
+/** A shell: dome, seams and a belly. Green, red and — with wings — spiny. */
+const shell = (main, wings = false) => `
+  ${wings ? '<path d="M9 17 L1 11 L4 21 Z" fill="#dbe6ff"/><path d="M31 17 L39 11 L36 21 Z" fill="#dbe6ff"/>' : ''}
+  <path d="M6 25 A14 13 0 0 1 34 25 Z" fill="${main}"/>
+  <path d="M20 12 V25 M10 20 L30 20 M12.5 15.5 L27.5 15.5" stroke="${DARK}" stroke-width="1.5" fill="none"/>
+  <path d="M5 25 H35 A4 4 0 0 1 31 30 H9 A4 4 0 0 1 5 25 Z" fill="#fff1cf"/>`
+
+/** Three of something, laid out so the count reads before the shape does. */
+const trio = (art) =>
+  [[-8, -5, 0.52], [8, -5, 0.52], [0, 8, 0.52]]
+    .map(([dx, dy, k]) => `<g transform="translate(${20 + dx} ${20 + dy}) scale(${k}) translate(-20 -20)">${art}</g>`)
+    .join('')
+
 const ITEM_ART = {
-  boost: {
-    color: '#f0b429',
-    svg: '<g fill="none" stroke="#f0b429" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 10 L18 20 L8 30"/><path d="M20 10 L30 20 L20 30"/></g>',
-  },
+  boost: { color: '#ef4444', svg: mushroom('#ef4444') },
   banana: {
     color: '#eab308',
     svg: '<path d="M9 9 C10 24 17 31 32 31 C30 23 25 16 18 13 C15 11.5 12 10 9 9 Z" fill="#eab308"/><path d="M9 9 C11 22 18 29 32 31" fill="none" stroke="rgba(0,0,0,0.35)" stroke-width="1.6"/>',
   },
-  green: {
-    color: '#22c55e',
-    svg: '<path d="M20 7 L31 13 L31 26 L20 32 L9 26 L9 13 Z" fill="#22c55e"/><path d="M20 7 L20 32 M9 13 L31 26 M31 13 L9 26" stroke="rgba(0,0,0,0.32)" stroke-width="1.6" fill="none"/>',
-  },
-  red: {
-    color: '#ef4444',
-    svg: '<path d="M20 7 L31 13 L31 26 L20 32 L9 26 L9 13 Z" fill="#ef4444"/><path d="M20 7 L20 32 M9 13 L31 26 M31 13 L9 26" stroke="rgba(0,0,0,0.32)" stroke-width="1.6" fill="none"/>',
-  },
+  green: { color: '#22c55e', svg: shell('#22c55e') },
+  red: { color: '#ef4444', svg: shell('#ef4444') },
   bolt: {
-    color: '#9184d9',
-    svg: '<path d="M23 6 L11 22 L18 22 L15 34 L29 17 L21.5 17 Z" fill="#9184d9"/>',
+    color: '#facc15',
+    svg: '<path d="M23 5 L10 22 L18 22 L14 35 L30 16 L21.5 16 Z" fill="#facc15"/>',
   },
   star: {
     color: '#ffd166',
-    svg: '<path d="M20 6 L24.2 15.6 L34.6 16.7 L26.8 23.6 L29 33.8 L20 28.4 L11 33.8 L13.2 23.6 L5.4 16.7 L15.8 15.6 Z" fill="#ffd166"/>',
+    svg: '<path d="M20 6 L24.2 15.6 L34.6 16.7 L26.8 23.6 L29 33.8 L20 28.4 L11 33.8 L13.2 23.6 L5.4 16.7 L15.8 15.6 Z" fill="#ffd166"/><ellipse cx="16.6" cy="19.5" rx="1.7" ry="2.4" fill="#1b1f2a"/><ellipse cx="23.4" cy="19.5" rx="1.7" ry="2.4" fill="#1b1f2a"/>',
+  },
+  boost3: { color: '#ef4444', svg: trio(mushroom('#ef4444')) },
+  banana3: {
+    color: '#eab308',
+    svg: trio('<path d="M9 9 C10 24 17 31 32 31 C30 23 25 16 18 13 C15 11.5 12 10 9 9 Z" fill="#eab308"/>'),
+  },
+  green3: { color: '#22c55e', svg: trio(shell('#22c55e')) },
+  red3: { color: '#ef4444', svg: trio(shell('#ef4444')) },
+  gold: { color: '#f0b429', svg: mushroom('#f0b429', '#fff8dc') },
+  fake: {
+    color: '#b45309',
+    svg: `<path d="M20 5 L34 12.5 V27.5 L20 35 L6 27.5 V12.5 Z" fill="#3b2412" stroke="#b45309" stroke-width="2"/>
+      <path d="M15.5 15.5 A4.5 4.5 0 1 1 20 21 V23.5" stroke="#ef4444" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+      <circle cx="20" cy="28" r="1.7" fill="#ef4444"/>`,
+  },
+  bomb: {
+    color: '#94a3b8',
+    svg: `<path d="M22 11 C28 8 33 6 34 4" stroke="#a16207" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+      <circle cx="35" cy="4" r="2.6" fill="#f59e0b"/>
+      <circle cx="18" cy="24" r="11" fill="#1b1f2a"/>
+      <circle cx="14" cy="20" r="3" fill="rgba(255,255,255,0.25)"/>`,
+  },
+  blue: { color: '#3b82f6', svg: shell('#3b82f6', true) },
+  pow: {
+    color: '#38bdf8',
+    svg: `<path d="M6 12 L20 5 L34 12 V28 L20 35 L6 28 Z" fill="#0f2740" stroke="#38bdf8" stroke-width="2"/>
+      <text x="20" y="24.5" text-anchor="middle" font-family="Verdana,sans-serif" font-size="10" font-weight="700" fill="#7dd3fc">POW</text>`,
+  },
+  blooper: {
+    color: '#e2e8f0',
+    svg: `<path d="M20 6 C27 6 31 11 31 18 V23 H9 V18 C9 11 13 6 20 6 Z" fill="#f1f5f9"/>
+      <path d="M11 23 C11 30 9 32 8 35 M16 23 C16 31 15 33 14 36 M24 23 C24 31 25 33 26 36 M29 23 C29 30 31 32 32 35" stroke="#f1f5f9" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+      <ellipse cx="16" cy="16" rx="2.2" ry="3" fill="#111827"/><ellipse cx="24" cy="16" rx="2.2" ry="3" fill="#111827"/>`,
+  },
+  mega: {
+    color: '#f97316',
+    svg: `${mushroom('#f97316')}<path d="M33 15 L37 9 L29 9 Z" fill="#fde68a"/>`,
+  },
+  bullet: {
+    color: '#94a3b8',
+    svg: `<path d="M8 13 H24 A9 7 0 0 1 24 27 H8 Z" fill="#334155"/>
+      <path d="M8 13 L2 16 V24 L8 27 Z" fill="#1e293b"/>
+      <circle cx="22" cy="17.5" r="2" fill="#f8fafc"/><circle cx="22" cy="17.5" r="1" fill="#0f172a"/>
+      <path d="M14 22 H26" stroke="#0f172a" stroke-width="1.8" stroke-linecap="round"/>`,
+  },
+  cloud: {
+    color: '#93c5fd',
+    svg: `<path d="M12 22 A6 6 0 0 1 14 11 A8 8 0 0 1 29 13 A5.5 5.5 0 0 1 29 22 Z" fill="#bfdbfe"/>
+      <path d="M22 21 L14 33 L20 33 L17 39 L27 27 L21 27 Z" fill="#facc15"/>`,
   },
 }
+const SHELL_KINDS = ['green', 'red', 'blue']
+const HAZARD_KINDS = ['banana', 'trap', 'bomb']
+const ITEM_SCALE = 2.6 // models are about 1.2 across; a kart is KART_R 2.2
+
 const AI_NAMES = ['Bolt', 'Ripsaw', 'Comet', 'Nitro', 'Sledge']
 const SOLO_ID = 1
 const MAX_CATCHUP = 5
@@ -88,6 +159,7 @@ let accumulator = 0
 // What the item slot and the effect chips are currently showing, so neither is
 // rebuilt on a frame where nothing about them changed.
 let shownItem
+let shownCount
 let shownEffects = ''
 // The slot reels through every item before settling on the one you actually
 // picked up: which is which matters, and a mark that simply appears is missed
@@ -207,17 +279,23 @@ function wireGate() {
  * rather than a copy of it.
  */
 function showItemSet() {
-  const max = Math.max(...K.ROLL_FRONT, ...K.ROLL_BACK)
+  const rows = K.ROLL_TABLE
+  const max = Math.max(...rows.flat())
+  // Front, middle and back of the field rather than only its two ends: half the
+  // roster — the bombs, the POW, the spiny shell — lives in the middle, and two
+  // bars could not show that it does.
+  const shown = [['Front', rows[0]], ['Mid', rows[5]], ['Back', rows[rows.length - 1]]]
   const bar = (label, weight) =>
     `<span class="weight"><span>${label}</span><span class="bar"><i style="width:${(weight / max) * 100}%"></i></span></span>`
   el('items-grid').innerHTML = K.ITEMS.map((item, i) => {
     const art = ITEM_ART[item.key]
+    const count = item.count ?? 1
     return `<div class="item-card" style="--item:${art.color}">
       <div class="head">
         <span class="mark"><svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">${art.svg}</svg></span>
-        <span><span class="name">${item.name}</span><br /><span class="hint">${item.hint}</span></span>
+        <span><span class="name">${item.name}${count > 1 ? ` <em>×${count}</em>` : ''}</span><br /><span class="hint">${item.hint}</span></span>
       </div>
-      <div class="weights">${bar('Front', K.ROLL_FRONT[i])}${bar('Back', K.ROLL_BACK[i])}</div>
+      <div class="weights">${shown.map(([label, row]) => bar(label, row[i])).join('')}</div>
     </div>`
   }).join('')
 }
@@ -409,18 +487,11 @@ function buildTrack() {
 
   buildFinish()
 
-  // Item boxes: one mesh per spot, hidden while that box is on its cooldown.
-  const geo = new THREE.BoxGeometry(2.6, 2.6, 2.6)
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0xffd166,
-    emissive: 0x6b4b00,
-    transparent: true,
-    opacity: 0.85,
-    flatShading: true,
-  })
+  // Item boxes: one model per spot, hidden while that box is on its cooldown.
   for (const box of K.boxSpots()) {
-    const mesh = new THREE.Mesh(geo, mat)
-    mesh.position.set(box.x, K.heightAt(box.s) + 2, box.y)
+    const mesh = buildItem('box')
+    mesh.scale.setScalar(ITEM_SCALE)
+    mesh.position.set(box.x, K.heightAt(box.s) + 1.4, box.y)
     scene.add(mesh)
     boxMeshes.push(mesh)
   }
@@ -644,8 +715,10 @@ function draw() {
     }
     // Shrunk by a Bolt, or lit up by a star: both have to be readable at a
     // glance from behind, so they change the shape rather than only a number.
-    mesh.scale.setScalar(kart.shrink > 0 ? 0.55 : 1)
-    mesh.children[0].material.emissive.setHex(kart.star > 0 ? 0xffe066 : 0x000000)
+    mesh.scale.setScalar(K.kartScale(kart))
+    mesh.children[0].material.emissive.setHex(
+      kart.star > 0 ? 0xffe066 : kart.bullet > 0 ? 0x2b3a55 : kart.mega > 0 ? 0x5a2a00 : 0x000000,
+    )
   }
   for (const [id, mesh] of kartMeshes) {
     if (seen.has(id)) continue
@@ -664,11 +737,15 @@ function draw() {
   })
 
   syncPool(shellPool, race.shells, makeShell, (mesh, shell) => {
-    mesh.position.set(shell.x, groundY(shell.x, shell.y) + 1.2, shell.y)
-    mesh.material.color.setHex(shell.red ? 0xef4444 : 0x22c55e)
+    mesh.position.set(shell.x, groundY(shell.x, shell.y) + 0.4, shell.y)
+    mesh.rotation.y = Math.atan2(-shell.vy, shell.vx)
+    dress(mesh, SHELL_KINDS, shell.kind ?? (shell.red ? 'red' : 'green'))
   })
-  syncPool(hazardPool, race.hazards, makeBanana, (mesh, hazard) => {
-    mesh.position.set(hazard.x, groundY(hazard.x, hazard.y) + 0.8, hazard.y)
+  syncPool(hazardPool, race.hazards, makeHazard, (mesh, hazard) => {
+    mesh.position.set(hazard.x, groundY(hazard.x, hazard.y), hazard.y)
+    // A fake box spins like the real thing: that is the whole trick of it.
+    if (hazard.kind === 'fake') mesh.rotation.y += 0.03
+    dress(mesh, HAZARD_KINDS, hazard.kind === 'fake' ? 'trap' : (hazard.kind ?? 'banana'))
   })
 
   const me = race.karts.find((k) => k.id === myId) ?? race.karts[0]
@@ -713,20 +790,31 @@ function syncPool(pool, bodies, make, place) {
   })
 }
 
-function makeShell() {
-  return new THREE.Mesh(
-    new THREE.IcosahedronGeometry(1.2, 0),
-    new THREE.MeshStandardMaterial({ color: 0x22c55e, flatShading: true, emissive: 0x0d2f18 }),
-  )
+/**
+ * A shell, as one of the models in kart-items.js rather than a tinted primitive:
+ * a green shell, a red one with its homing fin, and the spiny shell that goes
+ * for the leader. All three are built once per pool slot and the one this shell
+ * actually is, is the one left visible.
+ */
+function makeVariants(keys) {
+  const group = new THREE.Group()
+  for (const key of keys) {
+    const model = buildItem(key)
+    model.scale.setScalar(ITEM_SCALE)
+    group.add(model)
+  }
+  return group
 }
 
-function makeBanana() {
-  const mesh = new THREE.Mesh(
-    new THREE.ConeGeometry(1.1, 1.6, 6),
-    new THREE.MeshStandardMaterial({ color: 0xeab308, flatShading: true }),
-  )
-  mesh.rotation.z = Math.PI
-  return mesh
+const makeShell = () => makeVariants(SHELL_KINDS)
+const makeHazard = () => makeVariants(HAZARD_KINDS)
+
+/** Show the one variant this body actually is. */
+function dress(group, keys, kind) {
+  const want = keys.indexOf(kind)
+  group.children.forEach((child, i) => {
+    child.visible = i === (want === -1 ? 0 : want)
+  })
 }
 
 // HUD -----------------------------------------------------------------------
@@ -757,7 +845,10 @@ function updateHud() {
   el('speed').textContent = Math.round(Math.hypot(me.vx, me.vy) * 3.6)
   el('time').textContent = clock(race.time)
 
-  showItem(me.item === undefined ? null : me.item)
+  showItem(me.item === undefined ? null : me.item, me.itemCount ?? 1)
+  // Ink over the screen, thinning as it clears. A person can drive out of it
+  // on the throttle, which is what the sim's own fade does.
+  el('ink').style.opacity = me.ink > 0 ? Math.min(0.92, me.ink / 2) : 0
   showEffects(me)
 
   // The last lap is worth calling, and so is crossing the line: both are
@@ -829,7 +920,7 @@ function dot(id) {
  * runs every frame, and re-parsing an SVG sixty times a second for a mark that
  * has not moved is work for nothing.
  */
-function showItem(index) {
+function showItem(index, count) {
   const now = performance.now()
   if (index !== heldItem) {
     // Only a pickup reels. Spending one empties the slot on the spot, and so
@@ -846,11 +937,11 @@ function showItem(index) {
     const done = 1 - (reelUntil - now) / REEL_MS
     reelAt = now + 40 + 150 * done * done
   }
-  paintItem(reeling ? reelIndex : index, reeling)
+  paintItem(reeling ? reelIndex : index, reeling, reeling ? 1 : count)
 }
 
 /** The slot, showing one item — the one you have, or one the reel is passing. */
-function paintItem(index, reeling) {
+function paintItem(index, reeling, count = 1) {
   const item = index === null || index === undefined ? null : K.ITEMS[index]
   const slot = el('item-slot')
   slot.classList.toggle('full', Boolean(item))
@@ -860,12 +951,15 @@ function paintItem(index, reeling) {
     : item
       ? 'space to fire'
       : 'drive through a box'
-  if (index === shownItem) return
+  if (index === shownItem && count === shownCount) return
   shownItem = index
+  shownCount = count
   const art = item ? ITEM_ART[item.key] : null
   slot.style.setProperty('--item', art?.color ?? 'transparent')
   el('item-icon').innerHTML = art
-    ? `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">${art.svg}</svg>`
+    ? `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">${art.svg}</svg>` +
+      // How many are left of it, for the triples and the golden mushroom.
+      (count > 1 ? `<b class="count">${count}</b>` : '')
     : '<span class="blank"></span>'
 }
 
@@ -874,7 +968,12 @@ function showEffects(me) {
   const chips = []
   if (me.boost > 0) chips.push(['tag-accent', `Boost ${me.boost.toFixed(1)}s`])
   if (me.star > 0) chips.push(['tag-accent', `Star ${me.star.toFixed(1)}s`])
+  if (me.mega > 0) chips.push(['tag-accent', `Mega ${me.mega.toFixed(1)}s`])
+  if (me.bullet > 0) chips.push(['tag-accent', `Bullet ${me.bullet.toFixed(1)}s`])
   if (me.shrink > 0) chips.push(['tag-neutral', `Shrunk ${me.shrink.toFixed(1)}s`])
+  if (me.ink > 0) chips.push(['tag-neutral', `Inked ${me.ink.toFixed(1)}s`])
+  // The cloud is a countdown to being shrunk: hand it on before it runs out.
+  if (me.cloud > 0) chips.push(['tag-outline', `Cloud ${me.cloud.toFixed(1)}s`])
   const html = chips.map(([kind, text]) => `<span class="tag ${kind}">${text}</span>`).join('')
   if (html !== shownEffects) {
     shownEffects = html

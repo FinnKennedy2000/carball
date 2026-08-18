@@ -65,29 +65,79 @@ const SHELL_R = 1.2
 const SHELL_TURN = 3.2 // rad/s a red shell can steer
 const HAZARD_R = 1.6
 const AI_ITEM_DELAY = 1.5
+const GOLD_SECONDS = 0.9 // one of a Golden Mushroom's several short boosts
+const BLAST_R = 9 // a bomb, or a spiny shell coming home
+const BOMB_FUSE = 3 // it waits, and then it goes off whether or not it was found
+const BOMB_TRIGGER = 4.5 // how near you have to be for it to go off early
+const INK_SECONDS = 5
+const INK_MAX = 0.9 // what a screenful of ink costs you off the top end
+const MEGA_SECONDS = 7
+const MEGA_SPEED = 1.12
+const MEGA_SCALE = 1.7
+const BULLET_SECONDS = 5
+const BULLET_SPEED = 78
+const CLOUD_SECONDS = 8
+const CLOUD_SPEED = 1.06
+const CLOUD_LOCK = 0.8
 
 /**
  * The item table. The index travels in the state and the HUD looks it up, so
  * appending is safe and reordering is not.
+ *
+ * `fires` is the effect an item actually performs, so the triples are one item
+ * with a count rather than four copies of the same code; `count` is how many
+ * times it can be spent before the slot empties.
  */
 export const ITEMS = [
-  { key: 'boost', name: 'Turbo', hint: 'a burst of speed' },
+  { key: 'boost', name: 'Mushroom', hint: 'a burst of speed' },
   { key: 'banana', name: 'Banana', hint: 'drops behind you' },
   { key: 'green', name: 'Green Shell', hint: 'fires straight ahead' },
   { key: 'red', name: 'Red Shell', hint: 'homes on the kart ahead' },
-  { key: 'bolt', name: 'Bolt', hint: 'shrinks everyone else' },
+  { key: 'bolt', name: 'Lightning', hint: 'shrinks everyone else' },
   { key: 'star', name: 'Star', hint: 'untouchable, and quick' },
+  { key: 'boost3', name: 'Triple Mushrooms', hint: 'three bursts of speed', fires: 'boost', count: 3 },
+  { key: 'banana3', name: 'Triple Bananas', hint: 'three peels to lay', fires: 'banana', count: 3 },
+  { key: 'green3', name: 'Triple Green Shells', hint: 'three straight shots', fires: 'green', count: 3 },
+  { key: 'red3', name: 'Triple Red Shells', hint: 'three that chase', fires: 'red', count: 3 },
+  { key: 'gold', name: 'Golden Mushroom', hint: 'boost after boost', fires: 'gold', count: 6 },
+  { key: 'fake', name: 'Fake Item Box', hint: 'a box that is a trap' },
+  { key: 'bomb', name: 'Bob-omb', hint: 'a blast, not a bump' },
+  { key: 'blue', name: 'Spiny Shell', hint: 'goes for the leader' },
+  { key: 'pow', name: 'POW Block', hint: 'spins out everyone ahead' },
+  { key: 'blooper', name: 'Blooper', hint: 'inks the karts ahead' },
+  { key: 'mega', name: 'Mega Mushroom', hint: 'huge, and it squashes' },
+  { key: 'bullet', name: 'Bullet Bill', hint: 'flies the line for you' },
+  { key: 'cloud', name: 'Thundercloud', hint: 'quick — pass it on, fast' },
 ]
+
 /**
- * Roll weights for the leader and for the tail of the field, interpolated by
- * where you actually are. This is the rubber band, and it is steep: leading,
- * you almost only ever find a banana or a green shell — something to throw
- * behind you — while the back of the field is where the shells that chase, the
- * bolt and the star come from. Exported so the way-in screen can draw the same
- * numbers the roll uses rather than a copy of them.
+ * The roll, one row per place in a twelve-kart field, after Mario Kart Wii's
+ * own distribution chart. Two interpolated endpoints could not express this:
+ * the middle of the field is where the bombs, the POW and the spiny shell live,
+ * and a hump in the middle is not something a straight line between front and
+ * back can make. Leading, the pool is deliberately weak — things to throw
+ * behind you — and the back of the field is where the race is given back to
+ * you. Exported so the way-in screen draws the numbers the roll actually reads.
  */
-export const ROLL_FRONT = [0.5, 6, 4.5, 0.2, 0.02, 0.05]
-export const ROLL_BACK = [3.5, 0.5, 0.7, 4.5, 3, 2.5]
+export const ROLL_ROWS = [
+  { green: 3, fake: 2, banana: 3, banana3: 2 },
+  { red: 2, banana: 3, green: 3, boost: 1, green3: 1, banana3: 2, fake: 2 },
+  { red: 3, boost: 2, green: 2, green3: 2, banana3: 1, banana: 2, red3: 1, fake: 1, cloud: 1 },
+  { fake: 1, red: 3, boost: 2, green: 2, green3: 2, banana3: 1, bomb: 2, cloud: 1, blue: 1, red3: 1 },
+  { red: 3, boost: 2, green: 1, bomb: 2, pow: 1, gold: 1, blooper: 1, green3: 1, red3: 2, cloud: 1, boost3: 1 },
+  { boost3: 2, gold: 2, boost: 2, bomb: 2, blue: 1, red3: 2, cloud: 1, green3: 1, pow: 1, mega: 1 },
+  { boost3: 2, gold: 3, blooper: 2, pow: 2, red3: 2, blue: 1, boost: 1, green3: 1, red: 1, mega: 1 },
+  { boost3: 2, gold: 3, star: 2, blue: 1, blooper: 2, pow: 2, red3: 1, cloud: 1, mega: 1 },
+  { boost3: 2, gold: 3, star: 3, blooper: 2, pow: 1, blue: 1, bullet: 1, mega: 1 },
+  { gold: 3, boost3: 2, star: 4, bullet: 2, bolt: 1 },
+  { gold: 3, star: 4, bullet: 3, boost3: 1, bolt: 2 },
+  { bullet: 4, gold: 3, bolt: 3, star: 4, boost3: 1 },
+]
+
+/** The rows as weight arrays lined up with ITEMS, which is what roll() reads. */
+export const ROLL_TABLE = ROLL_ROWS.map((row) => ITEMS.map((item) => row[item.key] ?? 0))
+export const ROLL_FRONT = ROLL_TABLE[0]
+export const ROLL_BACK = ROLL_TABLE[ROLL_TABLE.length - 1]
 
 export function trackPoint(t) {
   const a = t * Math.PI * 2
@@ -309,11 +359,17 @@ export function addKart(state, racer) {
     vy: 0,
     heading: Math.atan2(p.ty, p.tx),
     item: null,
+    itemCount: 0, // uses left of it, which is 3 for a triple and 1 for the rest
     itemDown: false,
     boost: 0,
     star: 0,
     shrink: 0,
     spin: 0,
+    mega: 0,
+    bullet: 0,
+    ink: 0,
+    cloud: 0,
+    cloudLock: 0, // a moment after taking the cloud where it cannot be handed back
     lap: 0,
     s: (s + TRACK.length) % TRACK.length,
     prog: s, // total distance covered, the thing places are ranked on
@@ -383,6 +439,7 @@ export function step(state, inputs) {
   }
 
   stepShells(state, dt)
+  stepBombs(state, dt)
   for (const kart of state.karts) {
     collectBox(state, kart)
     hitHazards(state, kart)
@@ -417,6 +474,24 @@ function stepKart(state, kart, bits, dt) {
   if (kart.boost > 0) kart.boost = Math.max(0, kart.boost - dt)
   if (kart.star > 0) kart.star = Math.max(0, kart.star - dt)
   if (kart.shrink > 0) kart.shrink = Math.max(0, kart.shrink - dt)
+  if (kart.mega > 0) kart.mega = Math.max(0, kart.mega - dt)
+  // Ink clears on its own, and faster while you are on the throttle: boosting
+  // out of it is the way out, as it is in the game this is a clone of.
+  if (kart.ink > 0) kart.ink = Math.max(0, kart.ink - dt * (kart.boost > 0 ? 3 : 1))
+  if (kart.cloudLock > 0) kart.cloudLock = Math.max(0, kart.cloudLock - dt)
+  if (kart.cloud > 0) {
+    kart.cloud = Math.max(0, kart.cloud - dt)
+    // Hot potato, and you lost: it goes off over whoever is still holding it.
+    if (kart.cloud === 0) {
+      kart.shrink = SHRINK_SECONDS
+      kart.boost = 0
+    }
+  }
+  if (kart.bullet > 0) {
+    kart.bullet = Math.max(0, kart.bullet - dt)
+    flyBullet(kart, dt)
+    return
+  }
 
   const drifting = (bits & IN_DRIFT) !== 0 && !spinning
   const speed = Math.hypot(kart.vx, kart.vy)
@@ -457,7 +532,8 @@ function stepKart(state, kart, bits, dt) {
   const offroad = Math.abs(hit.lateral) > halfWidthAt(hit.s)
   const fwd = kart.vx * fx + kart.vy * fy
   const lat = kart.vx * -fy + kart.vy * fx
-  const drag = spinning ? 3.5 : offroad ? OFFROAD_DRAG : DRAG
+  const skims = boosting || kart.star > 0 || kart.mega > 0
+  const drag = spinning ? 3.5 : offroad && !skims ? OFFROAD_DRAG : DRAG
   const newFwd = fwd * damp(drag, dt)
   const newLat = lat * damp(drifting ? GRIP_DRIFT : GRIP, dt)
   kart.vx = fx * newFwd - fy * newLat
@@ -466,7 +542,15 @@ function stepKart(state, kart, bits, dt) {
   let max = boosting ? BOOST_MAX : MAX_SPEED
   if (kart.star > 0) max *= STAR_SPEED
   if (kart.shrink > 0) max *= SHRINK_SPEED
-  if (offroad) max *= OFFROAD_MAX
+  if (kart.mega > 0) max *= MEGA_SPEED
+  // The cloud pays before it charges: quicker while it is over you, and a
+  // shrink when it goes off.
+  if (kart.cloud > 0) max *= CLOUD_SPEED
+  // Driving half-blind costs you a little as well as showing you less.
+  if (kart.ink > 0) max *= 1 - INK_MAX * 0.1 * (kart.ink / INK_SECONDS)
+  // A mushroom is a shortcut item: while it is running, the grass does not
+  // slow you the way it otherwise would.
+  if (offroad) max *= boosting || kart.star > 0 || kart.mega > 0 ? 1 : OFFROAD_MAX
   // Two halves of the same rule: the cap is a hard ceiling on speed you can
   // gain, and a soft one on speed you already had. Without the first the engine
   // simply pushes through the cap; without the second the end of a Turbo cuts
@@ -558,13 +642,18 @@ function collectBox(state, kart) {
     if (Math.hypot(box.x - kart.x, box.y - kart.y) > KART_R + 1.8) continue
     box.cooldown = BOX_RESPAWN
     kart.item = roll(state, kart)
+    kart.itemCount = ITEMS[kart.item].count ?? 1
   }
 }
 
-/** Weighted by where you are running: see ROLL_FRONT and ROLL_BACK. */
+/**
+ * Weighted by where you are running: the field is mapped onto the twelve rows
+ * of ROLL_TABLE, so a six-kart race reads rows 0, 2, 4, 7, 9 and 11 rather than
+ * only its two ends.
+ */
 function roll(state, kart) {
   const frac = state.karts.length > 1 ? (kart.place - 1) / (state.karts.length - 1) : 0
-  const weights = ROLL_FRONT.map((f, i) => f + (ROLL_BACK[i] - f) * frac)
+  const weights = ROLL_TABLE[Math.round(frac * (ROLL_TABLE.length - 1))]
   const total = weights.reduce((a, b) => a + b, 0)
   let pick = rand(state) * total
   for (let i = 0; i < weights.length; i++) {
@@ -581,8 +670,11 @@ function useItem(state, kart, bits) {
   kart.itemDown = down
   if (!fire) return
 
-  const item = ITEMS[kart.item].key
-  kart.item = null
+  const held = ITEMS[kart.item]
+  // A triple is one item spent three times: the slot only empties on the last.
+  kart.itemCount = (kart.itemCount || 1) - 1
+  if (kart.itemCount <= 0) kart.item = null
+  const item = held.fires ?? held.key
   const fx = Math.cos(kart.heading)
   const fy = Math.sin(kart.heading)
   // A shell leaves at its own speed plus whatever the kart was already doing.
@@ -592,30 +684,72 @@ function useItem(state, kart, bits) {
   const launchSpeed = SHELL_SPEED + Math.max(0, kart.vx * fx + kart.vy * fy)
 
   if (item === 'boost') kart.boost = BOOST_SECONDS
+  else if (item === 'gold') kart.boost = Math.max(kart.boost, GOLD_SECONDS)
   else if (item === 'star') kart.star = STAR_SECONDS
-  else if (item === 'banana') {
-    state.hazards.push({ x: kart.x - fx * (KART_R + 2), y: kart.y - fy * (KART_R + 2), owner: kart.id })
-  } else if (item === 'green' || item === 'red') {
+  else if (item === 'mega') kart.mega = MEGA_SECONDS
+  else if (item === 'bullet') {
+    kart.bullet = BULLET_SECONDS
+    kart.spin = 0
+    kart.ink = 0
+  } else if (item === 'cloud') kart.cloud = CLOUD_SECONDS
+  else if (item === 'banana' || item === 'fake' || item === 'bomb') {
+    state.hazards.push({
+      x: kart.x - fx * (KART_R + 2),
+      y: kart.y - fy * (KART_R + 2),
+      owner: kart.id,
+      kind: item,
+      fuse: item === 'bomb' ? BOMB_FUSE : 0,
+    })
+  } else if (item === 'green' || item === 'red' || item === 'blue') {
     state.shells.push({
       x: kart.x + fx * (KART_R + 1.5),
       y: kart.y + fy * (KART_R + 1.5),
       vx: fx * launchSpeed,
       vy: fy * launchSpeed,
-      speed: launchSpeed,
+      speed: item === 'blue' ? launchSpeed * 1.3 : launchSpeed,
       life: SHELL_LIFE,
       owner: kart.id,
-      // A red shell chases whoever is one place ahead. Nobody ahead means it
-      // simply runs on as a green one does.
-      target: item === 'red' ? aheadOf(state, kart) : null,
-      red: item === 'red',
+      // A red shell chases whoever is one place ahead; a spiny one goes for
+      // whoever is winning, however far up the road that is. Nobody ahead means
+      // it simply runs on as a green one does.
+      target: item === 'red' ? aheadOf(state, kart) : item === 'blue' ? leaderOf(state, kart) : null,
+      red: item !== 'green',
+      kind: item,
     })
   } else if (item === 'bolt') {
     for (const other of state.karts) {
-      if (other.id === kart.id || other.star > 0) continue
+      if (other.id === kart.id || other.star > 0 || other.mega > 0 || other.bullet > 0) continue
       other.shrink = SHRINK_SECONDS
       other.item = null
+      other.itemCount = 0
+    }
+  } else if (item === 'pow') {
+    // A shockwave up the road: everyone in front of you loses the lap they were
+    // having, and whatever they were holding with it.
+    for (const other of state.karts) {
+      if (other.id === kart.id || other.prog <= kart.prog) continue
+      spinOut(other)
+      if (other.spin > 0) {
+        other.item = null
+        other.itemCount = 0
+      }
+    }
+  } else if (item === 'blooper') {
+    for (const other of state.karts) {
+      if (other.id === kart.id || other.prog <= kart.prog || other.star > 0) continue
+      other.ink = INK_SECONDS
     }
   }
+}
+
+/** Whoever is winning, which is what a spiny shell is for. */
+function leaderOf(state, kart) {
+  let best = null
+  for (const other of state.karts) {
+    if (other.id === kart.id) continue
+    if (best === null || other.prog > best.prog) best = other
+  }
+  return best ? best.id : null
 }
 
 function aheadOf(state, kart) {
@@ -671,22 +805,53 @@ function stepShells(state, dt) {
       if (kart.respawn > 0) continue
       if (Math.hypot(kart.x - shell.x, kart.y - shell.y) > KART_R + SHELL_R) continue
       shell.life = 0
-      spinOut(kart)
+      // A spiny shell arriving is an explosion, and whoever is running with the
+      // leader goes up with them.
+      if (shell.kind === 'blue') blast(state, shell.x, shell.y)
+      else spinOut(kart)
       break
     }
   }
   state.shells = state.shells.filter((s) => s.life > 0)
 }
 
+/** A bob-omb waits on its fuse, and then goes off wherever it is lying. */
+function stepBombs(state, dt) {
+  for (const hazard of state.hazards) {
+    if (hazard.kind !== 'bomb' || hazard.dead) continue
+    hazard.fuse -= dt
+    if (hazard.fuse > 0) continue
+    hazard.dead = true
+    blast(state, hazard.x, hazard.y)
+  }
+  state.hazards = state.hazards.filter((h) => !h.dead)
+}
+
 function hitHazards(state, kart) {
   if (kart.respawn > 0) return
   for (const hazard of state.hazards) {
     if (hazard.dead) continue
-    if (Math.hypot(hazard.x - kart.x, hazard.y - kart.y) > KART_R + HAZARD_R) continue
+    // A bomb does not wait to be run over — driving near it is enough, once it
+    // has had a moment to arm. Without that it goes off in the hand that set
+    // it: it is dropped a kart's length behind, which is inside its own reach.
+    if (hazard.kind === 'bomb' && hazard.fuse > BOMB_FUSE - 0.6) continue
+    const reach = hazard.kind === 'bomb' ? BOMB_TRIGGER : KART_R + HAZARD_R
+    if (Math.hypot(hazard.x - kart.x, hazard.y - kart.y) > reach) continue
     hazard.dead = true
-    spinOut(kart)
+    // A peel or a fake box catches whoever drove into it; a bomb catches
+    // everything standing near it, the kart that set it off included.
+    if (hazard.kind === 'bomb') blast(state, hazard.x, hazard.y)
+    else spinOut(kart)
   }
   state.hazards = state.hazards.filter((h) => !h.dead)
+}
+
+/** Everything close enough to a bang, star and mega excepted. */
+function blast(state, x, y) {
+  for (const kart of state.karts) {
+    if (Math.hypot(kart.x - x, kart.y - y) > BLAST_R) continue
+    spinOut(kart)
+  }
 }
 
 /**
@@ -705,8 +870,25 @@ function fall(kart, s) {
   kart.star = 0
 }
 
+/**
+ * A bullet flies the racing line for you: it holds the middle of the road, at a
+ * speed nothing else on the circuit has, and nothing touches it on the way.
+ */
+function flyBullet(kart, dt) {
+  const hit = project(kart.x, kart.y)
+  const p = pointAt(hit.s + 16)
+  const want = Math.atan2(p.y - kart.y, p.x - kart.x)
+  kart.heading = wrap(kart.heading + clamp(wrap(want - kart.heading), -7 * dt, 7 * dt))
+  kart.vx = Math.cos(kart.heading) * BULLET_SPEED
+  kart.vy = Math.sin(kart.heading) * BULLET_SPEED
+  kart.x += kart.vx * dt
+  kart.y += kart.vy * dt
+  confine(kart)
+}
+
 function spinOut(kart) {
-  if (kart.star > 0 || kart.finished !== null || kart.respawn > 0) return
+  if (kart.star > 0 || kart.mega > 0 || kart.bullet > 0) return
+  if (kart.finished !== null || kart.respawn > 0) return
   kart.spin = SPIN_SECONDS
   kart.boost = 0
   kart.vx *= 0.3
@@ -718,7 +900,7 @@ function bump(a, b) {
   if (a.respawn > 0 || b.respawn > 0) return
   const dx = b.x - a.x
   const dy = b.y - a.y
-  const r = KART_R * 2
+  const r = KART_R * (kartScale(a) + kartScale(b))
   const d = Math.hypot(dx, dy)
   if (d >= r || d < 1e-6) return
   const nx = dx / d
@@ -728,6 +910,16 @@ function bump(a, b) {
   a.y -= ny * push
   b.x += nx * push
   b.y += ny * push
+  // Contact is contact: what a star, a mega, a bullet or a cloud does happens
+  // whether or not the two are closing, or a kart caught from behind at the
+  // moment it is already being pushed away gets away with it.
+  if (a.star > 0 || a.mega > 0 || a.bullet > 0) spinOut(b)
+  if (b.star > 0 || b.mega > 0 || b.bullet > 0) spinOut(a)
+  // Hot potato: touch someone and the cloud is theirs, which is the only way
+  // out from under it.
+  if (a.cloud > 0 && a.cloudLock === 0 && b.cloud === 0 && b.star === 0) handCloud(a, b)
+  else if (b.cloud > 0 && b.cloudLock === 0 && a.cloud === 0 && a.star === 0) handCloud(b, a)
+
   const vn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny
   if (vn > 0) return
   const j = -1.4 * vn * 0.5
@@ -735,9 +927,21 @@ function bump(a, b) {
   a.vy -= j * ny
   b.vx += j * nx
   b.vy += j * ny
-  // A star run through the field scatters it.
-  if (a.star > 0) spinOut(b)
-  if (b.star > 0) spinOut(a)
+}
+
+/** Pass the cloud on, and hold it there a moment so it does not flip back. */
+function handCloud(from, to) {
+  to.cloud = from.cloud
+  to.cloudLock = CLOUD_LOCK
+  from.cloud = 0
+  from.cloudLock = 0
+}
+
+/** How big a kart is right now: mega is a real size, and so is a shrink. */
+export function kartScale(kart) {
+  if (kart.mega > 0) return MEGA_SCALE
+  if (kart.shrink > 0) return 0.55
+  return 1
 }
 
 // AI ------------------------------------------------------------------------
@@ -823,7 +1027,7 @@ function wrap(a) {
 export function hashRace(state) {
   const nums = [state.tick, state.phase.length, state.shells.length, state.hazards.length]
   for (const k of state.karts) {
-    nums.push(k.x, k.y, k.vx, k.vy, k.heading, k.prog, k.place, k.item ?? -1, k.spin, k.boost, k.star, k.shrink, k.respawn)
+    nums.push(k.x, k.y, k.vx, k.vy, k.heading, k.prog, k.place, k.item ?? -1, k.itemCount, k.spin, k.boost, k.star, k.shrink, k.respawn, k.mega, k.bullet, k.ink, k.cloud)
   }
   let h = 2166136261
   for (const n of nums) {
