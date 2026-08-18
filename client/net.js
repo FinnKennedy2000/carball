@@ -54,11 +54,28 @@ export const handlers = {
  */
 export const enabled = supabaseEnabled
 
+/**
+ * Which game this tab is playing. Both games use the same channel, the same
+ * snapshot buffer and the same input path; they differ in the worker that owns
+ * the simulation and in how two snapshots are blended. The football page takes
+ * the defaults, and client/kart.js calls this on the way in.
+ *
+ * The worker comes in as a factory rather than a URL because Vite only bundles
+ * a worker whose `new URL(...)` it can read literally at the call site.
+ */
+export function configure({ makeWorker, blend: blendFn }) {
+  if (makeWorker) newWorker = makeWorker
+  if (blendFn) blendSnapshots = blendFn
+}
+
+let newWorker = () => new Worker(new URL('./sim-worker.js', import.meta.url), { type: 'module' })
+let blendSnapshots = blend
+
 export async function createRoom(name, team, car, mode) {
   const code = randomCode()
   await open(code)
 
-  host = new Worker(new URL('./sim-worker.js', import.meta.url), { type: 'module' })
+  host = newWorker()
   const started = new Promise((resolve) => {
     host.onmessage = ({ data }) => {
       if (data.type === 'send') hostSend(data.event, data.payload)
@@ -257,7 +274,7 @@ export function sampleState() {
 
   const span = newer.recvAt - older.recvAt
   const t = span > 0 ? (renderAt - older.recvAt) / span : 0
-  return blend(older.s, newer.s, t)
+  return blendSnapshots(older.s, newer.s, t)
 }
 
 function blend(a, b, t) {

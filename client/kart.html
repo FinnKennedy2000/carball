@@ -140,12 +140,79 @@
       .tabular {
         font-variant-numeric: tabular-nums;
       }
+      /* The way in, and the room it opens ---------------------------------- */
+      /* display:grid/flex would otherwise beat the hidden attribute's rule. */
+      #gate[hidden],
+      #waiting[hidden],
+      #room-strip[hidden] {
+        display: none;
+      }
+      #gate,
+      #waiting {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: rgba(11, 14, 20, 0.72);
+      }
+      #gate-card,
+      #waiting-card {
+        background: var(--color-surface);
+        box-shadow: var(--shadow-lg);
+        border-radius: var(--radius-lg);
+        padding: var(--space-8) 28px;
+        min-width: 380px;
+        display: grid;
+        gap: var(--space-4);
+      }
+      #gate-cols {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        gap: var(--space-6);
+        align-items: start;
+      }
+      #gate-cols .divider {
+        width: 1px;
+        align-self: stretch;
+        background: var(--color-divider);
+      }
+      #room-strip {
+        position: fixed;
+        top: 18px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: var(--space-6);
+        align-items: center;
+        pointer-events: auto;
+      }
+      #room-code {
+        font-size: 20px;
+        letter-spacing: 0.16em;
+      }
+      #waiting-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 2px;
+        color: var(--color-neutral-300);
+      }
+      #waiting-list li.me {
+        color: var(--color-accent-300);
+        font-weight: 600;
+      }
+      #gate-note {
+        color: var(--color-neutral-400);
+        font-size: 13px;
+        min-height: 18px;
+      }
     </style>
   </head>
   <body>
     <canvas id="view"></canvas>
 
-    <div id="hud">
+    <div id="hud" hidden>
       <div id="race-info" class="panel">
         <div class="stat">
           <span class="kicker">Lap</span>
@@ -180,6 +247,50 @@
 
       <div id="banner" hidden>3</div>
       <div id="controls-line">WASD steer · shift drift · space or E use item</div>
+    </div>
+
+    <div id="room-strip" class="panel" hidden>
+      <span class="kicker">Room</span>
+      <b id="room-code">----</b>
+      <button id="copy" class="btn btn-ghost">Copy invite link</button>
+    </div>
+
+    <!-- Before the lights in a room: who is on the grid, and the host's go. -->
+    <div id="waiting" hidden>
+      <div id="waiting-card">
+        <div class="kicker accent">On the grid</div>
+        <ol id="waiting-list"></ol>
+        <p id="waiting-hint" class="hint"></p>
+        <div class="row">
+          <button id="start" class="btn btn-primary" hidden>Start race</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="gate">
+      <div id="gate-card">
+        <div class="kicker accent">Kart</div>
+        <h2>Three laps. Items. First across the line wins.</h2>
+        <div class="accent-rule"></div>
+        <input id="name" class="input" placeholder="your name" maxlength="16" autocomplete="off" />
+        <div id="gate-cols">
+          <div class="stack">
+            <div class="kicker">On your own</div>
+            <button id="solo" class="btn btn-primary">Race five AI</button>
+          </div>
+          <span class="divider"></span>
+          <div class="stack" id="room-side">
+            <div class="kicker">With other people</div>
+            <button id="create" class="btn btn-secondary">Create room</button>
+            <div class="row">
+              <input id="code" class="input" placeholder="CODE" maxlength="4" autocomplete="off" />
+              <button id="join" class="btn btn-secondary">Join</button>
+            </div>
+          </div>
+        </div>
+        <p id="gate-note"></p>
+        <a class="btn btn-ghost" href="./index.html">Back to home</a>
+      </div>
     </div>
 
     <div id="results" hidden>

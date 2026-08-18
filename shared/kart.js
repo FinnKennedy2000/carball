@@ -36,7 +36,7 @@ const OFFROAD_DRAG = 2.6
 const WALL_BOUNCE = 0.3
 
 const COUNTDOWN = 3
-const FINISH_GRACE = 10 // seconds the race runs on after the player is home
+const FINISH_GRACE = 45 // seconds the race runs on after the winner is home
 
 // Items ---------------------------------------------------------------------
 const BOX_RESPAWN = 5
@@ -176,16 +176,17 @@ export function boxSpots() {
 }
 
 /**
- * `racers` is [{ id, name, ai }] — the player is simply the one that is not an
- * AI. Grid order is list order, and the seed is the item PRNG's start.
+ * A race, empty or with a field already in it. `racers` is [{ id, name, ai }].
+ * It starts in WAITING: in a room the karts sit on the grid until the host says
+ * go, and the solo page simply calls begin() on the spot.
  */
-export function createRace(racers, seed = 1) {
+export function createRace(racers = [], seed = 1) {
   const state = {
     tick: 0,
     time: 0,
     seed: seed >>> 0,
-    phase: 'COUNT',
-    timer: COUNTDOWN,
+    phase: 'WAITING',
+    timer: 0,
     laps: LAPS,
     karts: [],
     boxes: [],
@@ -193,44 +194,62 @@ export function createRace(racers, seed = 1) {
     shells: [],
     finishers: [], // ids in the order they crossed
   }
-
-  racers.forEach((r, i) => {
-    // Two abreast, rows going back from the line, alternating sides.
-    const row = Math.floor(i / 2)
-    const side = i % 2 === 0 ? -1 : 1
-    const s = -8 - row * 9
-    const p = pointAt(s)
-    state.karts.push({
-      id: r.id,
-      name: r.name,
-      ai: Boolean(r.ai),
-      x: p.x + p.nx * side * 4.5,
-      y: p.y + p.ny * side * 4.5,
-      vx: 0,
-      vy: 0,
-      heading: Math.atan2(p.ty, p.tx),
-      item: null,
-      itemDown: false,
-      boost: 0,
-      star: 0,
-      shrink: 0,
-      spin: 0,
-      lap: 0,
-      s: (s + TRACK.length) % TRACK.length,
-      prog: s, // total distance covered, the thing places are ranked on
-      place: i + 1,
-      finished: null, // race time when it crossed, or null
-      // AI only: how long it has held its item, and its line's offset.
-      aiHold: 0,
-      offset: 0,
-    })
-  })
-
   for (const spot of boxSpots()) state.boxes.push({ x: spot.x, y: spot.y, cooldown: 0 })
-  // The grid offsets the AI takes on the racing line, drawn once so a race is
-  // not six karts on identical rails.
-  for (const k of state.karts) k.offset = (rand(state) - 0.5) * (HALF_WIDTH - 4)
+  for (const racer of racers) addKart(state, racer)
   return state
+}
+
+/**
+ * Seat one more kart, on the next grid slot. A kart added after the lights go
+ * out starts on the grid too, which is to say a long way last — a room is meant
+ * to fill up before the host starts it.
+ */
+export function addKart(state, racer) {
+  const i = state.karts.length
+  const row = Math.floor(i / 2)
+  const side = i % 2 === 0 ? -1 : 1
+  const s = -8 - row * 9
+  const p = pointAt(s)
+  const kart = {
+    id: racer.id,
+    name: racer.name,
+    ai: Boolean(racer.ai),
+    x: p.x + p.nx * side * 4.5,
+    y: p.y + p.ny * side * 4.5,
+    vx: 0,
+    vy: 0,
+    heading: Math.atan2(p.ty, p.tx),
+    item: null,
+    itemDown: false,
+    boost: 0,
+    star: 0,
+    shrink: 0,
+    spin: 0,
+    lap: 0,
+    s: (s + TRACK.length) % TRACK.length,
+    prog: s, // total distance covered, the thing places are ranked on
+    place: state.karts.length + 1,
+    finished: null, // race time when it crossed, or null
+    // AI only: how long it has held its item, and its line's offset.
+    aiHold: 0,
+    offset: 0,
+  }
+  // Drawn from the race's own PRNG, so a field is not six karts on one rail.
+  if (kart.ai) kart.offset = (rand(state) - 0.5) * (HALF_WIDTH - 4)
+  state.karts.push(kart)
+  return kart
+}
+
+export function removeKart(state, id) {
+  const i = state.karts.findIndex((k) => k.id === id)
+  if (i !== -1) state.karts.splice(i, 1)
+}
+
+/** Leave WAITING and run the lights. The host's call in a room. */
+export function begin(state) {
+  if (state.phase !== 'WAITING') return
+  state.phase = 'COUNT'
+  state.timer = COUNTDOWN
 }
 
 /** Advance one tick. `inputs` maps kart id -> input bitmask. */
@@ -238,7 +257,7 @@ export function step(state, inputs) {
   const dt = DT
   state.tick++
 
-  if (state.phase === 'OVER') return state
+  if (state.phase === 'OVER' || state.phase === 'WAITING') return state
 
   if (state.phase === 'COUNT') {
     state.timer -= dt
@@ -376,11 +395,13 @@ function trackProgress(state, kart) {
   if (kart.finished === null && kart.prog >= state.laps * L) {
     kart.finished = state.time
     state.finishers.push(kart.id)
-    // The player crossing starts the clock on the rest of the field — and so
-    // does the last AI, or a race the player cannot finish never ends.
-    const aiLeft = state.karts.some((k) => k.ai && k.finished === null)
-    if ((!kart.ai || !aiLeft) && state.timer <= 0) state.timer = FINISH_GRACE
-    if (state.finishers.length === state.karts.length) state.phase = 'OVER'
+    // The flag falls when there is nobody left worth waiting for: everyone home,
+    // or every person home — an AI still out on the circuit is placed on how far
+    // it got rather than watched in. Failing both, the first kart home starts a
+    // long clock on the rest, which is also what ends a race nobody can finish.
+    if (state.timer <= 0) state.timer = FINISH_GRACE
+    const waitingOn = state.karts.some((k) => !k.ai && k.finished === null)
+    if (!waitingOn || state.finishers.length === state.karts.length) state.phase = 'OVER'
   }
 }
 
