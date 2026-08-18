@@ -249,12 +249,14 @@ body {
   color: var(--color-accent-300);
 }
 
-#start {
+#start,
+#invite {
   pointer-events: auto;
 }
 
 /* .btn sets a display, which beats the UA rule for [hidden] — as with #over. */
-#start[hidden] {
+#start[hidden],
+#invite[hidden] {
   display: none;
 }
 

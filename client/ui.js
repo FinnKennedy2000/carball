@@ -91,6 +91,8 @@ export function updateHud(state, localId) {
   el('banner').textContent = bannerText(state)
   el('banner-sub').textContent = bannerSub(state)
   el('start').hidden = !(iAmHost && state.phase === 'WAITING')
+  // Anyone in a waiting room can pull someone else in, host or not.
+  el('invite').hidden = state.phase !== 'WAITING'
 
   // The panel belongs to the OVER phase, but the announcement arrives ahead of
   // the snapshot that carries the phase (the view runs INTERP_DELAY_MS behind).

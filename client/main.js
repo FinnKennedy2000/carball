@@ -50,16 +50,20 @@ handlers.onMatchOver = (score, players, matchId) => {
 el('start').addEventListener('click', beginMatch)
 
 el('over-again').addEventListener('click', hideMatchOver)
-el('over-copy').addEventListener('click', async () => {
+/** The link fills the code in for whoever opens it — see the hash below. */
+async function copyInvite(btn) {
   const code = el('room-code').textContent
   try {
     await navigator.clipboard.writeText(`${location.origin}${location.pathname}#${code}`)
-    el('over-copy').textContent = 'Link copied'
+    btn.textContent = 'Link copied'
   } catch {
     // No clipboard without a secure context — the code is the shareable part.
-    el('over-copy').textContent = `Room code ${code}`
+    btn.textContent = `Room code ${code}`
   }
-})
+}
+
+el('over-copy').addEventListener('click', () => copyInvite(el('over-copy')))
+el('invite').addEventListener('click', () => copyInvite(el('invite')))
 el('over-home').addEventListener('click', () => {
   location.href = location.pathname // dropping the socket leaves the room
 })
