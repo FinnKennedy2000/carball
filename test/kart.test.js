@@ -11,6 +11,8 @@ import {
   project,
   pointAt,
   boxSpots,
+  heightAt,
+  slopeAt,
   halfWidthAt,
   overVoid,
   VOIDS,
@@ -405,4 +407,43 @@ test('a kart that is home drives on down the road rather than into the barrier',
   const hit = project(me.x, me.y)
   assert.ok(Math.abs(hit.lateral) < HALF_WIDTH, `off the road at ${hit.lateral.toFixed(1)}m`)
   assert.ok(Math.hypot(me.vx, me.vy) > 5, 'parked')
+})
+
+test('a climb costs you speed, and the drop the other side gives it back', () => {
+  // The steepest part of the profile either way, found from the gradient
+  // itself so this does not have to know where the hills were put.
+  let up = 0
+  let down = 0
+  for (let i = 0; i < 400; i++) {
+    const s = (i / 400) * TRACK.length
+    // Away from the drops: a kart put down on one of those has a fall to worry
+    // about rather than a gradient.
+    if (overVoid(s) || overVoid(s + 60)) continue
+    if (slopeAt(s) > slopeAt(up)) up = s
+    if (slopeAt(s) < slopeAt(down)) down = s
+  }
+  assert.ok(slopeAt(up) > 0.1, `too flat to test: ${slopeAt(up)}`)
+  // A closed circuit has to meet itself, or the road would be a helix.
+  assert.ok(Math.abs(heightAt(0) - heightAt(TRACK.length)) < 1e-9)
+
+  const speedAfter = (from) => {
+    const state = started(1, 31)
+    run(state, 190) // the lights
+    const kart = state.karts[0]
+    const p = pointAt(from)
+    kart.x = p.x
+    kart.y = p.y
+    kart.s = from
+    kart.heading = Math.atan2(p.ty, p.tx)
+    // Rolling, not stood still: from a standstill on a slope it slides
+    // backwards off the road rather than driving anywhere.
+    kart.vx = p.tx * 20
+    kart.vy = p.ty * 20
+    run(state, 120, { 1: IN_FWD })
+    return Math.hypot(kart.vx, kart.vy)
+  }
+
+  const uphill = speedAfter(up)
+  const downhill = speedAfter(down)
+  assert.ok(downhill > uphill + 1, `hill does nothing: ${uphill} vs ${downhill}`)
 })

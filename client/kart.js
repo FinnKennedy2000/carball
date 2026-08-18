@@ -390,8 +390,10 @@ function buildTrack() {
   // than floating over a flat green plate. Kept in close: pushed much further
   // out, the inside of the hairpin folds over itself.
   scene.add(ribbon((i) => half(i) + 22, -0.35, 0x1c3a26, 1, solid))
-  // Under everything, and only where the ground gives out: the drop.
-  scene.add(ribbon((i) => half(i) + 34, -0.9, 0x05070c, 1, (i) => !solid(i)))
+  // Only where the ground gives out: the drop. No wider than the grass it
+  // replaces, or it wedges out past the hillside as a black shard, and far
+  // enough down to read as somewhere you would not want to be.
+  scene.add(ribbon((i) => half(i) + 22, -14, 0x05070c, 1, (i) => !solid(i)))
   scene.add(ribbon((i) => half(i) + K.KERB, 0.01, 0x6b4a22, 1, solid)) // the kerb, then
   scene.add(ribbon(half, 0.03, 0x49536b)) // the tarmac on top of it
   // The racing line, in dashes rather than one continuous stripe: a solid line
