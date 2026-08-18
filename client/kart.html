@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kart</title>
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="stylesheet" href="./nocturne.css" />
+    <link rel="stylesheet" href="./style.css" />
+    <!-- Only this page's own layout. Everything else — type, buttons, the dark
+         ground — comes from the two sheets above. -->
+    <style>
+      #hud {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        font-family: var(--font-body);
+        color: var(--color-text);
+      }
+      .panel {
+        position: absolute;
+        background: color-mix(in srgb, var(--color-surface) 82%, transparent);
+        box-shadow: var(--shadow-sm);
+        border-radius: var(--radius-lg);
+        padding: var(--space-4) var(--space-6);
+      }
+      #race-info {
+        top: 18px;
+        left: 18px;
+        display: flex;
+        gap: var(--space-8);
+      }
+      #race-info .stat b {
+        display: block;
+        font-size: 26px;
+        line-height: 1.1;
+      }
+      #standings-panel {
+        top: 18px;
+        right: 18px;
+        min-width: 168px;
+      }
+      #standings {
+        list-style: none;
+        margin: var(--space-2) 0 0;
+        padding: 0;
+        display: grid;
+        gap: 2px;
+      }
+      #standings li {
+        display: grid;
+        grid-template-columns: 18px 1fr;
+        gap: var(--space-3);
+        font-size: 13px;
+        color: var(--color-neutral-400);
+      }
+      #standings li.me {
+        color: var(--color-accent-300);
+        font-weight: 600;
+      }
+      #item-slot {
+        bottom: 22px;
+        left: 50%;
+        transform: translateX(-50%);
+        text-align: center;
+        min-width: 240px;
+        opacity: 0.75;
+      }
+      #item-slot.full {
+        opacity: 1;
+        box-shadow: 0 0 0 1px var(--color-accent-500), 0 8px 24px rgba(0, 0, 0, 0.5);
+      }
+      #item-name {
+        display: block;
+        font-size: 20px;
+      }
+      #item-hint {
+        font-size: 12px;
+        color: var(--color-neutral-500);
+      }
+      #speed-panel {
+        bottom: 22px;
+        right: 18px;
+        text-align: right;
+      }
+      #speed {
+        font-size: 30px;
+      }
+      #banner {
+        position: absolute;
+        top: 32%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 84px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-shadow: 0 8px 30px rgba(0, 0, 0, 0.7);
+      }
+      #controls-line {
+        position: absolute;
+        bottom: 22px;
+        left: 18px;
+        font-size: 12px;
+        color: var(--color-neutral-500);
+      }
+      /* display:grid would otherwise beat the hidden attribute's own rule and
+         the card would sit over the race from the first frame. */
+      #results[hidden] {
+        display: none;
+      }
+      #results {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: rgba(11, 14, 20, 0.72);
+      }
+      #results-card {
+        background: var(--color-surface);
+        box-shadow: var(--shadow-lg);
+        border-radius: var(--radius-lg);
+        padding: var(--space-8) 28px;
+        min-width: 340px;
+      }
+      #results table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: var(--space-6) 0;
+      }
+      #results td {
+        padding: 5px 8px;
+        border-top: 1px solid var(--color-divider);
+        color: var(--color-neutral-300);
+      }
+      #results tr.me td {
+        color: var(--color-accent-300);
+        font-weight: 600;
+      }
+      .tabular {
+        font-variant-numeric: tabular-nums;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+
+    <div id="hud">
+      <div id="race-info" class="panel">
+        <div class="stat">
+          <span class="kicker">Lap</span>
+          <b id="lap" class="tabular">1/3</b>
+        </div>
+        <div class="stat">
+          <span class="kicker">Position</span>
+          <b id="place">6th</b>
+          <span class="kicker" id="place-of">of 6</span>
+        </div>
+        <div class="stat">
+          <span class="kicker">Time</span>
+          <b id="time" class="tabular">0:00.00</b>
+        </div>
+      </div>
+
+      <div id="standings-panel" class="panel">
+        <span class="kicker">Field</span>
+        <ol id="standings"></ol>
+      </div>
+
+      <div id="item-slot" class="panel">
+        <span class="kicker">Item</span>
+        <b id="item-name">—</b>
+        <span id="item-hint">drive through a box</span>
+      </div>
+
+      <div id="speed-panel" class="panel">
+        <span class="kicker">km/h</span>
+        <b id="speed" class="tabular">0</b>
+      </div>
+
+      <div id="banner" hidden>3</div>
+      <div id="controls-line">WASD steer · shift drift · space or E use item</div>
+    </div>
+
+    <div id="results" hidden>
+      <div id="results-card">
+        <div class="kicker accent">Chequered flag</div>
+        <h2 id="verdict">Race won</h2>
+        <div class="accent-rule"></div>
+        <table><tbody id="result-rows"></tbody></table>
+        <div class="row">
+          <button id="restart" class="btn btn-primary">Race again</button>
+          <a class="btn btn-ghost" href="./index.html">Back to home</a>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./kart.js"></script>
+  </body>
+</html>
