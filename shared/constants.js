@@ -117,5 +117,19 @@ export const MAGNET_RANGE = 24
 // a Haymaker happen at all. Long enough to survive five or six snapshots.
 export const FX_SECONDS = 0.45
 
+// How long an opponent's throttle is jammed wide open. Long enough to lose a
+// challenge over, short enough not to be a spectator sport.
+export const DISRUPT_SECONDS = 3
+// How long the ball stays welded to the car that caught it. This is the window
+// to carry it somewhere useful, and the reason the goal is worth defending.
+export const SPIKE_SECONDS = 5
+export const TORNADO_SECONDS = 3
+// The vortex reaches about a fifth of the pitch. Anything caught is dragged
+// inward and swung around; the spin is the larger of the two so bodies orbit
+// rather than simply collapsing onto the car.
+export const TORNADO_RADIUS = 16
+export const TORNADO_PULL = 20
+export const TORNADO_SPIN = 34
+
 export const TEAM_BLUE = 0
 export const TEAM_ORANGE = 1

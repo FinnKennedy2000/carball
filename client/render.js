@@ -19,6 +19,10 @@ const ITEM_COLOR = {
   freeze: 0x6aa8ff,
   hook: 0x7ee7ff,
   magnet: 0xc084fc,
+  disruptor: 0x9dff6a,
+  swapper: 0xff8ae2,
+  spike: 0xffa34d,
+  tornado: 0x5ce1c0,
 }
 // The burst ring's radius at full spread, and the tether's height off the deck.
 const BURST_R = 6
@@ -41,7 +45,7 @@ let freezeRing
 let localRing
 // Per-car Rumble visuals, built on demand and tracking carMeshes. A car without
 // an item in flight keeps its objects, hidden: six cars is not worth churning.
-const carFx = new Map() // id -> { tether, burst }
+const carFx = new Map() // id -> { tether, burst, aura }
 let labelBox
 const carLabels = new Map() // id -> span, tracking carMeshes
 // Above the roof, and above the ball, so a label never sits on what it names.
@@ -268,7 +272,7 @@ export function draw(state, nameOf = () => null, carOf = () => null) {
     carLabels.delete(id)
     const fx = carFx.get(id)
     if (fx) {
-      scene.remove(fx.tether, fx.burst)
+      scene.remove(fx.tether, fx.burst, fx.aura)
       carFx.delete(id)
     }
   }
@@ -303,8 +307,8 @@ function drawFx(car, ball) {
 
   let fx = carFx.get(car.id)
   if (!fx) {
-    fx = { tether: makeTether(), burst: makeBurst() }
-    scene.add(fx.tether, fx.burst)
+    fx = { tether: makeTether(), burst: makeBurst(), aura: makeAura() }
+    scene.add(fx.tether, fx.burst, fx.aura)
     carFx.set(car.id, fx)
   }
 
@@ -325,6 +329,20 @@ function drawFx(car, ball) {
     // The geometry stands along +y, so it is turned to face down the gap.
     if (length > 1e-6) fx.tether.quaternion.setFromUnitVectors(UP, DIR.divideScalar(length))
     fx.tether.material.color.setHex(ITEM_COLOR[pulling])
+  }
+
+  // The standing effects that sit on the car rather than reaching out: a vortex
+  // at its full width, or an armed Spike waiting for a touch.
+  const standing = car.tornado > 0 ? 'tornado' : car.spike > 0 ? 'spike' : null
+  fx.aura.visible = standing !== null
+  if (standing) {
+    const radius = standing === 'tornado' ? C.TORNADO_RADIUS : C.CAR_R + C.BALL_R
+    fx.aura.position.set(car.x, 0.03, car.y)
+    fx.aura.scale.setScalar(radius)
+    fx.aura.material.color.setHex(ITEM_COLOR[standing])
+    fx.aura.material.opacity = 0.5
+    // Turning, so a vortex looks like one rather than like a painted circle.
+    fx.aura.rotation.z += standing === 'tornado' ? 0.06 : 0.02
   }
 
   // The burst, expanding and fading over the life of the mark.
@@ -356,6 +374,29 @@ function makeTether() {
   )
   tether.visible = false
   return tether
+}
+
+/**
+ * A standing ring, drawn at the true radius of the effect it stands for. Its
+ * band is a thin fraction of that radius rather than the burst's fat one: at a
+ * vortex's full width the burst geometry is a six-metre stripe that swamps the
+ * pitch it is drawn on.
+ */
+function makeAura() {
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.94, 1, 48),
+    new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  )
+  ring.rotation.x = -Math.PI / 2
+  ring.visible = false
+  return ring
 }
 
 function makeBurst() {

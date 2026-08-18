@@ -5,7 +5,7 @@
 // depend on a JS engine's transcendental function accuracy.
 
 import * as C from './constants.js'
-import { initCarItems, stepRumble } from './rumble.js'
+import { initCarItems, stepRumble, carrySpikedBall } from './rumble.js'
 
 /**
  * `mode` is 'normal' or 'rumble', and `seed` is the item PRNG's starting value —
@@ -25,7 +25,8 @@ export function createState(mode = 'normal', seed = 1) {
     lastScorer: null, // car id credited with the most recent goal, or null
     score: [0, 0],
     // lastTouch: the car that hit the ball most recently, for goal credit.
-    ball: { x: 0, y: 0, vx: 0, vy: 0, lastTouch: null, freeze: 0 },
+    // stuckTo: the car carrying the ball on a Spike, or null.
+    ball: { x: 0, y: 0, vx: 0, vy: 0, lastTouch: null, freeze: 0, stuckTo: null },
     cars: [],
   }
   return state
@@ -64,6 +65,7 @@ export function resetPositions(state) {
   state.ball.vy = 0
   state.ball.lastTouch = null
   state.ball.freeze = 0
+  state.ball.stuckTo = null
 
   const perTeam = [0, 0]
   for (const car of state.cars) {
@@ -73,13 +75,29 @@ export function resetPositions(state) {
   }
 }
 
+// Kickoff spots for one side, as fractions of its half. Corners first and the
+// back centre last, so nobody lines up on the ball until a side has three cars
+// in it: the old fan-out handed the centre spot out first, which put someone
+// directly on the ball at every single kickoff.
+const KICKOFF = [
+  { x: 0.55, y: 0.62 },
+  { x: 0.55, y: -0.62 },
+  { x: 0.8, y: 0 },
+]
+
 function placeCar(car, slot) {
   const side = car.team === C.TEAM_BLUE ? -1 : 1
-  // Fan out from the centre line: 0, +1, -1, +2, -2 ...
-  const rank = Math.ceil(slot / 2) * (slot % 2 === 1 ? 1 : -1)
-  car.x = side * (C.ARENA_W / 4)
-  car.y = rank * (C.ARENA_H / 5)
-  car.heading = side === -1 ? 0 : Math.PI
+  // Clamped rather than wrapped: MAX_PER_TEAM is 3 today, so this only matters
+  // if that cap ever moves, and a fourth car sharing the back spot beats one
+  // placed off the end of the table.
+  const spot = KICKOFF[Math.min(slot, KICKOFF.length - 1)]
+  // Both axes take the side, so one side's spots are the other's turned a half
+  // turn: the two first cars start on opposite corners rather than nose to nose.
+  car.x = side * spot.x * (C.ARENA_W / 2)
+  car.y = side * spot.y * (C.ARENA_H / 2)
+  // Aimed at the centre spot from wherever that put them. A corner start facing
+  // straight down the pitch would point at the far wall.
+  car.heading = Math.atan2(-car.y, -car.x)
   car.vx = 0
   car.vy = 0
   car.boost = C.BOOST_MAX
@@ -122,6 +140,9 @@ export function step(state, inputs) {
 
   for (const car of state.cars) stepCar(car, inputs[car.id] | 0, dt)
   stepBall(state.ball, dt)
+  // After the bodies have moved: a carried ball rides its carrier, wherever the
+  // tick has just put it.
+  if (state.mode === 'rumble') carrySpikedBall(state)
 
   for (let i = 0; i < state.cars.length; i++) {
     for (let j = i + 1; j < state.cars.length; j++) {
@@ -134,6 +155,12 @@ export function step(state, inputs) {
       // A held ball is freed by anyone reaching it, as in the real game — and it
       // must be, or the impulse just applied would be zeroed on the next tick.
       state.ball.freeze = 0
+      // An armed Spike welds the ball on contact; anyone else reaching a carried
+      // ball knocks it loose, which is how a carry is defended against.
+      if (car.spike > 0) state.ball.stuckTo = car.id
+      else if (state.ball.stuckTo !== null && state.ball.stuckTo !== car.id) {
+        state.ball.stuckTo = null
+      }
       pinch(state.ball, car)
     }
   }
@@ -436,7 +463,7 @@ export function hashState(state) {
   const nums = [state.tick, state.phase.length, state.overtime ? 1 : 0, state.score[0], state.score[1], state.ball.x, state.ball.y, state.ball.vx, state.ball.vy]
   // The seed and the items are hashed too, so the determinism test covers a
   // Rumble match rather than only the physics underneath it.
-  nums.push(state.seed, state.ball.freeze ?? 0)
+  nums.push(state.seed, state.ball.freeze ?? 0, state.ball.stuckTo ?? -1)
   for (const c of state.cars) nums.push(c.id, c.x, c.y, c.vx, c.vy, c.heading, c.boost, c.item ?? -1, c.itemTimer ?? -1, c.fx ?? -1, c.fxTimer ?? -1)
   let h = 2166136261
   for (const n of nums) {

@@ -19,6 +19,10 @@ export const ITEMS = [
   { key: 'freeze', name: 'Freeze', hint: 'holds the ball in place' },
   { key: 'hook', name: 'Grappling Hook', hint: 'reels you to the ball' },
   { key: 'magnet', name: 'Magnetizer', hint: 'pulls the ball to you' },
+  { key: 'disruptor', name: 'Disruptor', hint: 'jams an opponent wide open' },
+  { key: 'swapper', name: 'Swapper', hint: 'trades places with an opponent' },
+  { key: 'spike', name: 'Spike', hint: 'sticks the ball to your car' },
+  { key: 'tornado', name: 'Tornado', hint: 'drags everything around you' },
 ]
 
 /** Give a car the fields the mode needs. Called only in a Rumble match. */
@@ -30,6 +34,9 @@ export function initCarItems(car) {
   car.itemDown = false
   car.hook = 0
   car.magnet = 0
+  car.disrupt = 0
+  car.spike = 0
+  car.tornado = 0
   // What just went off on this car, and for how much longer it is worth
   // drawing. Cosmetic — nothing in the physics reads either of them.
   car.fx = null
@@ -52,7 +59,16 @@ export function stepRumble(state, inputs, dt) {
   // Cars are kept id-sorted by addCar, so rolls come off the seed in a fixed
   // order however the room filled up.
   for (const car of state.cars) {
-    const bits = inputs[car.id] | 0
+    let bits = inputs[car.id] | 0
+
+    // A jammed throttle, before anything reads the input: the car drives itself
+    // flat out and the brake does nothing. Steering is left alone, so it is a
+    // car you are fighting rather than a car you have lost.
+    if (car.disrupt > 0) {
+      car.disrupt = Math.max(0, car.disrupt - dt)
+      bits = (bits | C.IN_FWD) & ~C.IN_BACK
+      inputs[car.id] = bits
+    }
     deal(state, car, dt)
 
     if (car.fxTimer > 0) {
@@ -70,6 +86,33 @@ export function stepRumble(state, inputs, dt) {
 
     hold(state, car, dt)
   }
+}
+
+/**
+ * Carry a spiked ball. Run after the bodies have moved, so the ball is put where
+ * its carrier has actually ended up rather than a tick behind it.
+ *
+ * The ball is parked exactly one radius clear of the car's nose rather than on
+ * top of it: at that distance the two are touching without overlapping, so the
+ * ordinary car/ball collision has nothing to resolve and does not fight this.
+ */
+export function carrySpikedBall(state) {
+  if (state.ball.stuckTo === null || state.ball.stuckTo === undefined) return
+
+  const carrier = state.cars.find((c) => c.id === state.ball.stuckTo)
+  // The carrier left the match still holding it.
+  if (!carrier) {
+    state.ball.stuckTo = null
+    return
+  }
+
+  const reach = C.CAR_R + C.BALL_R
+  state.ball.x = carrier.x + Math.cos(carrier.heading) * reach
+  state.ball.y = carrier.y + Math.sin(carrier.heading) * reach
+  // It leaves with whatever the car was doing, so letting go is a pass.
+  state.ball.vx = carrier.vx
+  state.ball.vy = carrier.vy
+  state.ball.freeze = 0
 }
 
 /** Count down to the next item, but only while the slot is empty. */
@@ -139,6 +182,36 @@ function fire(state, car, item) {
     case 'magnet':
       car.magnet = C.MAGNET_SECONDS
       break
+    case 'disruptor': {
+      const target = nearestOpponent(state, car, C.ITEM_RANGE)
+      if (target) {
+        target.disrupt = C.DISRUPT_SECONDS
+        mark(target, item)
+      }
+      break
+    }
+    case 'swapper': {
+      // No range: reaching across the pitch is the whole trick. Positions only —
+      // arriving with the other car's momentum as well would be unreadable.
+      const target = nearestOpponent(state, car, Infinity)
+      if (target) {
+        const x = car.x
+        const y = car.y
+        car.x = target.x
+        car.y = target.y
+        target.x = x
+        target.y = y
+        mark(target, item)
+      }
+      break
+    }
+    case 'spike':
+      // Arms the car; the ball welds itself on the next touch — see sim.js.
+      car.spike = C.SPIKE_SECONDS
+      break
+    case 'tornado':
+      car.tornado = C.TORNADO_SECONDS
+      break
   }
 }
 
@@ -152,22 +225,46 @@ function hold(state, car, dt) {
     car.vy += d.ny * C.HOOK_ACCEL * dt
   }
 
+  if (car.spike > 0) {
+    car.spike = Math.max(0, car.spike - dt)
+    // Time up: it lets go, keeping whatever the carry gave it.
+    if (car.spike === 0 && state.ball.stuckTo === car.id) state.ball.stuckTo = null
+  }
+
+  if (car.tornado > 0) {
+    car.tornado = Math.max(0, car.tornado - dt)
+    // Everything loose nearby, the ball included — but not team-mates, who are
+    // helping. A carried ball is held by its carrier and does not answer to this.
+    const caught = state.cars.filter((c) => c.team !== car.team)
+    if (state.ball.stuckTo === null || state.ball.stuckTo === undefined) caught.push(state.ball)
+    for (const body of caught) {
+      const d = toward(car, body)
+      if (d.dist > C.TORNADO_RADIUS || d.dist === 0) continue
+      // Fading with distance, so the edge of the vortex is a nudge and the
+      // middle is not survivable.
+      const bite = 1 - d.dist / C.TORNADO_RADIUS
+      // Inward, plus a push at right angles to it: together they orbit.
+      body.vx += (-d.nx * C.TORNADO_PULL + -d.ny * C.TORNADO_SPIN) * bite * dt
+      body.vy += (-d.ny * C.TORNADO_PULL + d.nx * C.TORNADO_SPIN) * bite * dt
+    }
+  }
+
   if (car.magnet > 0) {
     car.magnet = Math.max(0, car.magnet - dt)
     const d = toward(car, state.ball)
     // Pulled the other way — toward the car — and only from inside its reach,
     // so a magnet cannot drag the ball the length of the pitch.
-    if (d.dist <= C.MAGNET_RANGE && state.ball.freeze <= 0) {
+    if (d.dist <= C.MAGNET_RANGE && state.ball.freeze <= 0 && !state.ball.stuckTo) {
       state.ball.vx -= d.nx * C.MAGNET_ACCEL * dt
       state.ball.vy -= d.ny * C.MAGNET_ACCEL * dt
     }
   }
 }
 
-/** The nearest car on the other side within reach, or null. */
-function nearestOpponent(state, car) {
+/** The nearest car on the other side within `range`, or null. */
+function nearestOpponent(state, car, range = C.ITEM_RANGE) {
   let best = null
-  let bestDist = C.ITEM_RANGE
+  let bestDist = range
   for (const other of state.cars) {
     if (other.team === car.team) continue // which also rules out the car itself
     const { dist } = toward(car, other)

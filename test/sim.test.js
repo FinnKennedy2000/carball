@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import * as C from '../shared/constants.js'
-import { createState, addCar, step, kickoff, hashState } from '../shared/sim.js'
+import { createState, addCar, resetPositions, step, kickoff, hashState } from '../shared/sim.js'
 import { ITEMS } from '../shared/rumble.js'
 import { parse } from '../shared/protocol.js'
 import { CARS, DEFAULT_CAR } from '../shared/cars.js'
@@ -82,6 +82,48 @@ test('a room waits, frozen, until the host kicks off', () => {
   run(state, Math.ceil(C.KICKOFF_SECONDS * C.TICK_HZ) + 5, () => 0)
   assert.equal(state.phase, 'PLAY')
   assert.ok(state.clock < clock)
+})
+
+test('kickoff spawns keep the corners, and the ball line clear until 3v3', () => {
+  const sides = (n) => {
+    const state = createState()
+    for (let i = 0; i < n; i++) {
+      addCar(state, i * 2 + 1, C.TEAM_BLUE)
+      addCar(state, i * 2 + 2, C.TEAM_ORANGE)
+    }
+    resetPositions(state)
+    return state
+  }
+
+  for (const n of [1, 2]) {
+    const state = sides(n)
+    // Nobody lined up on the ball: that spot put someone on it every kickoff.
+    assert.ok(
+      state.cars.every((c) => Math.abs(c.y) > C.BALL_R + C.CAR_R),
+      `${n}v${n} should leave the ball's line clear`,
+    )
+  }
+
+  // The back spot is third in the table, so it only comes out at three a side.
+  const full = sides(3)
+  const middle = full.cars.filter((c) => Math.abs(c.y) < 1)
+  assert.equal(middle.length, 2, 'one straight-on car per side at 3v3')
+
+  // The first car of each side starts diagonally opposite the other's.
+  const [blue, orange] = [C.TEAM_BLUE, C.TEAM_ORANGE].map((t) =>
+    full.cars.find((c) => c.team === t),
+  )
+  assert.equal(Math.sign(blue.x), -Math.sign(orange.x))
+  assert.equal(Math.sign(blue.y), -Math.sign(orange.y))
+
+  // Everyone is inside the pitch, and aimed at the centre spot rather than at
+  // whatever wall happens to be in front of them.
+  for (const car of full.cars) {
+    assert.ok(Math.abs(car.x) <= C.MAX_X - C.CAR_R, 'inside the end walls')
+    assert.ok(Math.abs(car.y) <= C.MAX_Y - C.CAR_R, 'inside the side walls')
+    const toCentre = Math.atan2(-car.y, -car.x)
+    assert.ok(Math.abs(car.heading - toCentre) < 1e-9, 'pointed at the ball')
+  }
 })
 
 test('the ball cannot escape through a wall', () => {
@@ -504,8 +546,13 @@ test('a rumble match is as reproducible as a normal one', () => {
   const a = run(rumbleGame(), 900, scriptedBits)
   const b = run(rumbleGame(), 900, scriptedBits)
   assert.equal(hashState(a), hashState(b))
-  // And it really did deal items, or the hash above proves nothing about them.
-  assert.ok(a.cars.some((c) => c.item !== null) || a.seed !== rumbleGame().seed)
+  // And items really are dealt, or the hash above proves nothing about them.
+  // Checked on a quiet match rather than the scripted one: scripted input can
+  // score, and a goal restarts every cooldown, so whether a roll lands inside
+  // the window is luck rather than something worth asserting.
+  const quiet = run(rumbleGame(), Math.ceil(C.ITEM_COOLDOWN * C.TICK_HZ) + 5, () => 0)
+  assert.ok(quiet.cars.every((c) => c.item !== null), 'items are dealt')
+  assert.notEqual(quiet.seed, rumbleGame().seed, 'and the roll moved the seed')
 })
 
 test('a different seed deals a different sequence of items', () => {
@@ -623,8 +670,12 @@ test('a boot punts the nearest opponent, never a team-mate', () => {
   state.ball.y = C.MAX_Y - C.BALL_R
 
   fireItem(state, me.id)
-  assert.ok(foe.vx > C.BOOT_IMPULSE * 0.5, 'the opponent is sent away')
-  assert.ok(Math.abs(mate.vx) < 1, 'the team-mate is left alone')
+  run(state, 10, () => 0)
+  // Measured as ground covered rather than as a fraction of BOOT_IMPULSE: how
+  // much of a shove survives depends on the victim's heading, since GRIP damps
+  // sideways motion hard. Where they end up is the claim; the speed is not.
+  assert.ok(foe.x > 9 + 2, 'the opponent is sent away')
+  assert.ok(Math.abs(mate.x - 4) < 0.5, 'the team-mate is left alone')
 })
 
 test('a frozen ball hangs, and a touch frees it', () => {
@@ -776,6 +827,155 @@ test('a fluffed item still marks the car that spent it', () => {
 
   fireItem(state, me.id)
   assert.notEqual(me.fx, null, 'spending it should look like something happened')
+})
+
+test('a disruptor jams an opponent wide open', () => {
+  const state = rumbleGame()
+  const me = state.cars[0]
+  const foe = state.cars[1]
+  hand(me, 'disruptor')
+  me.x = 0
+  me.y = 0
+  foe.x = 8
+  foe.y = 0
+  foe.heading = 0
+  foe.vx = 0
+  foe.vy = 0
+  state.ball.x = 0
+  state.ball.y = C.MAX_Y - C.BALL_R // out of the way
+
+  fireItem(state, me.id)
+  assert.ok(foe.disrupt > 0)
+
+  // Flat out despite the brake being held, and the steering still answers.
+  const before = foe.x
+  for (let t = 0; t < 40; t++) tickWith(state, foe.id, C.IN_BACK)
+  assert.ok(foe.x > before + 2, 'the throttle is not its own any more')
+
+  run(state, Math.ceil(C.DISRUPT_SECONDS * C.TICK_HZ), () => 0)
+  assert.equal(foe.disrupt, 0, 'and it wears off')
+})
+
+test('a swapper trades places across the pitch', () => {
+  const state = rumbleGame()
+  const me = state.cars[0]
+  const foe = state.cars[1]
+  hand(me, 'swapper')
+  me.x = -30
+  me.y = -10
+  foe.x = 30
+  foe.y = 12
+  // Well beyond anything else's reach: distance is the point of this one.
+  assert.ok(Math.hypot(foe.x - me.x, foe.y - me.y) > C.ITEM_RANGE)
+
+  fireItem(state, me.id)
+  assert.ok(me.x > 20, 'we are where they were')
+  assert.ok(foe.x < -20, 'and they are where we were')
+})
+
+test('a spiked ball rides the car and can be carried in', () => {
+  const state = rumbleGame()
+  const me = state.cars[0]
+  const foe = state.cars[1]
+  foe.x = 0
+  foe.y = C.MAX_Y - C.CAR_R // out of the way
+  hand(me, 'spike')
+
+  // Facing the orange goal, with the ball just ahead.
+  me.x = 20
+  me.y = 0
+  me.heading = 0
+  state.ball.x = me.x + C.CAR_R + C.BALL_R - 0.3
+  state.ball.y = 0
+  state.ball.vx = 0
+  state.ball.vy = 0
+
+  fireItem(state, me.id)
+  assert.ok(me.spike > 0, 'armed')
+  run(state, 3, () => 0)
+  assert.equal(state.ball.stuckTo, me.id, 'and it welds on contact')
+
+  // Drive at the goal: the ball goes with us, and crossing the line counts.
+  const scoreBefore = state.score[C.TEAM_BLUE]
+  run(state, 90, (t, id) => (id === me.id ? C.IN_FWD | C.IN_BOOST : 0))
+  assert.ok(state.score[C.TEAM_BLUE] > scoreBefore, 'carried over the line')
+})
+
+test('a carried ball is knocked loose by anyone else reaching it', () => {
+  const state = rumbleGame()
+  const me = state.cars[0]
+  const foe = state.cars[1]
+  hand(me, 'spike')
+  me.x = 0
+  me.y = 0
+  me.heading = 0
+  state.ball.x = C.CAR_R + C.BALL_R - 0.3
+  state.ball.y = 0
+
+  fireItem(state, me.id)
+  run(state, 3, () => 0)
+  assert.equal(state.ball.stuckTo, me.id)
+
+  // The opponent arrives at the ball.
+  foe.x = state.ball.x + C.BALL_R + C.CAR_R - 0.2
+  foe.y = 0
+  foe.vx = -25
+  foe.vy = 0
+  step(state, {})
+  assert.equal(state.ball.stuckTo, null, 'a challenge frees it')
+})
+
+test('a spike lets go when its time is up', () => {
+  const state = rumbleGame()
+  const me = state.cars[0]
+  state.cars[1].y = C.MAX_Y - C.CAR_R
+  hand(me, 'spike')
+  me.x = 0
+  me.y = 0
+  me.heading = 0
+  state.ball.x = C.CAR_R + C.BALL_R - 0.3
+  state.ball.y = 0
+
+  fireItem(state, me.id)
+  run(state, 3, () => 0)
+  assert.equal(state.ball.stuckTo, me.id)
+
+  run(state, Math.ceil(C.SPIKE_SECONDS * C.TICK_HZ) + 5, () => 0)
+  assert.equal(state.ball.stuckTo, null)
+})
+
+test('a tornado drags opponents and the ball, but not team-mates', () => {
+  const state = rumbleGame()
+  addCar(state, 3, C.TEAM_BLUE)
+  const me = state.cars.find((c) => c.id === 1)
+  const foe = state.cars.find((c) => c.id === 2)
+  const mate = state.cars.find((c) => c.id === 3)
+  hand(me, 'tornado')
+
+  me.x = 0
+  me.y = 0
+  for (const c of [foe, mate]) {
+    c.x = 8
+    c.y = 0
+    c.vx = 0
+    c.vy = 0
+  }
+  state.ball.x = -8
+  state.ball.y = 0
+  state.ball.vx = 0
+  state.ball.vy = 0
+
+  fireItem(state, me.id)
+  run(state, 20, () => 0)
+  assert.ok(Math.hypot(foe.vx, foe.vy) > 1, 'the opponent is caught')
+  assert.ok(Math.hypot(state.ball.vx, state.ball.vy) > 1, 'and so is the ball')
+  assert.ok(Math.hypot(mate.vx, mate.vy) < 0.5, 'a team-mate is left out of it')
+})
+
+test('nine items still deal reproducibly', () => {
+  const a = run(rumbleGame(4242), 1200, scriptedBits)
+  const b = run(rumbleGame(4242), 1200, scriptedBits)
+  assert.equal(hashState(a), hashState(b))
 })
 
 test('the item bit survives the protocol', () => {

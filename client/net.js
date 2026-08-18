@@ -281,6 +281,7 @@ function blend(a, b, t) {
       vx: b.ball.vx,
       vy: b.ball.vy,
       freeze: b.ball.freeze,
+      stuckTo: b.ball.stuckTo,
     },
     cars: b.cars.map((cb) => {
       const ca = carsA.get(cb.id)
