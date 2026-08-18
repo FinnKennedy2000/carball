@@ -131,6 +131,7 @@ const ITEM_ART = {
 const SHELL_KINDS = ['green', 'red', 'blue']
 const HAZARD_KINDS = ['banana', 'trap', 'bomb']
 const ITEM_SCALE = 2.6 // models are about 1.2 across; a kart is KART_R 2.2
+const BOX_HALF = 0.43 * ITEM_SCALE // half an item box, which is what it spins about
 
 const AI_NAMES = ['Bolt', 'Ripsaw', 'Comet', 'Nitro', 'Sledge']
 const SOLO_ID = 1
@@ -489,9 +490,15 @@ function buildTrack() {
 
   // Item boxes: one model per spot, hidden while that box is on its cooldown.
   for (const box of K.boxSpots()) {
-    const mesh = buildItem('box')
-    mesh.scale.setScalar(ITEM_SCALE)
-    mesh.position.set(box.x, K.heightAt(box.s) + 1.4, box.y)
+    // Hung inside a pivot with the cube's own centre on the origin: the model
+    // is built standing on its base, and spinning that about the base is what
+    // buried half of every box in the road.
+    const model = buildItem('box')
+    model.scale.setScalar(ITEM_SCALE)
+    model.position.y = -BOX_HALF
+    const mesh = new THREE.Group()
+    mesh.add(model)
+    mesh.position.set(box.x, K.heightAt(box.s) + BOX_HALF + 0.6, box.y)
     scene.add(mesh)
     boxMeshes.push(mesh)
   }
@@ -732,8 +739,9 @@ function draw() {
     // The host holds boxes as objects; a snapshot carries only the cooldown,
     // since a box never moves.
     mesh.visible = (typeof box === 'number' ? box : box.cooldown) === 0
+    // Turning on its own axis only. A tumble on x swung the corners through the
+    // tarmac, which is the one thing a floating pickup must never do.
     mesh.rotation.y += 0.03
-    mesh.rotation.x += 0.01
   })
 
   syncPool(shellPool, race.shells, makeShell, (mesh, shell) => {
@@ -742,7 +750,9 @@ function draw() {
     dress(mesh, SHELL_KINDS, shell.kind ?? (shell.red ? 'red' : 'green'))
   })
   syncPool(hazardPool, race.hazards, makeHazard, (mesh, hazard) => {
-    mesh.position.set(hazard.x, groundY(hazard.x, hazard.y), hazard.y)
+    // Just clear of the tarmac: the banana's curve dips below its own origin,
+    // and laid flat on the road the underside of it disappears into the road.
+    mesh.position.set(hazard.x, groundY(hazard.x, hazard.y) + 0.3, hazard.y)
     // A fake box spins like the real thing: that is the whole trick of it.
     if (hazard.kind === 'fake') mesh.rotation.y += 0.03
     dress(mesh, HAZARD_KINDS, hazard.kind === 'fake' ? 'trap' : (hazard.kind ?? 'banana'))
