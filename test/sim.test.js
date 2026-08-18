@@ -7,6 +7,7 @@ import { ITEMS } from '../shared/rumble.js'
 import { parse } from '../shared/protocol.js'
 import { CARS, DEFAULT_CAR } from '../shared/cars.js'
 import { buildRow } from '../api/record-match.js'
+import { renameProblem } from '../client/auth.js'
 
 /** A repeatable pseudo-random input stream — no Math.random, so runs are comparable. */
 function scriptedBits(tick, id) {
@@ -783,3 +784,10 @@ test('the item bit survives the protocol', () => {
   assert.equal(parse({ t: 'input', cid: 'x', seq: 1, bits: C.IN_ALL + 1 }), null)
 })
 
+test('a refused rename says which rule it broke', () => {
+  // A clash is refused rather than suffixed the way sign-up does it.
+  assert.equal(renameProblem({ code: '23505' }), 'That name is taken')
+  assert.equal(renameProblem({ code: '23514' }), 'Two to sixteen characters')
+  // Anything else is passed through rather than dressed up as a rule.
+  assert.equal(renameProblem({ code: '42501', message: 'permission denied' }), 'permission denied')
+})

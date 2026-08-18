@@ -14,9 +14,11 @@ import { createClient } from '@supabase/supabase-js'
 // enough and nothing has to be copied by hand; the VITE_ pair is what a local
 // .env uses and takes precedence when both are present. envPrefix in
 // vite.config.js is what lets a NEXT_PUBLIC_ name reach the bundle at all.
-const url = import.meta.env.VITE_SUPABASE_URL || import.meta.env.NEXT_PUBLIC_SUPABASE_URL
-const anonKey =
-  import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+// Vite defines import.meta.env; plain Node does not, and the test imports this
+// module for the pure parts. Without the fallback the import itself throws.
+const env = import.meta.env ?? {}
+const url = env.VITE_SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL
+const anonKey = env.VITE_SUPABASE_ANON_KEY || env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 
 export const enabled = Boolean(url && anonKey)
 
@@ -67,6 +69,44 @@ export async function signUp(email, password, username) {
 export async function signIn(email, password) {
   const { error } = await supabase.auth.signInWithPassword({ email, password })
   if (error) throw new Error(error.message)
+}
+
+/**
+ * Change the signed-in player's name. The rules live in the database — unique,
+ * two to sixteen characters — so this does not restate them; it turns the
+ * constraint that fired into something worth reading.
+ *
+ * Unlike stats() and leaderboard(), which degrade quietly because a missing
+ * leaderboard costs nothing, this throws: a rename that silently did not happen
+ * is a lie told to the player's face.
+ */
+export async function rename(username) {
+  const wanted = username.trim()
+  const { data } = await supabase.auth.getSession()
+  const id = data.session?.user?.id
+  if (!id) throw new Error('Sign in first')
+
+  // Checked here as well as by the database, so the common mistake is answered
+  // without a round trip. The database remains the one that decides.
+  if (wanted.length < 2 || wanted.length > 16) throw new Error('Two to sixteen characters')
+
+  const { error } = await supabase.from('profiles').update({ username: wanted }).eq('id', id)
+  if (error) throw new Error(renameProblem(error))
+  return wanted
+}
+
+/**
+ * A Postgres error from a rename, as something a player can act on. Exported
+ * for the test: it is the part of a rename that is worth checking without a
+ * database in front of it.
+ */
+export function renameProblem(error) {
+  // A clash is refused rather than suffixed the way sign-up does it: you asked
+  // for a particular name, and quietly handing you a different one is worse
+  // than being told it is taken.
+  if (error.code === '23505') return 'That name is taken'
+  if (error.code === '23514') return 'Two to sixteen characters'
+  return error.message
 }
 
 export async function signOut() {

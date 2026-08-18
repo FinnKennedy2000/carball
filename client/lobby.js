@@ -104,6 +104,11 @@ el('code').addEventListener('keydown', (e) => {
 // Optional throughout: with Supabase unconfigured the panel stays hidden and
 // everyone plays as a guest with a typed-in name.
 
+const renameNote = (text, ok = false) => {
+  el('rename-note').textContent = text
+  el('rename-note').classList.toggle('ok', ok)
+}
+
 const accountNote = (text, ok = false) => {
   el('account-note').textContent = text
   el('account-note').classList.toggle('ok', ok)
@@ -120,6 +125,8 @@ if (auth.enabled) {
     el('topbar').hidden = !session
     if (session) {
       el('account-name').textContent = session.username
+      el('rename').value = session.username
+      renameNote('')
       // Shown and locked so a signed-in player is recognisable to others. It is
       // only a claim now — see the trust note in host.js.
       el('name').value = session.username
@@ -158,6 +165,32 @@ if (auth.enabled) {
       true,
     )
   }))
+  el('rename-go').addEventListener('click', async () => {
+    const wanted = el('rename').value.trim()
+    if (!wanted) {
+      renameNote('A name, please')
+      return
+    }
+    renameNote('')
+    try {
+      const username = await auth.rename(wanted)
+      // A profile update is not an auth change, so watchSession never fires for
+      // it and nothing repaints on its own. Everything showing the old name is
+      // brought up to date here.
+      el('account-name').textContent = username
+      el('name').value = username
+      renameNote('Saved.', true)
+      showRecord(username)
+      showLeaderboard()
+    } catch (err) {
+      renameNote(err.message)
+    }
+  })
+
+  el('rename').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') el('rename-go').click()
+  })
+
   el('sign-out').addEventListener('click', () => auth.signOut())
   el('password').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') el('sign-in').click()

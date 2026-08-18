@@ -105,6 +105,16 @@
 
             <div id="account-signed-in" hidden>
               <div class="card">
+                <div class="card-kicker">Your name</div>
+                <!-- The name others see. Your record follows the account rather
+                     than the name, so changing it keeps every goal. -->
+                <div class="row">
+                  <input id="rename" class="input" maxlength="16" autocomplete="off" />
+                  <button id="rename-go" class="btn btn-secondary">Save</button>
+                </div>
+                <div id="rename-note" class="hint"></div>
+              </div>
+              <div class="card">
                 <div class="card-kicker">Your record</div>
                 <div id="record">
                   <div><b id="record-goals">0</b><span>goals</span></div>
