@@ -54,7 +54,7 @@ export const handlers = {
  */
 export const enabled = supabaseEnabled
 
-export async function createRoom(name, team) {
+export async function createRoom(name, team, car) {
   const code = randomCode()
   await open(code)
 
@@ -66,7 +66,7 @@ export async function createRoom(name, team) {
       else if (data.type === 'started') resolve(data)
     }
   })
-  host.postMessage({ type: 'start', code, hostName: name, hostTeam: team })
+  host.postMessage({ type: 'start', code, hostName: name, hostTeam: team, hostCar: car })
 
   const { hostId, hostTeam, roster } = await started
   handlers.onJoined({ id: hostId, code, team: hostTeam })
@@ -74,13 +74,13 @@ export async function createRoom(name, team) {
   startSendingInput()
 }
 
-export async function joinRoom(name, code, team) {
+export async function joinRoom(name, code, team, car) {
   await open(code)
 
   const settled = waitForWelcome()
   // Everything aimed at the host goes on the one 'peer' event, so host.js has a
   // single validated entry point rather than a listener per message type.
-  send('peer', { t: 'hello', cid, name, team })
+  send('peer', { t: 'hello', cid, name, team, car })
   const welcome = await settled
   if (!welcome) {
     // We may have been seated after all, by a welcome that arrived too late to

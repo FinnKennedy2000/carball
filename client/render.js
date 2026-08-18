@@ -4,6 +4,7 @@
 
 import * as THREE from 'three'
 import * as C from '../shared/constants.js'
+import { CARS, DEFAULT_CAR } from '../shared/cars.js'
 
 const TEAM_COLOR = [0x3b82f6, 0xf97316]
 const GROUND = 0x1b2432
@@ -13,6 +14,7 @@ let scene
 let camera
 let localId = null
 const carMeshes = new Map() // id -> Group
+const carModels = new Map() // id -> the model index its mesh was built from
 let ballMesh
 let localRing
 let labelBox
@@ -152,44 +154,58 @@ function lineMaterial(color = 0xffffff, opacity = 0.14) {
   return new THREE.MeshBasicMaterial({ color, transparent: true, opacity })
 }
 
-function makeCar(team) {
+/** One of the models in shared/cars.js, in the side's colour. */
+export function makeCar(team, model = DEFAULT_CAR) {
+  const spec = CARS[model] ?? CARS[DEFAULT_CAR]
   const group = new THREE.Group()
+
   const body = new THREE.Mesh(
-    new THREE.BoxGeometry(4, 1.5, 2.6),
+    new THREE.BoxGeometry(...spec.body),
     new THREE.MeshStandardMaterial({ color: TEAM_COLOR[team], flatShading: true, roughness: 0.45 }),
   )
-  body.position.y = 0.9
+  body.position.y = spec.body[1] / 2 + 0.15
   body.castShadow = true
   group.add(body)
 
   const roof = new THREE.Mesh(
-    new THREE.BoxGeometry(2, 0.8, 2.1),
+    new THREE.BoxGeometry(...spec.roof),
     new THREE.MeshStandardMaterial({ color: 0x11151d, flatShading: true }),
   )
-  roof.position.set(-0.35, 1.9, 0)
+  roof.position.set(spec.roofAt[0], spec.roofAt[1], 0)
   roof.castShadow = true
   group.add(roof)
 
   // A nose flash so facing is readable at this camera distance.
   const nose = new THREE.Mesh(
-    new THREE.BoxGeometry(0.5, 1.1, 2.2),
+    new THREE.BoxGeometry(...spec.nose),
     new THREE.MeshStandardMaterial({ color: 0xf4f4f5 }),
   )
-  nose.position.set(2.0, 0.9, 0)
+  nose.position.set(spec.body[0] / 2, body.position.y, 0)
   group.add(nose)
 
   return group
 }
 
-/** `nameOf` maps a car id to a player name, or null while the roster is unknown. */
-export function draw(state, nameOf = () => null) {
+/**
+ * `nameOf` and `carOf` map a car id to its player's name and chosen model, both
+ * null until the roster arrives. A car is drawn before that — the snapshot beats
+ * the roster on a mid-match join — so the mesh is rebuilt if the model turns out
+ * to be something other than what it was first built with.
+ */
+export function draw(state, nameOf = () => null, carOf = () => null) {
   const seen = new Set()
   for (const car of state.cars) {
     seen.add(car.id)
+    const model = carOf(car.id) ?? DEFAULT_CAR
     let mesh = carMeshes.get(car.id)
+    if (mesh && carModels.get(car.id) !== model) {
+      scene.remove(mesh)
+      mesh = null
+    }
     if (!mesh) {
-      mesh = makeCar(car.team)
+      mesh = makeCar(car.team, model)
       carMeshes.set(car.id, mesh)
+      carModels.set(car.id, model)
       scene.add(mesh)
     }
     mesh.position.set(car.x, 0, car.y)
@@ -205,6 +221,7 @@ export function draw(state, nameOf = () => null) {
     if (seen.has(id)) continue
     scene.remove(mesh)
     carMeshes.delete(id)
+    carModels.delete(id)
     carLabels.get(id)?.remove()
     carLabels.delete(id)
   }

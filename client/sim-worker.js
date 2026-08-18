@@ -22,6 +22,7 @@ onmessage = ({ data }) => {
         live: (state) => postMessage({ type: 'live', s: state }),
         hostName: data.hostName,
         hostTeam: data.hostTeam,
+        hostCar: data.hostCar,
       })
       postMessage({ type: 'started', hostId: host.hostId, hostTeam: host.hostTeam, roster: host.roster() })
       break

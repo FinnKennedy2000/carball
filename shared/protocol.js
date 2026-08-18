@@ -5,6 +5,7 @@
 // messages from peers it has no reason to trust, exactly as the old server did.
 
 import { IN_ALL, TEAM_BLUE, TEAM_ORANGE } from './constants.js'
+import { CARS, DEFAULT_CAR } from './cars.js'
 
 const CODE_RE = /^[A-Z]{4}$/
 const CONTROL_RE = /[\u0000-\u001f\u007f]/g
@@ -26,7 +27,7 @@ export function parse(msg) {
     case 'hello': {
       const name = cleanName(msg.name)
       if (name === null) return null
-      return { t: 'hello', cid, name, team: cleanTeam(msg.team) }
+      return { t: 'hello', cid, name, team: cleanTeam(msg.team), car: cleanCar(msg.car) }
     }
     case 'input': {
       if (!Number.isInteger(msg.seq) || msg.seq < 0) return null
@@ -55,6 +56,14 @@ export function cleanCid(cid) {
 /** A side request. Anything that is not a valid team means "put me anywhere". */
 export function cleanTeam(team) {
   return team === TEAM_BLUE || team === TEAM_ORANGE ? team : null
+}
+
+/**
+ * A chosen car model. Cosmetic, so anything unrecognised is the default rather
+ * than a rejected message: a peer with a stale build should still get a seat.
+ */
+export function cleanCar(car) {
+  return Number.isInteger(car) && car >= 0 && car < CARS.length ? car : DEFAULT_CAR
 }
 
 export function cleanCode(code) {

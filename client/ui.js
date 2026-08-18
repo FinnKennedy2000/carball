@@ -141,6 +141,11 @@ export function nameOf(id) {
   return roster.find((p) => p.id === id)?.name ?? null
 }
 
+/** A car's chosen model, or null while the roster is unknown — see render.js. */
+export function carOf(id) {
+  return roster.find((p) => p.id === id)?.car ?? null
+}
+
 function bannerText(state) {
   if (performance.now() < bannerUntil) return bannerOverride
   // The waiting strip carries this now, so the pitch stays clear.

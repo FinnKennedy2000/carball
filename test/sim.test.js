@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import * as C from '../shared/constants.js'
 import { createState, addCar, step, kickoff, hashState } from '../shared/sim.js'
 import { parse } from '../shared/protocol.js'
+import { CARS, DEFAULT_CAR } from '../shared/cars.js'
 import { buildRow } from '../api/record-match.js'
 
 /** A repeatable pseudo-random input stream — no Math.random, so runs are comparable. */
@@ -420,6 +421,16 @@ test('a reported result becomes a row, or is refused', () => {
   ]) {
     assert.equal(buildRow('u', bad), null, `should reject: ${JSON.stringify(bad)}`)
   }
+})
+
+test('a claimed car model is bounded, not trusted', () => {
+  const hello = (car) => parse({ t: 'hello', cid: 'peer-1', name: 'x', car })
+  // Cosmetic, so junk means the default rather than a dropped message: a peer on
+  // a stale build still gets a seat.
+  for (const junk of [undefined, null, -1, 1.5, '1', CARS.length, 1e9, {}]) {
+    assert.equal(hello(junk).car, DEFAULT_CAR, `should default: ${JSON.stringify(junk)}`)
+  }
+  for (let i = 0; i < CARS.length; i++) assert.equal(hello(i).car, i)
 })
 
 test('malformed peer messages are rejected without throwing', () => {

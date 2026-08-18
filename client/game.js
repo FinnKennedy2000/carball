@@ -8,7 +8,7 @@
 
 import { initRenderer, setLocalId, draw } from './render.js'
 import { createRoom, joinRoom, beginMatch, sampleState, handlers, enabled as netEnabled } from './net.js'
-import { cleanCode, cleanTeam } from '../shared/protocol.js'
+import { cleanCode, cleanTeam, cleanCar } from '../shared/protocol.js'
 import { reportMyMatch } from './stats.js'
 import { startInput } from './input.js'
 import { initSound, updateSound } from './sound.js'
@@ -19,6 +19,7 @@ import {
   gateNote,
   gatePrompt,
   nameOf,
+  carOf,
   updateHud,
   flashBanner,
   showMatchOver,
@@ -31,6 +32,9 @@ const el = (id) => document.getElementById(id)
 // The lobby leaves these behind on its way here; an invite link has neither.
 const STORED_NAME = 'carball.name'
 const STORED_TEAM = 'carball.team'
+// Set by the lobby, and in localStorage rather than sessionStorage: a car is a
+// standing preference, so an invite link opened cold still uses it.
+const STORED_CAR = 'carball.car'
 
 let localId = null
 let myTeam = null
@@ -93,6 +97,9 @@ const wanted = location.hash.slice(1)
 const code = cleanCode(wanted)
 const opening = wanted.toUpperCase() === 'NEW'
 const team = cleanTeam(Number.parseInt(sessionStorage.getItem(STORED_TEAM), 10))
+// Chosen in the lobby and kept there; an invite link arrives with whatever the
+// player last picked on this device, or the default on their first visit.
+const car = cleanCar(Number.parseInt(localStorage.getItem(STORED_CAR), 10))
 
 if (!code && !opening) location.replace('./index.html') // nothing to join
 else if (!netEnabled) gateNote('Multiplayer is not configured on this deployment')
@@ -137,8 +144,8 @@ async function join(name) {
   // it to resolve would leave the first frames thinking they are not the host.
   setHost(opening)
   try {
-    if (opening) await createRoom(name, team)
-    else await joinRoom(name, code, team)
+    if (opening) await createRoom(name, team, car)
+    else await joinRoom(name, code, team, car)
   } catch (err) {
     gatePrompt('Try again', err.message)
   }
@@ -166,7 +173,7 @@ function firstSession() {
 function frame() {
   const state = sampleState()
   if (state) {
-    draw(state, nameOf)
+    draw(state, nameOf, carOf)
     updateHud(state, localId)
     updateSound(state, localId)
   }

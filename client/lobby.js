@@ -2,7 +2,8 @@
 // match. The match itself lives on game.html, which this page hands off to with
 // the room in the hash — see game.js.
 
-import { cleanCode } from '../shared/protocol.js'
+import { cleanCode, cleanCar } from '../shared/protocol.js'
+import { CARS } from '../shared/cars.js'
 import * as auth from './auth.js'
 
 const el = (id) => document.getElementById(id)
@@ -11,6 +12,9 @@ const el = (id) => document.getElementById(id)
 // business in a link people paste to each other.
 const STORED_NAME = 'carball.name'
 const STORED_TEAM = 'carball.team'
+// The car outlives the tab, unlike the side and the name: it is a preference
+// rather than a decision about this match, so localStorage.
+const STORED_CAR = 'carball.car'
 
 // Invite links used to point here. Keep the old ones working.
 if (/^#[A-Za-z]{4}$/.test(location.hash)) location.replace(`./game.html${location.hash}`)
@@ -29,11 +33,29 @@ for (const btn of document.querySelectorAll('#teams .team')) {
   })
 }
 
+// Car buttons, built from the model list itself.
+let wantedCar = cleanCar(Number.parseInt(localStorage.getItem(STORED_CAR), 10))
+el('cars').replaceChildren(
+  ...CARS.map((spec, i) => {
+    const btn = document.createElement('button')
+    btn.className = `btn btn-secondary car${i === wantedCar ? ' on' : ''}`
+    btn.textContent = spec.name
+    btn.addEventListener('click', () => {
+      for (const other of el('cars').children) other.classList.remove('on')
+      btn.classList.add('on')
+      wantedCar = i
+      localStorage.setItem(STORED_CAR, String(i))
+    })
+    return btn
+  }),
+)
+
 /** Hand the choice to the game page. A room is only ever opened there. */
 function play(hash) {
   const name = el('name').value.trim()
   if (name) sessionStorage.setItem(STORED_NAME, name)
   sessionStorage.setItem(STORED_TEAM, String(wantedTeam))
+  localStorage.setItem(STORED_CAR, String(wantedCar))
   location.href = `./game.html#${hash}`
 }
 

@@ -651,17 +651,25 @@ body {
   box-shadow: inset 1px 0 0 var(--color-neutral-900);
 }
 
-#teams {
+#teams,
+#cars {
   display: flex;
   gap: var(--space-2);
 }
 
-#teams .team {
+/* Five models do not fit a row at the lobby's width. */
+#cars {
+  flex-wrap: wrap;
+}
+
+#teams .team,
+#cars .car {
   flex: 1;
   color: var(--color-neutral-500);
 }
 
-#teams .team.on {
+#teams .team.on,
+#cars .car.on {
   border-color: var(--color-accent);
   color: var(--color-accent-300);
 }
