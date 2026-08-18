@@ -111,6 +111,11 @@ export const MAGNET_ACCEL = 26
 // The magnet reaches further than a punch — it is a pull, and needs to be worth
 // holding rather than firing the moment the ball is close.
 export const MAGNET_RANGE = 24
+// How long a fired item stays marked on the car that fired it, purely so the
+// renderer has something to draw. A one-shot item is over in a single tick and
+// snapshots only go out at SNAPSHOT_HZ, so without this a peer would never see
+// a Haymaker happen at all. Long enough to survive five or six snapshots.
+export const FX_SECONDS = 0.45
 
 export const TEAM_BLUE = 0
 export const TEAM_ORANGE = 1

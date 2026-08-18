@@ -437,7 +437,7 @@ export function hashState(state) {
   // The seed and the items are hashed too, so the determinism test covers a
   // Rumble match rather than only the physics underneath it.
   nums.push(state.seed, state.ball.freeze ?? 0)
-  for (const c of state.cars) nums.push(c.id, c.x, c.y, c.vx, c.vy, c.heading, c.boost, c.item ?? -1, c.itemTimer ?? -1)
+  for (const c of state.cars) nums.push(c.id, c.x, c.y, c.vx, c.vy, c.heading, c.boost, c.item ?? -1, c.itemTimer ?? -1, c.fx ?? -1, c.fxTimer ?? -1)
   let h = 2166136261
   for (const n of nums) {
     const s = String(Math.round(n * 1e6))

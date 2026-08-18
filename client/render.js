@@ -5,9 +5,30 @@
 import * as THREE from 'three'
 import * as C from '../shared/constants.js'
 import { CARS, DEFAULT_CAR } from '../shared/cars.js'
+import { ITEMS } from '../shared/rumble.js'
 
 const TEAM_COLOR = [0x3b82f6, 0xf97316]
 const GROUND = 0x1b2432
+
+// One colour per item, so what went off is readable from the ring alone rather
+// than only from the HUD. Keyed by name: ITEMS' order is a wire format, and this
+// should not have to move when something is appended to it.
+const ITEM_COLOR = {
+  haymaker: 0xffd166,
+  boot: 0xff6b6b,
+  freeze: 0x6aa8ff,
+  hook: 0x7ee7ff,
+  magnet: 0xc084fc,
+}
+// The burst ring's radius at full spread, and the tether's height off the deck.
+const BURST_R = 6
+const TETHER_Y = 1.4
+const TETHER_R = 0.16
+// Reused so a per-frame tether costs no allocation.
+const FROM = new THREE.Vector3()
+const TO = new THREE.Vector3()
+const DIR = new THREE.Vector3()
+const UP = new THREE.Vector3(0, 1, 0)
 
 let renderer
 let scene
@@ -16,7 +37,11 @@ let localId = null
 const carMeshes = new Map() // id -> Group
 const carModels = new Map() // id -> the model index its mesh was built from
 let ballMesh
+let freezeRing
 let localRing
+// Per-car Rumble visuals, built on demand and tracking carMeshes. A car without
+// an item in flight keeps its objects, hidden: six cars is not worth churning.
+const carFx = new Map() // id -> { tether, burst }
 let labelBox
 const carLabels = new Map() // id -> span, tracking carMeshes
 // Above the roof, and above the ball, so a label never sits on what it names.
@@ -59,6 +84,22 @@ export function initRenderer(canvas) {
   )
   ballMesh.castShadow = true
   scene.add(ballMesh)
+
+  // Around a held ball. Always in the scene, shown only while it hangs.
+  freezeRing = new THREE.Mesh(
+    new THREE.RingGeometry(C.BALL_R + 0.5, C.BALL_R + 1.1, 32),
+    new THREE.MeshBasicMaterial({
+      color: ITEM_COLOR.freeze,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  )
+  freezeRing.rotation.x = -Math.PI / 2
+  freezeRing.visible = false
+  scene.add(freezeRing)
 
   localRing = new THREE.Mesh(
     new THREE.RingGeometry(C.CAR_R + 0.5, C.CAR_R + 1.1, 24),
@@ -210,6 +251,7 @@ export function draw(state, nameOf = () => null, carOf = () => null) {
     }
     mesh.position.set(car.x, 0, car.y)
     mesh.rotation.y = -car.heading
+    drawFx(car, state.ball)
     drawLabel(car, nameOf(car.id))
     if (car.id === localId) {
       localRing.visible = true
@@ -224,6 +266,11 @@ export function draw(state, nameOf = () => null, carOf = () => null) {
     carModels.delete(id)
     carLabels.get(id)?.remove()
     carLabels.delete(id)
+    const fx = carFx.get(id)
+    if (fx) {
+      scene.remove(fx.tether, fx.burst)
+      carFx.delete(id)
+    }
   }
   if (!seen.has(localId)) localRing.visible = false
 
@@ -234,8 +281,98 @@ export function draw(state, nameOf = () => null, carOf = () => null) {
   // A held ball hangs perfectly still, which reads as a bug unless it is lit as
   // something someone did. Rumble only; in a normal match freeze is never set.
   ballMesh.material.emissive.setHex(state.ball.freeze > 0 ? 0x2b6cff : 0x000000)
+  freezeRing.visible = state.ball.freeze > 0
+  if (freezeRing.visible) {
+    freezeRing.position.set(state.ball.x, 0.05, state.ball.y)
+    // Turning slowly, so a held ball still reads as something being done to it
+    // rather than as a dropped frame.
+    freezeRing.rotation.z += 0.01
+  }
 
   renderer.render(scene, camera)
+}
+
+/**
+ * A car's Rumble visuals: the tether to the ball while a hook or a magnet runs,
+ * and an expanding ring for whatever it last fired. Both are driven entirely by
+ * state the snapshot carries, so a peer sees them exactly as the host does.
+ */
+function drawFx(car, ball) {
+  // Nothing here exists in a normal match, and there is no reason to build it.
+  if (car.fx === undefined && car.hook === undefined) return
+
+  let fx = carFx.get(car.id)
+  if (!fx) {
+    fx = { tether: makeTether(), burst: makeBurst() }
+    scene.add(fx.tether, fx.burst)
+    carFx.set(car.id, fx)
+  }
+
+  // The tether. A hook pulls the car in, a magnet drags the ball out — one line
+  // either way, coloured for which of the two is happening.
+  const pulling = car.hook > 0 ? 'hook' : car.magnet > 0 ? 'magnet' : null
+  fx.tether.visible = pulling !== null
+  if (pulling) {
+    // A cylinder rather than a line: WebGL ignores linewidth, so a THREE.Line is
+    // one pixel wide whatever it is asked for — which at this camera distance is
+    // not a tether, it is a scratch on the screen.
+    FROM.set(car.x, TETHER_Y, car.y)
+    TO.set(ball.x, C.BALL_R, ball.y)
+    DIR.subVectors(TO, FROM)
+    const length = DIR.length()
+    fx.tether.position.copy(FROM).addScaledVector(DIR, 0.5)
+    fx.tether.scale.set(1, Math.max(length, 0.001), 1)
+    // The geometry stands along +y, so it is turned to face down the gap.
+    if (length > 1e-6) fx.tether.quaternion.setFromUnitVectors(UP, DIR.divideScalar(length))
+    fx.tether.material.color.setHex(ITEM_COLOR[pulling])
+  }
+
+  // The burst, expanding and fading over the life of the mark.
+  const item = car.fx === null || car.fx === undefined ? null : ITEMS[car.fx]
+  fx.burst.visible = item !== null && car.fxTimer > 0
+  if (fx.burst.visible) {
+    const left = Math.min(1, car.fxTimer / C.FX_SECONDS)
+    fx.burst.position.set(car.x, 0.04, car.y)
+    fx.burst.scale.setScalar(1 + (1 - left) * BURST_R)
+    fx.burst.material.color.setHex(ITEM_COLOR[item.key] ?? 0xffffff)
+    fx.burst.material.opacity = left
+  }
+}
+
+function makeTether() {
+  // A unit-length cylinder, stretched and turned into place each frame.
+  const tether = new THREE.Mesh(
+    new THREE.CylinderGeometry(TETHER_R, TETHER_R, 1, 8, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.9,
+      // Additive, so it lights up against a deliberately dark pitch instead of
+      // sinking into it.
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  )
+  tether.visible = false
+  return tether
+}
+
+function makeBurst() {
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.82, 1.2, 32),
+    new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  )
+  ring.rotation.x = -Math.PI / 2
+  ring.visible = false
+  return ring
 }
 
 /**

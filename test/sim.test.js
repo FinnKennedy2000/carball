@@ -727,8 +727,59 @@ test('kickoff clears whatever anyone was holding', () => {
   assert.equal(state.ball.freeze, 0)
 })
 
+test('firing marks the car for long enough to be drawn', () => {
+  const state = rumbleGame()
+  const me = state.cars[0]
+  hand(me, 'haymaker')
+  me.x = -10
+  me.y = 0
+  state.ball.x = 0
+  state.ball.y = 0
+
+  assert.equal(me.fx, null)
+  fireItem(state, me.id)
+  assert.equal(ITEMS[me.fx].key, 'haymaker')
+  // Long enough that a peer reading snapshots at SNAPSHOT_HZ cannot miss it.
+  assert.ok(me.fxTimer * C.SNAPSHOT_HZ > 3)
+
+  run(state, Math.ceil(C.FX_SECONDS * C.TICK_HZ) + 2, () => 0)
+  assert.equal(me.fx, null, 'and it clears itself')
+  assert.equal(me.fxTimer, 0)
+})
+
+test('a boot marks the car it lands on, not just the one that fired', () => {
+  const state = rumbleGame()
+  const me = state.cars[0]
+  const foe = state.cars[1]
+  hand(me, 'boot')
+  me.x = 0
+  me.y = 0
+  foe.x = 8
+  foe.y = 0
+  state.ball.x = 0
+  state.ball.y = C.MAX_Y - C.BALL_R // out of the way
+
+  fireItem(state, me.id)
+  assert.equal(ITEMS[foe.fx].key, 'boot', 'the victim is marked where it landed')
+  assert.equal(ITEMS[me.fx].key, 'boot')
+})
+
+test('a fluffed item still marks the car that spent it', () => {
+  const state = rumbleGame()
+  const me = state.cars[0]
+  hand(me, 'haymaker')
+  me.x = -C.ITEM_RANGE - 15 // nowhere near the ball
+  me.y = 0
+  state.ball.x = 0
+  state.ball.y = 0
+
+  fireItem(state, me.id)
+  assert.notEqual(me.fx, null, 'spending it should look like something happened')
+})
+
 test('the item bit survives the protocol', () => {
   const msg = parse({ t: 'input', cid: 'x', seq: 1, bits: C.IN_ITEM })
   assert.equal(msg.bits, C.IN_ITEM)
   assert.equal(parse({ t: 'input', cid: 'x', seq: 1, bits: C.IN_ALL + 1 }), null)
 })
+

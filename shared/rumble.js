@@ -30,6 +30,10 @@ export function initCarItems(car) {
   car.itemDown = false
   car.hook = 0
   car.magnet = 0
+  // What just went off on this car, and for how much longer it is worth
+  // drawing. Cosmetic — nothing in the physics reads either of them.
+  car.fx = null
+  car.fxTimer = 0
 }
 
 /**
@@ -50,6 +54,11 @@ export function stepRumble(state, inputs, dt) {
   for (const car of state.cars) {
     const bits = inputs[car.id] | 0
     deal(state, car, dt)
+
+    if (car.fxTimer > 0) {
+      car.fxTimer = Math.max(0, car.fxTimer - dt)
+      if (car.fxTimer === 0) car.fx = null
+    }
 
     const down = (bits & C.IN_ITEM) !== 0
     if (down && !car.itemDown && car.item !== null) {
@@ -82,8 +91,18 @@ function roll(state) {
   return Math.floor((state.seed >>> 16) / 65536 * ITEMS.length) % ITEMS.length
 }
 
+/** Mark a car as having just been on one end of an item. Drawn, never simulated. */
+function mark(car, item) {
+  car.fx = item
+  car.fxTimer = C.FX_SECONDS
+}
+
 /** Spend an item. One-shot items act here; timed ones just start their clock. */
 function fire(state, car, item) {
+  // Marked whether or not it connects: spending an item you then fluffed should
+  // still look like something happened.
+  mark(car, item)
+
   switch (ITEMS[item].key) {
     case 'haymaker': {
       const d = toward(car, state.ball)
@@ -103,6 +122,8 @@ function fire(state, car, item) {
         const d = toward(car, target)
         target.vx += d.nx * C.BOOT_IMPULSE
         target.vy += d.ny * C.BOOT_IMPULSE
+        // The victim too: a boot is most legible where it lands.
+        mark(target, item)
       }
       break
     }
