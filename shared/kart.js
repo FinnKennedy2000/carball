@@ -80,12 +80,14 @@ export const ITEMS = [
 ]
 /**
  * Roll weights for the leader and for the tail of the field, interpolated by
- * where you actually are. This is the rubber band: the front gets things to
- * throw behind it, the back gets things that close a gap. Exported so the way-in
- * screen can draw the same numbers the roll uses rather than a copy of them.
+ * where you actually are. This is the rubber band, and it is steep: leading,
+ * you almost only ever find a banana or a green shell — something to throw
+ * behind you — while the back of the field is where the shells that chase, the
+ * bolt and the star come from. Exported so the way-in screen can draw the same
+ * numbers the roll uses rather than a copy of them.
  */
-export const ROLL_FRONT = [1, 5, 4, 0.6, 0.15, 0.25]
-export const ROLL_BACK = [4, 1, 1, 4, 2.5, 2]
+export const ROLL_FRONT = [0.5, 6, 4.5, 0.2, 0.02, 0.05]
+export const ROLL_BACK = [3.5, 0.5, 0.7, 4.5, 3, 2.5]
 
 export function trackPoint(t) {
   const a = t * Math.PI * 2
@@ -111,6 +113,40 @@ function lapFraction(s) {
  */
 export function halfWidthAt(s) {
   return HALF_WIDTH - NARROWING * (0.5 - 0.5 * Math.cos(lapFraction(s) * Math.PI * 4))
+}
+
+// Elevation -----------------------------------------------------------------
+// The road climbs and drops around the lap. Height is a function of `s` alone:
+// the simulation stays a plan view — a kart's x and y are where it is on the
+// map — and the hills are what you see, plus a pull along the road that costs
+// you on a climb and pays it back on the way down.
+const HILL = 13 // metres from the mean to a crest
+// How hard a gradient pulls, in m/s^2 per unit of rise-over-run. Arcade rather
+// than g: at the steepest part of the circuit this is about an eighth of what
+// the engine gives you, which is felt without being fought.
+const GRAVITY = 22
+// The two waves the profile is made of: a long rise and fall, and a shorter one
+// laid across it so the crests are not evenly spaced. Whole numbers of cycles
+// per lap, or the road would not meet itself at the line.
+const HILLS = [
+  { cycles: 2, weight: 0.62, phase: 0 },
+  { cycles: 3, weight: 0.38, phase: 1.9 },
+]
+
+/** The height of the road at a distance around the lap. */
+export function heightAt(s) {
+  const a = lapFraction(s) * Math.PI * 2
+  let h = 0
+  for (const w of HILLS) h += w.weight * Math.sin(w.cycles * a + w.phase)
+  return HILL * h
+}
+
+/** Its gradient there — rise per metre along the road. */
+export function slopeAt(s) {
+  const a = lapFraction(s) * Math.PI * 2
+  let d = 0
+  for (const w of HILLS) d += w.weight * w.cycles * Math.cos(w.cycles * a + w.phase)
+  return ((HILL * Math.PI * 2) / TRACK.length) * d
 }
 
 /**
@@ -220,7 +256,9 @@ export function boxSpots() {
     const s = (i + 0.5) * (TRACK.length / BOX_ROWS)
     for (const lane of [-6, 0, 6]) {
       const p = pointAt(s)
-      out.push({ x: p.x + p.nx * lane, y: p.y + p.ny * lane })
+      // `s` rides along so the renderer can stand the box on the road's height
+      // without projecting it back onto the circuit to find out.
+      out.push({ x: p.x + p.nx * lane, y: p.y + p.ny * lane, s })
     }
   }
   return out
@@ -410,6 +448,12 @@ function stepKart(state, kart, bits, dt) {
   kart.vy += fy * accel * dt
 
   const hit = project(kart.x, kart.y)
+  // The hill: gravity down the road rather than down the kart's nose, so a
+  // climb takes the same off you whichever way you are pointing.
+  const slope = slopeAt(hit.s)
+  kart.vx -= hit.tx * GRAVITY * slope * dt
+  kart.vy -= hit.ty * GRAVITY * slope * dt
+
   const offroad = Math.abs(hit.lateral) > halfWidthAt(hit.s)
   const fwd = kart.vx * fx + kart.vy * fy
   const lat = kart.vx * -fy + kart.vy * fx

@@ -262,11 +262,17 @@ test('the roll favours the back of the field', () => {
       me.x = spot.x
       me.y = spot.y
       step(state, {})
-      if (me.item !== null) tally[ITEMS[me.item].key === 'banana' ? 1 : 2]++
+      if (me.item === null) continue
+      const key = ITEMS[me.item].key
+      // The basics you throw behind you, against the ones that close a gap.
+      if (key === 'banana' || key === 'green') tally[1]++
+      if (key === 'red' || key === 'bolt' || key === 'star') tally[2]++
     }
   }
-  // Bananas are a leader's item, so the front of the field should see far more.
-  assert.ok(front[1] > back[1], `${front[1]} vs ${back[1]}`)
+  // Leading, it should be nearly all bananas and green shells; at the back,
+  // nearly none of them and most of the chasing ones.
+  assert.ok(front[1] > back[1] * 3, `basics: ${front[1]} vs ${back[1]}`)
+  assert.ok(back[2] > front[2] * 3, `strong: ${back[2]} vs ${front[2]}`)
 })
 
 test('a lap only turns over on the line, not on a lateral wobble', () => {

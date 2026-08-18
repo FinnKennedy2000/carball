@@ -89,6 +89,14 @@ let accumulator = 0
 // rebuilt on a frame where nothing about them changed.
 let shownItem
 let shownEffects = ''
+// The slot reels through every item before settling on the one you actually
+// picked up: which is which matters, and a mark that simply appears is missed
+// at the speed the rest of the screen is moving.
+const REEL_MS = 900
+let heldItem // what the sim says is in the slot, reel or no reel
+let reelUntil = 0
+let reelAt = 0 // when the reel takes its next step
+let reelIndex = 0
 // The lap the banner last called, and when the final-lap flash started: a lap
 // turning over is a moment, and the banner has to be told to stop showing it.
 let calledLap = -1
@@ -226,6 +234,8 @@ function startSolo() {
   myId = SOLO_ID
   results = null
   shownItem = undefined
+  heldItem = undefined
+  reelUntil = 0
   calledLap = -1
   flashUntil = 0
   el('gate').hidden = true
@@ -359,12 +369,14 @@ function initRenderer() {
 }
 
 function buildTrack() {
+  // Far below the lowest dip, so the hills never poke through it: at this
+  // distance it is a horizon rather than ground you look at.
   const ground = new THREE.Mesh(
     new THREE.CircleGeometry(K.TRACK_R * 2.2, 64),
-    new THREE.MeshStandardMaterial({ color: 0x1c3a26, roughness: 1 }),
+    new THREE.MeshStandardMaterial({ color: 0x16301f, roughness: 1 }),
   )
   ground.rotation.x = -Math.PI / 2
-  ground.position.y = -0.2
+  ground.position.y = -20
   scene.add(ground)
 
   // The road's width varies around the lap, so every strip is built from
@@ -374,6 +386,10 @@ function buildTrack() {
   const onVoid = (i) => K.overVoid(K.TRACK.cum[i])
   const solid = (i) => !onVoid(i) && !onVoid((i + 1) % K.TRACK_N)
 
+  // Grass that climbs with the road, so the tarmac is laid on a hillside rather
+  // than floating over a flat green plate. Kept in close: pushed much further
+  // out, the inside of the hairpin folds over itself.
+  scene.add(ribbon((i) => half(i) + 22, -0.35, 0x1c3a26, 1, solid))
   // Under everything, and only where the ground gives out: the drop.
   scene.add(ribbon((i) => half(i) + 34, -0.9, 0x05070c, 1, (i) => !solid(i)))
   scene.add(ribbon((i) => half(i) + K.KERB, 0.01, 0x6b4a22, 1, solid)) // the kerb, then
@@ -402,7 +418,7 @@ function buildTrack() {
   })
   for (const box of K.boxSpots()) {
     const mesh = new THREE.Mesh(geo, mat)
-    mesh.position.set(box.x, 2, box.y)
+    mesh.position.set(box.x, K.heightAt(box.s) + 2, box.y)
     scene.add(mesh)
     boxMeshes.push(mesh)
   }
@@ -416,6 +432,7 @@ function buildTrack() {
 function buildFinish() {
   const p = K.pointAt(0)
   const half = K.halfWidthAt(0)
+  const base = K.heightAt(0)
   // Along the road, and across it. Everything below is placed in those two.
   const ax = p.tx
   const az = p.ty
@@ -433,7 +450,7 @@ function buildFinish() {
       const across = -half + size * (col + 0.5)
       const along = size * (row - 0.5)
       mesh.rotation.x = -Math.PI / 2
-      mesh.position.set(p.x + bx * across + ax * along, 0.07, p.y + bz * across + az * along)
+      mesh.position.set(p.x + bx * across + ax * along, base + 0.07, p.y + bz * across + az * along)
       scene.add(mesh)
     }
   }
@@ -446,14 +463,14 @@ function buildFinish() {
   for (const side of [1, -1]) {
     const post = new THREE.Mesh(postGeo, postMat)
     const across = side * (half + 1.6)
-    post.position.set(p.x + bx * across, postH / 2, p.y + bz * across)
+    post.position.set(p.x + bx * across, base + postH / 2, p.y + bz * across)
     scene.add(post)
   }
   const beam = new THREE.Mesh(
     new THREE.BoxGeometry((half + 2.2) * 2, 2.2, 1),
     new THREE.MeshStandardMaterial({ color: 0x9184d9, emissive: 0x2b2741, flatShading: true }),
   )
-  beam.position.set(p.x, postH - 1, p.y)
+  beam.position.set(p.x, base + postH - 1, p.y)
   // Its length runs across the road, not along it: a turn about y maps the
   // box's own +x onto the across vector.
   beam.rotation.y = Math.atan2(-bz, bx)
@@ -465,7 +482,8 @@ function buildFinish() {
  * index, and `keep` decides which segments are drawn at all.
  */
 function ribbon(halfWidth, y, color, opacity = 1, keep) {
-  const geo = strip(halfWidth, (x, z) => [x, y, z], keep)
+  // `y` is a height above the road now, not a height above the world.
+  const geo = strip(halfWidth, (x, z, i) => [x, nodeY(i) + y, z], keep)
   return new THREE.Mesh(
     geo,
     new THREE.MeshStandardMaterial({
@@ -490,7 +508,9 @@ function dashes(halfWidth, y, color, opacity) {
     const nx = (-(b.y - a.y) / len) * halfWidth
     const nz = ((b.x - a.x) / len) * halfWidth
     const v = verts.length / 3
-    verts.push(a.x + nx, y, a.y + nz, a.x - nx, y, a.y - nz, b.x + nx, y, b.y + nz, b.x - nx, y, b.y - nz)
+    const ay = nodeY(i) + y
+    const by = nodeY((i + 1) % pts.length) + y
+    verts.push(a.x + nx, ay, a.y + nz, a.x - nx, ay, a.y - nz, b.x + nx, by, b.y + nz, b.x - nx, by, b.y - nz)
     idx.push(v, v + 2, v + 1, v + 2, v + 3, v + 1)
   }
   const geo = new THREE.BufferGeometry()
@@ -509,7 +529,7 @@ function wall(offset, height, keep) {
   const verts = []
   for (let i = 0; i < n; i++) {
     const [ox, oz] = offsetPoint(i, offset(i))
-    verts.push(ox, 0, oz, ox, height, oz)
+    verts.push(ox, nodeY(i), oz, ox, nodeY(i) + height, oz)
   }
   return new THREE.Mesh(
     geometryFrom(verts, n, keep),
@@ -523,9 +543,19 @@ function strip(halfWidth, place, keep) {
   for (let i = 0; i < n; i++) {
     const [lx, lz] = offsetPoint(i, halfWidth(i))
     const [rx, rz] = offsetPoint(i, -halfWidth(i))
-    verts.push(...place(lx, lz), ...place(rx, rz))
+    verts.push(...place(lx, lz, i), ...place(rx, rz, i))
   }
   return geometryFrom(verts, n, keep)
+}
+
+/** How high the road stands at polyline node `i`. */
+function nodeY(i) {
+  return K.heightAt(K.TRACK.cum[i])
+}
+
+/** The road's height under any point on the map, for the things that move. */
+function groundY(x, z) {
+  return K.heightAt(K.project(x, z).s)
 }
 
 /** Node `i` of the centre line, pushed sideways onto its own normal. */
@@ -600,13 +630,15 @@ function draw() {
       const home = K.pointAt(kart.recoverAt)
       mesh.position.set(
         kart.x + (home.x - kart.x) * t,
-        -26 * Math.sin(Math.PI * t),
+        K.heightAt(kart.recoverAt) - 26 * Math.sin(Math.PI * t),
         kart.y + (home.y - kart.y) * t,
       )
-      mesh.rotation.y = -kart.heading - t * 6
+      mesh.rotation.set(0, -kart.heading - t * 6, 0)
     } else {
-      mesh.position.set(kart.x, 0, kart.y)
-      mesh.rotation.y = -kart.heading
+      mesh.position.set(kart.x, K.heightAt(kart.s), kart.y)
+      // Nose up the climb and down the drop. 'YZX' so the pitch is taken about
+      // the kart's own lateral axis, after it has been turned to its heading.
+      mesh.rotation.set(0, -kart.heading, Math.atan(K.slopeAt(kart.s)), 'YZX')
     }
     // Shrunk by a Bolt, or lit up by a star: both have to be readable at a
     // glance from behind, so they change the shape rather than only a number.
@@ -630,11 +662,11 @@ function draw() {
   })
 
   syncPool(shellPool, race.shells, makeShell, (mesh, shell) => {
-    mesh.position.set(shell.x, 1.2, shell.y)
+    mesh.position.set(shell.x, groundY(shell.x, shell.y) + 1.2, shell.y)
     mesh.material.color.setHex(shell.red ? 0xef4444 : 0x22c55e)
   })
   syncPool(hazardPool, race.hazards, makeBanana, (mesh, hazard) => {
-    mesh.position.set(hazard.x, 0.8, hazard.y)
+    mesh.position.set(hazard.x, groundY(hazard.x, hazard.y) + 0.8, hazard.y)
   })
 
   const me = race.karts.find((k) => k.id === myId) ?? race.karts[0]
@@ -645,10 +677,15 @@ function draw() {
     // off it: the eye reads speed from the view widening and the camera
     // dropping back far more than from a number in the corner.
     const rush = Math.min(1.4, Math.hypot(me.vx, me.vy) / K.MAX_SPEED)
-    camPos.set(me.x - fx * (20 + rush * 6), 10.5 - rush * 2, me.y - fy * (20 + rush * 6))
+    // The camera rides the road too, or a crest throws it underground and the
+    // next dip leaves it looking at the sky.
+    const here = K.heightAt(me.s)
+    camPos.set(me.x - fx * (20 + rush * 6), here + 10.5 - rush * 2, me.y - fy * (20 + rush * 6))
     // Eased rather than pinned, so a spin-out does not whip the camera round.
     camera.position.lerp(camPos, 0.12)
-    camAim.set(me.x + fx * 16, 2.5, me.y + fy * 16)
+    const aimX = me.x + fx * 16
+    const aimZ = me.y + fy * 16
+    camAim.set(aimX, groundY(aimX, aimZ) + 2.5, aimZ)
     camera.lookAt(camAim)
 
     const wantFov = 60 + rush * 14 + (me.boost > 0 ? 6 : 0)
@@ -791,11 +828,36 @@ function dot(id) {
  * has not moved is work for nothing.
  */
 function showItem(index) {
-  const item = index === null ? null : K.ITEMS[index]
+  const now = performance.now()
+  if (index !== heldItem) {
+    // Only a pickup reels. Spending one empties the slot on the spot, and so
+    // does firing mid-reel — the slot never shows something you cannot use.
+    reelUntil = index !== null && (heldItem === null || heldItem === undefined) ? now + REEL_MS : 0
+    heldItem = index
+  }
+
+  const reeling = now < reelUntil
+  if (reeling && now >= reelAt) {
+    reelIndex = (reelIndex + 1) % K.ITEMS.length
+    // Slowing as it runs down, so it lands on the last one rather than stopping
+    // mid-blur: ~40ms a step at the start, ~190ms at the end.
+    const done = 1 - (reelUntil - now) / REEL_MS
+    reelAt = now + 40 + 150 * done * done
+  }
+  paintItem(reeling ? reelIndex : index, reeling)
+}
+
+/** The slot, showing one item — the one you have, or one the reel is passing. */
+function paintItem(index, reeling) {
+  const item = index === null || index === undefined ? null : K.ITEMS[index]
   const slot = el('item-slot')
   slot.classList.toggle('full', Boolean(item))
   el('item-name').textContent = item ? item.name : 'No item'
-  el('item-hint').textContent = item ? 'space to fire' : 'drive through a box'
+  el('item-hint').textContent = reeling
+    ? 'rolling…'
+    : item
+      ? 'space to fire'
+      : 'drive through a box'
   if (index === shownItem) return
   shownItem = index
   const art = item ? ITEM_ART[item.key] : null
