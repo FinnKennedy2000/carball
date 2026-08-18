@@ -6,6 +6,7 @@
 // the lobby buttons rather than at load.
 
 import * as C from './../shared/constants.js'
+import { isTyping } from './input.js'
 
 const HIT_MIN_DV = 4 // ignore rolling contact; only real impacts
 const HIT_LOUD_DV = 45 // the speed change that counts as full volume
@@ -41,7 +42,7 @@ export function initSound() {
   noise.start()
 
   addEventListener('keydown', (e) => {
-    if (e.code !== 'KeyM') return
+    if (e.code !== 'KeyM' || isTyping(e.target)) return
     muted = !muted
     master.gain.setTargetAtTime(muted ? 0 : 0.6, ctx.currentTime, 0.02)
   })
