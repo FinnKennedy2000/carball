@@ -429,6 +429,11 @@ body {
 
 /* The Rumble slot. Lit while something is in it, so a glance is enough. */
 
+/* display: flex beats the UA rule for [hidden], as with #start and #footer. */
+#item-chip[hidden] {
+  display: none;
+}
+
 #item-chip {
   display: flex;
   align-items: center;
