@@ -106,8 +106,10 @@ requestAnimationFrame(frame)
 function wireGate() {
   const name = el('name')
   name.value = localStorage.getItem(STORED_NAME) || ''
-  const joined = cleanCode(location.hash.slice(1))
-  if (joined) el('code').value = joined
+  // An invite link is this page's own URL with the room in the hash, so a code
+  // there means someone sent us to a room rather than to the way-in screen.
+  const invited = netEnabled ? cleanCode(location.hash.slice(1)) : null
+  if (invited) el('code').value = invited
   if (!netEnabled) {
     el('room-side').hidden = true
     el('gate-note').textContent = 'Rooms need a Supabase project configured. Solo works either way.'
@@ -128,10 +130,15 @@ function wireGate() {
       beginMatch()
     }
   })
-  el('copy').addEventListener('click', () => {
+  el('copy').addEventListener('click', async () => {
     const link = `${location.origin}${location.pathname}#${roomCode}`
-    navigator.clipboard?.writeText(link)
-    el('copy').textContent = 'Copied'
+    try {
+      await navigator.clipboard.writeText(link)
+      el('copy').textContent = 'Link copied'
+    } catch {
+      // No clipboard outside a secure context — the code is the shareable part.
+      el('copy').textContent = `Room code ${roomCode}`
+    }
   })
 
   handlers.onJoined = (msg) => {
@@ -153,6 +160,32 @@ function wireGate() {
   }
   handlers.onMatchOver = (_score, players) => {
     results = players.map((p) => ({ ...p, me: p.id === myId }))
+  }
+
+  // Arriving on someone's link goes straight into their room, exactly as the
+  // football page does it. Without a name to send there is nothing to do but
+  // ask for one — the code is already in the box, so Join is one press away.
+  if (invited) join(invited)
+
+  // A link pasted into a tab that is already on this page changes the hash
+  // without reloading anything, so the load-time check above never runs — the
+  // link would look broken. onJoined sets the hash itself, hence the guard.
+  addEventListener('hashchange', () => {
+    const code = netEnabled ? cleanCode(location.hash.slice(1)) : null
+    if (code && code !== roomCode) {
+      el('code').value = code
+      join(code)
+    }
+  })
+
+  /** Straight in if we have a name to send, otherwise ask for one. */
+  function join(code) {
+    if (name.value) enterRoom(code)
+    else {
+      el('gate').hidden = false
+      el('gate-note').textContent = `Room ${code} — your name, then Join.`
+      name.focus()
+    }
   }
 }
 
@@ -328,20 +361,32 @@ function buildTrack() {
   ground.position.y = -0.2
   scene.add(ground)
 
-  scene.add(ribbon(K.HALF_WIDTH + K.KERB, 0.01, 0x6b4a22)) // the kerb, then
-  scene.add(ribbon(K.HALF_WIDTH, 0.03, 0x49536b)) // the tarmac on top of it
+  // The road's width varies around the lap, so every strip is built from
+  // halfWidthAt rather than one number — the tarmac you see is the tarmac the
+  // physics grips. The kerb stops where the drops are; the road does not.
+  const half = (i) => K.halfWidthAt(K.TRACK.cum[i])
+  const onVoid = (i) => K.overVoid(K.TRACK.cum[i])
+  const solid = (i) => !onVoid(i) && !onVoid((i + 1) % K.TRACK_N)
+
+  // Under everything, and only where the ground gives out: the drop.
+  scene.add(ribbon((i) => half(i) + 34, -0.9, 0x05070c, 1, (i) => !solid(i)))
+  scene.add(ribbon((i) => half(i) + K.KERB, 0.01, 0x6b4a22, 1, solid)) // the kerb, then
+  scene.add(ribbon(half, 0.03, 0x49536b)) // the tarmac on top of it
   // The racing line, in dashes rather than one continuous stripe: a solid line
   // gives the eye nothing to track, and the dashes flicking past the nose are
   // most of what tells you how fast you are actually going.
   scene.add(dashes(0.4, 0.05, 0xffffff, 0.4))
 
-  // The barrier, as a wall either side. Same polyline, stood up.
-  for (const side of [1, -1]) scene.add(wall(side * (K.HALF_WIDTH + K.KERB), 2.4))
+  // The barrier, as a wall either side — with the void stretches left open,
+  // which is what makes them look like somewhere you can go off.
+  for (const side of [1, -1]) {
+    scene.add(wall((i) => side * (half(i) + K.KERB), 2.4, solid))
+  }
 
   // Start/finish, a stripe across the road at s = 0.
   const p = K.pointAt(0)
   const line = new THREE.Mesh(
-    new THREE.PlaneGeometry(K.HALF_WIDTH * 2, 2.5),
+    new THREE.PlaneGeometry(K.halfWidthAt(0) * 2, 2.5),
     new THREE.MeshBasicMaterial({ color: 0xf3f5fe, transparent: true, opacity: 0.75 }),
   )
   line.rotation.x = -Math.PI / 2
@@ -366,9 +411,12 @@ function buildTrack() {
   }
 }
 
-/** A flat strip of the given half-width, following the centre line. */
-function ribbon(halfWidth, y, color, opacity = 1) {
-  const geo = strip(halfWidth, (x, z) => [x, y, z])
+/**
+ * A flat strip following the centre line. `halfWidth` is a function of the node
+ * index, and `keep` decides which segments are drawn at all.
+ */
+function ribbon(halfWidth, y, color, opacity = 1, keep) {
+  const geo = strip(halfWidth, (x, z) => [x, y, z], keep)
   return new THREE.Mesh(
     geo,
     new THREE.MeshStandardMaterial({
@@ -406,30 +454,29 @@ function dashes(halfWidth, y, color, opacity) {
   )
 }
 
-/** A vertical band standing on the polyline, offset sideways by `offset`. */
-function wall(offset, height) {
-  const pts = K.TRACK.pts
-  const n = pts.length
+/** A vertical band standing on the polyline, offset sideways by `offset(i)`. */
+function wall(offset, height, keep) {
+  const n = K.TRACK.pts.length
   const verts = []
   for (let i = 0; i < n; i++) {
-    const [ox, oz] = offsetPoint(i, offset)
+    const [ox, oz] = offsetPoint(i, offset(i))
     verts.push(ox, 0, oz, ox, height, oz)
   }
   return new THREE.Mesh(
-    geometryFrom(verts, n),
+    geometryFrom(verts, n, keep),
     new THREE.MeshStandardMaterial({ color: 0x596b8c, roughness: 0.8, side: THREE.DoubleSide }),
   )
 }
 
-function strip(halfWidth, place) {
+function strip(halfWidth, place, keep) {
   const n = K.TRACK.pts.length
   const verts = []
   for (let i = 0; i < n; i++) {
-    const [lx, lz] = offsetPoint(i, halfWidth)
-    const [rx, rz] = offsetPoint(i, -halfWidth)
+    const [lx, lz] = offsetPoint(i, halfWidth(i))
+    const [rx, rz] = offsetPoint(i, -halfWidth(i))
     verts.push(...place(lx, lz), ...place(rx, rz))
   }
-  return geometryFrom(verts, n)
+  return geometryFrom(verts, n, keep)
 }
 
 /** Node `i` of the centre line, pushed sideways onto its own normal. */
@@ -441,10 +488,15 @@ function offsetPoint(i, offset) {
   return [a.x - ((b.y - a.y) / len) * offset, a.y + ((b.x - a.x) / len) * offset]
 }
 
-/** Two vertices per node, closed back onto the first: a ring of quads. */
-function geometryFrom(verts, n) {
+/**
+ * Two vertices per node, closed back onto the first: a ring of quads. `keep`
+ * drops the segment that starts at a node, which is how the scenery is left out
+ * over a drop without building a separate mesh per run of road.
+ */
+function geometryFrom(verts, n, keep = () => true) {
   const idx = []
   for (let i = 0; i < n; i++) {
+    if (!keep(i)) continue
     const a = i * 2
     const b = ((i + 1) % n) * 2
     idx.push(a, b, a + 1, b, b + 1, a + 1)
@@ -492,8 +544,21 @@ function draw() {
       kartMeshes.set(kart.id, mesh)
       scene.add(mesh)
     }
-    mesh.position.set(kart.x, 0, kart.y)
-    mesh.rotation.y = -kart.heading
+    if (kart.respawn > 0) {
+      // Fished out: it drops out of the world where it went over, is carried
+      // back up the road, and is set down on the spot the sim will resume it.
+      const t = 1 - kart.respawn / K.RESPAWN_SECONDS
+      const home = K.pointAt(kart.recoverAt)
+      mesh.position.set(
+        kart.x + (home.x - kart.x) * t,
+        -26 * Math.sin(Math.PI * t),
+        kart.y + (home.y - kart.y) * t,
+      )
+      mesh.rotation.y = -kart.heading - t * 6
+    } else {
+      mesh.position.set(kart.x, 0, kart.y)
+      mesh.rotation.y = -kart.heading
+    }
     // Shrunk by a Bolt, or lit up by a star: both have to be readable at a
     // glance from behind, so they change the shape rather than only a number.
     mesh.scale.setScalar(kart.shrink > 0 ? 0.55 : 1)
@@ -611,6 +676,9 @@ function updateHud() {
   if (race.phase === 'COUNT') {
     const n = Math.ceil(race.timer)
     banner.textContent = n > 0 ? String(n) : 'GO'
+    banner.hidden = false
+  } else if (me.respawn > 0) {
+    banner.textContent = `RESCUE ${me.respawn.toFixed(1)}`
     banner.hidden = false
   } else if (me.spin > 0) {
     banner.textContent = 'SPUN OUT'
@@ -749,7 +817,10 @@ function resize() {
   camera.updateProjectionMatrix()
 }
 
-// Enter in the name field is the same as pressing whatever is in front of you.
+// Enter in the name field is the same as pressing whatever is in front of you:
+// the room whose link brought you here, or a solo race.
 el('name').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && isTyping(e.target)) el('solo').click()
+  if (e.key !== 'Enter' || !isTyping(e.target)) return
+  if (cleanCode(el('code').value)) el('join').click()
+  else el('solo').click()
 })

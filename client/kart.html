@@ -520,6 +520,10 @@
 
       #room-strip {
         position: fixed;
+        /* Above the grid and the flag: those cover the screen, and the moment
+           you most want to hand someone the link is while you are waiting on
+           the grid for them. */
+        z-index: 2;
         top: var(--space-6);
         left: 50%;
         transform: translateX(-50%);
