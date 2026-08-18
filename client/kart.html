@@ -7,10 +7,54 @@
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="stylesheet" href="./nocturne.css" />
-    <link rel="stylesheet" href="./style.css" />
-    <!-- Only this page's own layout. Everything else — type, buttons, the dark
-         ground — comes from the two sheets above. -->
+    <!-- Type, buttons and tags come from Nocturne above. style.css is
+         deliberately not loaded: it is the football page's layout, and its
+         #gate, #banner and #item-* rules are for a different screen with the
+         same names. The handful of shared helpers it holds are copied here. -->
     <style>
+      html,
+      body {
+        height: 100%;
+        overflow: hidden;
+        background: #0b0e14;
+      }
+      #view {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      .kicker {
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--color-neutral-500);
+      }
+      .kicker.accent {
+        letter-spacing: 0.18em;
+        color: var(--color-accent-400);
+      }
+      .stack {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+      }
+      .row {
+        display: flex;
+        gap: var(--space-2);
+        align-items: center;
+      }
+      .hint {
+        margin: 0;
+        font-size: 12px;
+        color: var(--color-neutral-500);
+      }
+      #code {
+        width: 96px;
+        text-transform: uppercase;
+        letter-spacing: 0.24em;
+        text-align: center;
+      }
+
       #hud {
         position: fixed;
         inset: 0;
@@ -18,153 +62,344 @@
         font-family: var(--font-body);
         color: var(--color-text);
       }
+
+      /* The camera looks at a lit road on a dark ground, and the panels sit at
+         the corners: without this the top and bottom edges have nothing behind
+         them and the type floats on the tarmac. */
+      #vignette {
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(180deg, rgba(11, 14, 20, 0.5) 0%, transparent 22%),
+          linear-gradient(0deg, rgba(11, 14, 20, 0.55) 0%, transparent 26%);
+      }
+
+      /* Streaks down the left and right edges, faded in by speed from kart.js.
+         Peripheral blur is what the eye actually reads speed from — the number
+         in the corner is a readout, not a sensation. */
+      #speed-lines {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        background:
+          linear-gradient(90deg, rgba(233, 233, 237, 0.3) 0%, transparent 15%),
+          linear-gradient(270deg, rgba(233, 233, 237, 0.3) 0%, transparent 15%),
+          radial-gradient(120% 70% at 50% 50%, transparent 38%, rgba(11, 14, 20, 0.62) 100%);
+      }
+
       .panel {
         position: absolute;
-        background: color-mix(in srgb, var(--color-surface) 82%, transparent);
-        box-shadow: var(--shadow-sm);
-        border-radius: var(--radius-lg);
         padding: var(--space-4) var(--space-6);
+        border-radius: var(--radius-md);
+        background: rgba(22, 24, 38, 0.82);
+        backdrop-filter: blur(8px);
+        box-shadow: inset 0 0 0 1px var(--color-neutral-900), var(--shadow-sm);
       }
+
+      .label {
+        font-size: 10px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--color-neutral-500);
+      }
+
+      .readout {
+        font-family: var(--font-heading);
+        font-weight: 500;
+        font-size: 28px;
+        line-height: 1.05;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* The half of a readout that is not the number: the lap total, the
+         ordinal's suffix. */
+      .readout .sub {
+        color: var(--color-neutral-600);
+        font-size: 18px;
+      }
+
       #race-info {
-        top: 18px;
-        left: 18px;
+        top: var(--space-6);
+        left: var(--space-6);
         display: flex;
         gap: var(--space-8);
       }
-      #race-info .stat b {
-        display: block;
-        font-size: 26px;
-        line-height: 1.1;
+      #race-info > div {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
       }
+
       #standings-panel {
-        top: 18px;
-        right: 18px;
-        min-width: 168px;
+        top: var(--space-6);
+        right: var(--space-6);
+        min-width: 172px;
       }
       #standings {
         list-style: none;
-        margin: var(--space-2) 0 0;
+        margin: var(--space-3) 0 0;
         padding: 0;
         display: grid;
-        gap: 2px;
+        gap: 4px;
       }
       #standings li {
         display: grid;
-        grid-template-columns: 18px 1fr;
+        grid-template-columns: 14px 8px 1fr;
+        align-items: center;
         gap: var(--space-3);
         font-size: 13px;
         color: var(--color-neutral-400);
+        font-variant-numeric: tabular-nums;
       }
       #standings li.me {
         color: var(--color-accent-300);
-        font-weight: 600;
       }
-      #item-slot {
-        bottom: 22px;
+
+      /* One colour per kart, the same one its bodywork is painted. Inline-block
+         because it is a grid item in the standings and plain flow content in
+         the grid list — an inline span would take no size at all in the latter. */
+      .dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 99px;
+      }
+
+      #item-stack {
+        position: absolute;
+        bottom: var(--space-6);
         left: 50%;
         transform: translateX(-50%);
-        text-align: center;
-        min-width: 240px;
-        opacity: 0.75;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--space-3);
+      }
+      #effects {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        min-height: 22px;
+      }
+      #effects .tag {
+        letter-spacing: 0.1em;
+      }
+
+      /* The slot is dark and quiet while empty, and lit in the item's own
+         colour the moment there is something in it. */
+      #item-slot {
+        display: flex;
+        align-items: center;
+        gap: var(--space-4);
+        padding: var(--space-3) var(--space-6);
+        border-radius: var(--radius-md);
+        background: rgba(22, 24, 38, 0.7);
+        box-shadow: inset 0 0 0 1px var(--color-neutral-900);
       }
       #item-slot.full {
-        opacity: 1;
-        box-shadow: 0 0 0 1px var(--color-accent-500), 0 8px 24px rgba(0, 0, 0, 0.5);
+        background: rgba(22, 24, 38, 0.86);
+        box-shadow: inset 0 0 0 1px var(--item), 0 0 26px -8px var(--item);
+      }
+      #item-icon {
+        display: grid;
+        place-items: center;
+        width: 52px;
+        height: 52px;
+        border-radius: var(--radius-md);
+        box-shadow: inset 0 0 0 1px var(--color-neutral-800);
+      }
+      #item-slot.full #item-icon {
+        background: radial-gradient(
+          70% 70% at 50% 35%,
+          color-mix(in oklab, var(--item) 30%, transparent) 0%,
+          transparent 72%
+        );
+        box-shadow: none;
+      }
+      /* The empty slot's mark: a small blank tile, not a missing icon. */
+      #item-icon .blank {
+        width: 14px;
+        height: 14px;
+        border-radius: 3px;
+        background: var(--color-neutral-800);
+      }
+      #item-icon svg {
+        width: 38px;
+        height: 38px;
+        display: block;
+      }
+      #item-text {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
       }
       #item-name {
-        display: block;
-        font-size: 20px;
-      }
-      #item-hint {
-        font-size: 12px;
+        font-family: var(--font-heading);
+        font-size: 17px;
         color: var(--color-neutral-500);
       }
+      #item-slot.full #item-name {
+        color: var(--color-text);
+      }
+      #item-hint {
+        font-size: 11px;
+        color: var(--color-neutral-700);
+      }
+      #item-slot.full #item-hint {
+        color: var(--color-neutral-500);
+      }
+
       #speed-panel {
-        bottom: 22px;
-        right: 18px;
+        bottom: var(--space-6);
+        right: var(--space-6);
         text-align: right;
       }
       #speed {
-        font-size: 30px;
+        font-family: var(--font-heading);
+        font-weight: 500;
+        font-size: 32px;
+        line-height: 1.05;
+        font-variant-numeric: tabular-nums;
       }
+
+      #controls-line {
+        position: absolute;
+        bottom: var(--space-6);
+        left: var(--space-6);
+        /* Wide enough that the last clause does not break onto a line of its
+           own, which reads as a truncation rather than a wrap. */
+        max-width: 260px;
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--color-neutral-500);
+      }
+
       #banner {
         position: absolute;
         top: 32%;
         left: 50%;
         transform: translate(-50%, -50%);
+        font-family: var(--font-heading);
         font-size: 84px;
         font-weight: 700;
         letter-spacing: 0.04em;
         text-shadow: 0 8px 30px rgba(0, 0, 0, 0.7);
       }
-      #controls-line {
-        position: absolute;
-        bottom: 22px;
-        left: 18px;
-        font-size: 12px;
-        color: var(--color-neutral-500);
-      }
-      /* display:grid would otherwise beat the hidden attribute's own rule and
-         the card would sit over the race from the first frame. */
-      #results[hidden] {
-        display: none;
-      }
-      #results {
-        position: fixed;
-        inset: 0;
-        display: grid;
-        place-items: center;
-        background: rgba(11, 14, 20, 0.72);
-      }
-      #results-card {
-        background: var(--color-surface);
-        box-shadow: var(--shadow-lg);
-        border-radius: var(--radius-lg);
-        padding: var(--space-8) 28px;
-        min-width: 340px;
-      }
-      #results table {
-        width: 100%;
-        border-collapse: collapse;
-        margin: var(--space-6) 0;
-      }
-      #results td {
-        padding: 5px 8px;
-        border-top: 1px solid var(--color-divider);
-        color: var(--color-neutral-300);
-      }
-      #results tr.me td {
-        color: var(--color-accent-300);
-        font-weight: 600;
-      }
-      .tabular {
-        font-variant-numeric: tabular-nums;
-      }
-      /* The way in, and the room it opens ---------------------------------- */
+
+      /* Cards over the race: the flag, the grid, and the way in ------------- */
       /* display:grid/flex would otherwise beat the hidden attribute's rule. */
+      #results[hidden],
       #gate[hidden],
       #waiting[hidden],
       #room-strip[hidden] {
         display: none;
       }
+      #results,
       #gate,
       #waiting {
         position: fixed;
         inset: 0;
         display: grid;
         place-items: center;
-        background: rgba(11, 14, 20, 0.72);
+        background: rgba(11, 14, 20, 0.78);
+      }
+      /* The way in carries the item set under it, which is taller than a short
+         window: this is the one overlay that scrolls. */
+      #gate {
+        overflow: auto;
+        padding: 40px;
+        align-content: center;
+      }
+      #gate-inner {
+        display: flex;
+        flex-direction: column;
+        gap: 34px;
+        align-items: center;
+      }
+      .over-card {
+        box-sizing: border-box;
+        padding: var(--space-8) 36px;
+        border-radius: var(--radius-md);
+        background: var(--color-surface);
+        box-shadow: var(--shadow-lg);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-6);
+      }
+      #results-card {
+        width: 520px;
       }
       #gate-card,
       #waiting-card {
-        background: var(--color-surface);
-        box-shadow: var(--shadow-lg);
-        border-radius: var(--radius-lg);
-        padding: var(--space-8) 28px;
-        min-width: 380px;
+        width: 560px;
+      }
+      .over-card h2 {
+        margin: 0;
+        font-family: var(--font-heading);
+        font-weight: 500;
+        font-size: 34px;
+        letter-spacing: -0.02em;
+      }
+      .over-head {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+      }
+      .over-rule {
+        width: 150px;
+        height: 1px;
+        background: linear-gradient(
+          90deg,
+          var(--color-accent) 0%,
+          var(--color-accent) 44%,
+          transparent 100%
+        );
+      }
+
+      /* The result: position, colour, racer, time. Each row is its own grid on
+         the header's columns, so the rule above a row runs the whole width
+         instead of breaking at every column gap. */
+      .result-head,
+      .result-row {
         display: grid;
+        grid-template-columns: 26px 8px 1fr auto;
+        align-items: center;
         gap: var(--space-4);
       }
+      .result-head {
+        font-size: 10px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--color-neutral-500);
+        padding-bottom: var(--space-3);
+      }
+      .result-row {
+        padding: var(--space-3) 0;
+        box-shadow: inset 0 1px 0 var(--color-divider);
+        font-size: 14px;
+        color: var(--color-neutral-300);
+        font-variant-numeric: tabular-nums;
+      }
+      .result-row.me {
+        color: var(--color-accent-300);
+      }
+      .result-row .time {
+        text-align: right;
+      }
+
+      #waiting-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: var(--space-2);
+        color: var(--color-neutral-300);
+        font-size: 14px;
+      }
+      #waiting-list li.me {
+        color: var(--color-accent-300);
+      }
+
       #gate-cols {
         display: grid;
         grid-template-columns: 1fr auto 1fr;
@@ -176,9 +411,116 @@
         align-self: stretch;
         background: var(--color-divider);
       }
+      #gate-cols .stack {
+        gap: var(--space-3);
+      }
+      /* A button that wraps its label reads as two buttons at this size. */
+      #gate-cols .btn {
+        white-space: nowrap;
+      }
+      #gate-cols .label {
+        white-space: nowrap;
+      }
+      #gate-note {
+        min-height: 18px;
+        font-size: 13px;
+        color: var(--color-neutral-400);
+      }
+
+      /* The item set, from the design's own card ---------------------------- */
+      #items-card {
+        width: 1024px;
+        max-width: 100%;
+        box-sizing: border-box;
+        padding: var(--space-8) 44px;
+        background: var(--color-bg);
+        box-shadow: var(--shadow-sm);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-8);
+      }
+      #items-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--space-4);
+      }
+      .item-card {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+        padding: var(--space-6);
+        border-radius: var(--radius-md);
+        background: color-mix(in oklab, var(--color-neutral-900) 60%, transparent);
+        box-shadow: 0 0 0 1px var(--color-neutral-900);
+      }
+      .item-card .head {
+        display: flex;
+        align-items: center;
+        gap: var(--space-4);
+      }
+      .item-card .mark {
+        display: grid;
+        place-items: center;
+        width: 56px;
+        height: 56px;
+        border-radius: var(--radius-md);
+        background: radial-gradient(
+          70% 70% at 50% 35%,
+          color-mix(in oklab, var(--item) 26%, transparent) 0%,
+          transparent 72%
+        );
+        box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--item) 34%, transparent);
+      }
+      .item-card .mark svg {
+        width: 40px;
+        height: 40px;
+        display: block;
+      }
+      .item-card .name {
+        font-family: var(--font-heading);
+        font-weight: 500;
+        font-size: 17px;
+        letter-spacing: -0.01em;
+      }
+      .item-card .hint {
+        font-size: 12px;
+        color: var(--color-neutral-500);
+      }
+      .item-card .weights {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      /* How likely the item is at the front of the field and at the back — the
+         rubber band, drawn from the same table the roll reads. */
+      .item-card .weight {
+        display: grid;
+        grid-template-columns: 52px 1fr;
+        align-items: center;
+        gap: var(--space-3);
+      }
+      .item-card .weight span:first-child {
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--color-neutral-600);
+      }
+      .item-card .bar {
+        display: block;
+        height: 3px;
+        background: var(--color-neutral-900);
+        border-radius: 2px;
+      }
+      .item-card .bar > i {
+        display: block;
+        height: 3px;
+        background: var(--item);
+        border-radius: 2px;
+      }
+
       #room-strip {
         position: fixed;
-        top: 18px;
+        top: var(--space-6);
         left: 50%;
         transform: translateX(-50%);
         display: flex;
@@ -187,25 +529,9 @@
         pointer-events: auto;
       }
       #room-code {
+        font-family: var(--font-heading);
         font-size: 20px;
         letter-spacing: 0.16em;
-      }
-      #waiting-list {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        display: grid;
-        gap: 2px;
-        color: var(--color-neutral-300);
-      }
-      #waiting-list li.me {
-        color: var(--color-accent-300);
-        font-weight: 600;
-      }
-      #gate-note {
-        color: var(--color-neutral-400);
-        font-size: 13px;
-        min-height: 18px;
       }
     </style>
   </head>
@@ -213,52 +539,63 @@
     <canvas id="view"></canvas>
 
     <div id="hud" hidden>
+      <div id="vignette"></div>
+      <div id="speed-lines"></div>
+
       <div id="race-info" class="panel">
-        <div class="stat">
-          <span class="kicker">Lap</span>
-          <b id="lap" class="tabular">1/3</b>
+        <div>
+          <span class="label">Lap</span>
+          <span class="readout"><span id="lap">1</span><span class="sub" id="lap-total">/3</span></span>
         </div>
-        <div class="stat">
-          <span class="kicker">Position</span>
-          <b id="place">6th</b>
-          <span class="kicker" id="place-of">of 6</span>
+        <div>
+          <span class="label">Position</span>
+          <span class="readout"><span id="place">6</span><span class="sub" id="place-suffix">th</span></span>
         </div>
-        <div class="stat">
-          <span class="kicker">Time</span>
-          <b id="time" class="tabular">0:00.00</b>
+        <div>
+          <span class="label">Time</span>
+          <span class="readout" id="time">0:00.00</span>
         </div>
       </div>
 
       <div id="standings-panel" class="panel">
-        <span class="kicker">Field</span>
+        <span class="label">Field</span>
         <ol id="standings"></ol>
       </div>
 
-      <div id="item-slot" class="panel">
-        <span class="kicker">Item</span>
-        <b id="item-name">—</b>
-        <span id="item-hint">drive through a box</span>
+      <div id="item-stack">
+        <div id="effects"></div>
+        <div id="item-slot">
+          <span id="item-icon"><span class="blank"></span></span>
+          <span id="item-text">
+            <span id="item-name">No item</span>
+            <span id="item-hint">drive through a box</span>
+          </span>
+        </div>
       </div>
 
       <div id="speed-panel" class="panel">
-        <span class="kicker">km/h</span>
-        <b id="speed" class="tabular">0</b>
+        <span class="label">km/h</span>
+        <div id="speed">0</div>
       </div>
 
       <div id="banner" hidden>3</div>
-      <div id="controls-line">WASD steer · shift drift · space or E use item</div>
+      <div id="controls-line">WASD steer · shift drift · space use item</div>
     </div>
 
     <div id="room-strip" class="panel" hidden>
-      <span class="kicker">Room</span>
+      <span class="label">Room</span>
       <b id="room-code">----</b>
       <button id="copy" class="btn btn-ghost">Copy invite link</button>
     </div>
 
     <!-- Before the lights in a room: who is on the grid, and the host's go. -->
     <div id="waiting" hidden>
-      <div id="waiting-card">
-        <div class="kicker accent">On the grid</div>
+      <div id="waiting-card" class="over-card">
+        <div class="over-head">
+          <span class="kicker accent">On the grid</span>
+          <h2>Waiting to start</h2>
+          <div class="over-rule"></div>
+        </div>
         <ol id="waiting-list"></ol>
         <p id="waiting-hint" class="hint"></p>
         <div class="row">
@@ -267,20 +604,45 @@
       </div>
     </div>
 
+    <div id="results" hidden>
+      <div id="results-card" class="over-card">
+        <div class="over-head">
+          <span class="kicker accent">Chequered flag</span>
+          <h2 id="verdict">Race won</h2>
+          <div class="over-rule"></div>
+        </div>
+
+        <div>
+          <div class="result-head">
+            <span>Pos</span><span></span><span>Racer</span><span class="time">Time</span>
+          </div>
+          <div id="result-rows"></div>
+        </div>
+
+        <div class="row">
+          <button id="restart" class="btn btn-primary">Race again</button>
+          <a class="btn btn-ghost" href="./index.html">Back to home</a>
+        </div>
+      </div>
+    </div>
+
     <div id="gate">
-      <div id="gate-card">
-        <div class="kicker accent">Kart</div>
-        <h2>Three laps. Items. First across the line wins.</h2>
-        <div class="accent-rule"></div>
+      <div id="gate-inner">
+      <div id="gate-card" class="over-card">
+        <div class="over-head">
+          <span class="kicker accent">Kart</span>
+          <h2>Three laps. Items. First across the line wins.</h2>
+          <div class="over-rule"></div>
+        </div>
         <input id="name" class="input" placeholder="your name" maxlength="16" autocomplete="off" />
         <div id="gate-cols">
           <div class="stack">
-            <div class="kicker">On your own</div>
+            <span class="label">On your own</span>
             <button id="solo" class="btn btn-primary">Race five AI</button>
           </div>
           <span class="divider"></span>
           <div class="stack" id="room-side">
-            <div class="kicker">With other people</div>
+            <span class="label">With other people</span>
             <button id="create" class="btn btn-secondary">Create room</button>
             <div class="row">
               <input id="code" class="input" placeholder="CODE" maxlength="4" autocomplete="off" />
@@ -289,20 +651,21 @@
           </div>
         </div>
         <p id="gate-note"></p>
-        <a class="btn btn-ghost" href="./index.html">Back to home</a>
-      </div>
-    </div>
-
-    <div id="results" hidden>
-      <div id="results-card">
-        <div class="kicker accent">Chequered flag</div>
-        <h2 id="verdict">Race won</h2>
-        <div class="accent-rule"></div>
-        <table><tbody id="result-rows"></tbody></table>
         <div class="row">
-          <button id="restart" class="btn btn-primary">Race again</button>
           <a class="btn btn-ghost" href="./index.html">Back to home</a>
         </div>
+      </div>
+
+      <!-- What is in a box, and how the roll leans by where you are running.
+           Filled in by kart.js from the item table itself. -->
+      <div id="items-card">
+        <div class="over-head">
+          <span class="kicker accent">Items</span>
+          <h2>Six things to find in a box</h2>
+          <div class="over-rule"></div>
+        </div>
+        <div id="items-grid"></div>
+      </div>
       </div>
     </div>
 

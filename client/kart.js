@@ -26,7 +26,41 @@ import {
 
 const el = (id) => document.getElementById(id)
 
-const COLORS = [0x3b82f6, 0xf97316, 0x22c55e, 0xef4444, 0xa855f7, 0xeab308]
+// One palette for both the bodywork and the dot beside a name in the HUD, so a
+// kart is the same colour wherever it appears. THREE takes a CSS string.
+const COLORS = ['#3b82f6', '#f97316', '#22c55e', '#ef4444', '#a855f7', '#eab308']
+const kartColor = (id) => COLORS[(id - 1) % COLORS.length]
+
+/**
+ * The item marks, from the design: one flat glyph per item in its own colour.
+ * Keyed by ITEMS' key rather than its index, which is a wire format.
+ */
+const ITEM_ART = {
+  boost: {
+    color: '#f0b429',
+    svg: '<g fill="none" stroke="#f0b429" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 10 L18 20 L8 30"/><path d="M20 10 L30 20 L20 30"/></g>',
+  },
+  banana: {
+    color: '#eab308',
+    svg: '<path d="M9 9 C10 24 17 31 32 31 C30 23 25 16 18 13 C15 11.5 12 10 9 9 Z" fill="#eab308"/><path d="M9 9 C11 22 18 29 32 31" fill="none" stroke="rgba(0,0,0,0.35)" stroke-width="1.6"/>',
+  },
+  green: {
+    color: '#22c55e',
+    svg: '<path d="M20 7 L31 13 L31 26 L20 32 L9 26 L9 13 Z" fill="#22c55e"/><path d="M20 7 L20 32 M9 13 L31 26 M31 13 L9 26" stroke="rgba(0,0,0,0.32)" stroke-width="1.6" fill="none"/>',
+  },
+  red: {
+    color: '#ef4444',
+    svg: '<path d="M20 7 L31 13 L31 26 L20 32 L9 26 L9 13 Z" fill="#ef4444"/><path d="M20 7 L20 32 M9 13 L31 26 M31 13 L9 26" stroke="rgba(0,0,0,0.32)" stroke-width="1.6" fill="none"/>',
+  },
+  bolt: {
+    color: '#9184d9',
+    svg: '<path d="M23 6 L11 22 L18 22 L15 34 L29 17 L21.5 17 Z" fill="#9184d9"/>',
+  },
+  star: {
+    color: '#ffd166',
+    svg: '<path d="M20 6 L24.2 15.6 L34.6 16.7 L26.8 23.6 L29 33.8 L20 28.4 L11 33.8 L13.2 23.6 L5.4 16.7 L15.8 15.6 Z" fill="#ffd166"/>',
+  },
+}
 const AI_NAMES = ['Bolt', 'Ripsaw', 'Comet', 'Nitro', 'Sledge']
 const SOLO_ID = 1
 const MAX_CATCHUP = 5
@@ -51,6 +85,10 @@ let roster = []
 let results = null // the finishing order, once a room's race is over
 let lastFrame = 0
 let accumulator = 0
+// What the item slot and the effect chips are currently showing, so neither is
+// rebuilt on a frame where nothing about them changed.
+let shownItem
+let shownEffects = ''
 
 configure({
   makeWorker: () => new Worker(new URL('./kart-sim-worker.js', import.meta.url), { type: 'module' }),
@@ -60,6 +98,7 @@ configure({
 initRenderer()
 startInput()
 wireGate()
+showItemSet()
 requestAnimationFrame(frame)
 
 // Getting in ----------------------------------------------------------------
@@ -117,6 +156,27 @@ function wireGate() {
   }
 }
 
+/**
+ * The item set on the way-in screen: each mark, what it does, and how the roll
+ * leans by where you are running. Drawn once, from the sim's own weight table
+ * rather than a copy of it.
+ */
+function showItemSet() {
+  const max = Math.max(...K.ROLL_FRONT, ...K.ROLL_BACK)
+  const bar = (label, weight) =>
+    `<span class="weight"><span>${label}</span><span class="bar"><i style="width:${(weight / max) * 100}%"></i></span></span>`
+  el('items-grid').innerHTML = K.ITEMS.map((item, i) => {
+    const art = ITEM_ART[item.key]
+    return `<div class="item-card" style="--item:${art.color}">
+      <div class="head">
+        <span class="mark"><svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">${art.svg}</svg></span>
+        <span><span class="name">${item.name}</span><br /><span class="hint">${item.hint}</span></span>
+      </div>
+      <div class="weights">${bar('Front', K.ROLL_FRONT[i])}${bar('Back', K.ROLL_BACK[i])}</div>
+    </div>`
+  }).join('')
+}
+
 function saveName() {
   const value = el('name').value.trim().slice(0, 16) || 'You'
   localStorage.setItem(STORED_NAME, value)
@@ -128,6 +188,7 @@ function startSolo() {
   solo = true
   myId = SOLO_ID
   results = null
+  shownItem = undefined
   el('gate').hidden = true
   el('room-strip').hidden = true
   const racers = [{ id: SOLO_ID, name, ai: false }]
@@ -269,7 +330,10 @@ function buildTrack() {
 
   scene.add(ribbon(K.HALF_WIDTH + K.KERB, 0.01, 0x6b4a22)) // the kerb, then
   scene.add(ribbon(K.HALF_WIDTH, 0.03, 0x49536b)) // the tarmac on top of it
-  scene.add(ribbon(0.35, 0.05, 0xffffff, 0.35)) // the racing line
+  // The racing line, in dashes rather than one continuous stripe: a solid line
+  // gives the eye nothing to track, and the dashes flicking past the nose are
+  // most of what tells you how fast you are actually going.
+  scene.add(dashes(0.4, 0.05, 0xffffff, 0.4))
 
   // The barrier, as a wall either side. Same polyline, stood up.
   for (const side of [1, -1]) scene.add(wall(side * (K.HALF_WIDTH + K.KERB), 2.4))
@@ -314,6 +378,31 @@ function ribbon(halfWidth, y, color, opacity = 1) {
       opacity,
       side: THREE.DoubleSide,
     }),
+  )
+}
+
+/** Every other segment of the centre line, as a flat dash. */
+function dashes(halfWidth, y, color, opacity) {
+  const pts = K.TRACK.pts
+  const verts = []
+  const idx = []
+  for (let i = 0; i < pts.length; i += 2) {
+    const a = pts[i]
+    const b = pts[(i + 1) % pts.length]
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1
+    const nx = (-(b.y - a.y) / len) * halfWidth
+    const nz = ((b.x - a.x) / len) * halfWidth
+    const v = verts.length / 3
+    verts.push(a.x + nx, y, a.y + nz, a.x - nx, y, a.y - nz, b.x + nx, y, b.y + nz, b.x - nx, y, b.y - nz)
+    idx.push(v, v + 2, v + 1, v + 2, v + 3, v + 1)
+  }
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+  geo.setIndex(idx)
+  geo.computeVertexNormals()
+  return new THREE.Mesh(
+    geo,
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide }),
   )
 }
 
@@ -399,7 +488,7 @@ function draw() {
     seen.add(kart.id)
     let mesh = kartMeshes.get(kart.id)
     if (!mesh) {
-      mesh = makeKart(COLORS[(kart.id - 1) % COLORS.length])
+      mesh = makeKart(kartColor(kart.id))
       kartMeshes.set(kart.id, mesh)
       scene.add(mesh)
     }
@@ -438,11 +527,23 @@ function draw() {
   if (me) {
     const fx = Math.cos(me.heading)
     const fy = Math.sin(me.heading)
-    camPos.set(me.x - fx * 22, 11, me.y - fy * 22)
+    // How fast this feels, as a fraction of flat out. Everything below hangs
+    // off it: the eye reads speed from the view widening and the camera
+    // dropping back far more than from a number in the corner.
+    const rush = Math.min(1.4, Math.hypot(me.vx, me.vy) / K.MAX_SPEED)
+    camPos.set(me.x - fx * (20 + rush * 6), 10.5 - rush * 2, me.y - fy * (20 + rush * 6))
     // Eased rather than pinned, so a spin-out does not whip the camera round.
     camera.position.lerp(camPos, 0.12)
     camAim.set(me.x + fx * 16, 2.5, me.y + fy * 16)
     camera.lookAt(camAim)
+
+    const wantFov = 60 + rush * 14 + (me.boost > 0 ? 6 : 0)
+    camera.fov += (wantFov - camera.fov) * 0.08
+    camera.updateProjectionMatrix()
+
+    // Streaks down the edges of the screen, in from nothing at about half of
+    // top speed so ordinary running is not permanently smeared.
+    el('speed-lines').style.opacity = Math.max(0, Math.min(1, (rush - 0.5) * 2.2))
   }
 }
 
@@ -496,16 +597,15 @@ function updateHud() {
     return
   }
 
-  el('lap').textContent = `${Math.min(me.lap + 1, race.laps)}/${race.laps}`
-  el('place').textContent = ordinal(me.place)
-  el('place-of').textContent = `of ${race.karts.length}`
+  el('lap').textContent = String(Math.min(me.lap + 1, race.laps))
+  el('lap-total').textContent = `/${race.laps}`
+  el('place').textContent = String(me.place)
+  el('place-suffix').textContent = ordinalSuffix(me.place)
   el('speed').textContent = Math.round(Math.hypot(me.vx, me.vy) * 3.6)
   el('time').textContent = clock(race.time)
 
-  const item = me.item === null || me.item === undefined ? null : K.ITEMS[me.item]
-  el('item-name').textContent = item ? item.name : '—'
-  el('item-hint').textContent = item ? item.hint : 'drive through a box'
-  el('item-slot').classList.toggle('full', Boolean(item))
+  showItem(me.item === undefined ? null : me.item)
+  showEffects(me)
 
   const banner = el('banner')
   if (race.phase === 'COUNT') {
@@ -525,8 +625,7 @@ function updateHud() {
   el('standings').innerHTML = [...race.karts]
     .sort((a, b) => a.place - b.place)
     .map(
-      (k) =>
-        `<li class="${k.id === myId ? 'me' : ''}"><b>${k.place}</b><span>${escapeHtml(k.name)}</span></li>`,
+      (k) => `<li class="${k.id === myId ? 'me' : ''}"><span>${k.place}</span>${dot(k.id)}<span>${escapeHtml(k.name)}</span></li>`,
     )
     .join('')
 
@@ -539,12 +638,49 @@ function updateHud() {
   }
 }
 
+function dot(id) {
+  return `<span class="dot" style="background:${kartColor(id)}"></span>`
+}
+
+/**
+ * What is in the slot. The icon is only rebuilt when the item changes: this
+ * runs every frame, and re-parsing an SVG sixty times a second for a mark that
+ * has not moved is work for nothing.
+ */
+function showItem(index) {
+  const item = index === null ? null : K.ITEMS[index]
+  const slot = el('item-slot')
+  slot.classList.toggle('full', Boolean(item))
+  el('item-name').textContent = item ? item.name : 'No item'
+  el('item-hint').textContent = item ? 'space to fire' : 'drive through a box'
+  if (index === shownItem) return
+  shownItem = index
+  const art = item ? ITEM_ART[item.key] : null
+  slot.style.setProperty('--item', art?.color ?? 'transparent')
+  el('item-icon').innerHTML = art
+    ? `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">${art.svg}</svg>`
+    : '<span class="blank"></span>'
+}
+
+/** The effects running on your own kart, as chips over the slot. */
+function showEffects(me) {
+  const chips = []
+  if (me.boost > 0) chips.push(['tag-accent', `Boost ${me.boost.toFixed(1)}s`])
+  if (me.star > 0) chips.push(['tag-accent', `Star ${me.star.toFixed(1)}s`])
+  if (me.shrink > 0) chips.push(['tag-neutral', `Shrunk ${me.shrink.toFixed(1)}s`])
+  const html = chips.map(([kind, text]) => `<span class="tag ${kind}">${text}</span>`).join('')
+  if (html !== shownEffects) {
+    shownEffects = html
+    el('effects').innerHTML = html
+  }
+}
+
 /** Before the lights, in a room: who is in, and the host's start button. */
 function showWaitingRoom() {
   el('results').hidden = true
   el('start').hidden = !isHost
   el('waiting-list').innerHTML = roster
-    .map((p) => `<li class="${p.id === myId ? 'me' : ''}">${escapeHtml(p.name)}</li>`)
+    .map((p) => `<li class="${p.id === myId ? 'me' : ''}">${dot(p.id)} ${escapeHtml(p.name)}</li>`)
     .join('')
   el('waiting-hint').textContent = isHost
     ? 'Start when everyone is in. Empty seats are filled with AI.'
@@ -559,31 +695,41 @@ function showResults() {
     results ??
     [...race.karts]
       .sort((a, b) => a.place - b.place)
-      .map((k) => ({ name: k.name, place: k.place, time: k.finished, me: k.id === myId }))
+      .map((k) => ({ id: k.id, name: k.name, place: k.place, time: k.finished, me: k.id === myId }))
 
-  const mine = rows.find((r) => r.me)
-  el('verdict').textContent = !mine
-    ? 'Race over'
-    : mine.place === 1
-      ? 'Race won'
-      : mine.place <= 3
-        ? `${ordinal(mine.place)} — podium`
-        : ordinal(mine.place)
+  el('verdict').textContent = verdict(rows)
   el('result-rows').innerHTML = rows
-    .map(
-      (r) => `<tr class="${r.me ? 'me' : ''}">
-        <td>${r.place}</td><td>${escapeHtml(r.name)}</td>
-        <td class="tabular">${r.time === null || r.time === undefined ? 'DNF' : clock(r.time)}</td>
-      </tr>`,
-    )
+    .map((r) => {
+      const time = r.time === null || r.time === undefined ? 'DNF' : clock(r.time)
+      return `<div class="result-row${r.me ? ' me' : ''}"><span>${r.place}</span>${dot(r.id)}<span>${escapeHtml(r.name)}</span><span class="time">${time}</span></div>`
+    })
     .join('')
   // Only the host can put a room back on the grid; solo can always go again.
   el('restart').hidden = !solo && !isHost
 }
 
+const PLACINGS = ['Race won', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth']
+
+/**
+ * How it went, in the design's words: the placing and the gap that decided it —
+ * to the kart ahead, or for a winner to the one that came next.
+ */
+function verdict(rows) {
+  const mine = rows.find((r) => r.me)
+  if (!mine) return 'Race over'
+  const placing = PLACINGS[mine.place - 1] ?? ordinal(mine.place)
+  if (mine.time === null || mine.time === undefined) return `${placing} — did not finish`
+  const rival = rows.find((r) => r.place === (mine.place === 1 ? 2 : mine.place - 1))
+  if (!rival || rival.time === null || rival.time === undefined) return placing
+  return `${placing}, by ${Math.abs(mine.time - rival.time).toFixed(1)}s`
+}
+
+function ordinalSuffix(n) {
+  return n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'
+}
+
 function ordinal(n) {
-  const suffix = n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'
-  return `${n}${suffix}`
+  return `${n}${ordinalSuffix(n)}`
 }
 
 function clock(seconds) {

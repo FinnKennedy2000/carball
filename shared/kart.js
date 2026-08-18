@@ -13,16 +13,26 @@ import { DT, IN_FWD, IN_BACK, IN_LEFT, IN_RIGHT, IN_BOOST, IN_DRIFT, IN_ITEM } f
 // The circuit is a closed parametric curve sampled into a polyline. No asset
 // files, and the renderer builds its ribbon from the same numbers the physics
 // uses, so the road you see is the road you drive on.
-export const TRACK_N = 200
+// Sampled finely enough for the hairpin: at 200 nodes the tight corners came
+// out as flat spots, which project() then reads as a straight.
+export const TRACK_N = 280
 export const TRACK_R = 150
-export const HALF_WIDTH = 12 // tarmac reaches this far either side of the line
+export const HALF_WIDTH = 14 // the tarmac at its widest — see halfWidthAt
+const NARROWING = 6 // how much of that width the narrows take away
 export const KERB = 5 // grass past the tarmac before the wall
 export const LAPS = 3
+// A fall costs you this long sitting still, plus the metres you fell at.
+export const RESPAWN_SECONDS = 2.5
+// How far back up the road you are put down, so you are not dropped straight
+// back over the edge you went off.
+const RECOVER_BACK = 6
 
 export const KART_R = 2.2
 const ACCEL = 34
 const REVERSE = 20
-const MAX_SPEED = 38
+// Exported: the renderer scales its speed cues against flat out, and a second
+// copy of the number would drift the first time this is tuned.
+export const MAX_SPEED = 38
 const BOOST_ACCEL = 46
 const BOOST_MAX = 56
 const DRAG = 0.45
@@ -66,16 +76,55 @@ export const ITEMS = [
   { key: 'bolt', name: 'Bolt', hint: 'shrinks everyone else' },
   { key: 'star', name: 'Star', hint: 'untouchable, and quick' },
 ]
-// Roll weights for the leader and for the tail of the field, interpolated by
-// where you actually are. This is the rubber band: the front gets things to
-// throw behind it, the back gets things that close a gap.
-const ROLL_FRONT = [1, 5, 4, 0.6, 0.15, 0.25]
-const ROLL_BACK = [4, 1, 1, 4, 2.5, 2]
+/**
+ * Roll weights for the leader and for the tail of the field, interpolated by
+ * where you actually are. This is the rubber band: the front gets things to
+ * throw behind it, the back gets things that close a gap. Exported so the way-in
+ * screen can draw the same numbers the roll uses rather than a copy of them.
+ */
+export const ROLL_FRONT = [1, 5, 4, 0.6, 0.15, 0.25]
+export const ROLL_BACK = [4, 1, 1, 4, 2.5, 2]
 
 export function trackPoint(t) {
   const a = t * Math.PI * 2
-  const r = TRACK_R * (1 + 0.22 * Math.sin(3 * a) - 0.12 * Math.cos(2 * a))
-  return { x: Math.cos(a) * r, y: Math.sin(a) * r * 0.72 }
+  // Three harmonics rather than two, and the 5th is what makes the corners
+  // uneven: a couple of sweepers you can carry speed through, a hairpin you
+  // cannot, and a kink between them that punishes a lazy line.
+  const r =
+    TRACK_R * (1 + 0.2 * Math.sin(3 * a) - 0.13 * Math.cos(2 * a) + 0.07 * Math.sin(5 * a + 1.1))
+  return { x: Math.cos(a) * r, y: Math.sin(a) * r * 0.66 }
+}
+
+/** Where `s` falls in the lap, as a fraction in [0, 1). */
+function lapFraction(s) {
+  const L = TRACK.length
+  return (((s % L) + L) % L) / L
+}
+
+/**
+ * The tarmac's half-width at a distance around the lap. Width is part of the
+ * corner rather than a constant the corners sit in: two sections pinch to a
+ * little over three kart-widths, and the line through them is the whole job.
+ * Widest across the start line, so a six-kart grid still fits.
+ */
+export function halfWidthAt(s) {
+  return HALF_WIDTH - NARROWING * (0.5 - 0.5 * Math.cos(lapFraction(s) * Math.PI * 4))
+}
+
+/**
+ * The stretches with nothing beside the road, as fractions of the lap. Run wide
+ * here and there is no kerb and no barrier to catch you — only the drop.
+ * Exported because the renderer has to leave the same gaps in its scenery.
+ */
+export const VOIDS = [
+  [0.17, 0.23],
+  [0.54, 0.6],
+  [0.79, 0.84],
+]
+
+export function overVoid(s) {
+  const t = lapFraction(s)
+  return VOIDS.some(([from, to]) => t >= from && t <= to)
 }
 
 /** The polyline, with cumulative arc length. Built once and never mutated. */
@@ -230,6 +279,9 @@ export function addKart(state, racer) {
     prog: s, // total distance covered, the thing places are ranked on
     place: state.karts.length + 1,
     finished: null, // race time when it crossed, or null
+    // Off the edge: seconds until it is put back, and where it is put back to.
+    respawn: 0,
+    recoverAt: 0,
     // AI only: how long it has held its item, and its line's offset.
     aiHold: 0,
     offset: 0,
@@ -300,6 +352,21 @@ export function step(state, inputs) {
 }
 
 function stepKart(state, kart, bits, dt) {
+  // Being fished out. Nothing it does counts, nothing reaches it, and its other
+  // timers are held rather than burnt off while it waits.
+  if (kart.respawn > 0) {
+    kart.respawn = Math.max(0, kart.respawn - dt)
+    kart.vx = 0
+    kart.vy = 0
+    if (kart.respawn === 0) {
+      const p = pointAt(kart.recoverAt)
+      kart.x = p.x
+      kart.y = p.y
+      kart.heading = Math.atan2(p.ty, p.tx)
+    }
+    return
+  }
+
   // Home already: it drives itself off the throttle so it does not park on the
   // line, and nothing it does counts any more.
   if (kart.finished !== null) bits = IN_FWD
@@ -340,7 +407,7 @@ function stepKart(state, kart, bits, dt) {
   kart.vy += fy * accel * dt
 
   const hit = project(kart.x, kart.y)
-  const offroad = Math.abs(hit.lateral) > HALF_WIDTH
+  const offroad = Math.abs(hit.lateral) > halfWidthAt(hit.s)
   const fwd = kart.vx * fx + kart.vy * fy
   const lat = kart.vx * -fy + kart.vy * fx
   const drag = spinning ? 3.5 : offroad ? OFFROAD_DRAG : DRAG
@@ -360,10 +427,19 @@ function stepKart(state, kart, bits, dt) {
   confine(kart)
 }
 
-/** The barrier past the grass. Nothing leaves the circuit. */
+/**
+ * The edge of the world. Over most of the lap that is a barrier past the grass
+ * and nothing leaves the circuit; over a void section there is no grass and no
+ * barrier, and going past the tarmac is a fall.
+ */
 function confine(kart) {
   const hit = project(kart.x, kart.y)
-  const limit = HALF_WIDTH + KERB - KART_R
+  const half = halfWidthAt(hit.s)
+  if (overVoid(hit.s)) {
+    if (Math.abs(hit.lateral) > half) fall(kart, hit.s)
+    return
+  }
+  const limit = half + KERB - KART_R
   if (Math.abs(hit.lateral) <= limit) return
   const side = hit.lateral > 0 ? 1 : -1
   const nx = -hit.ty
@@ -422,6 +498,7 @@ function rank(state) {
 // Items ---------------------------------------------------------------------
 
 function collectBox(state, kart) {
+  if (kart.respawn > 0) return
   for (const box of state.boxes) {
     // A full hand drives straight through: a box you cannot use is a box you
     // have not taken, as in the game this is a clone of.
@@ -447,7 +524,8 @@ function roll(state, kart) {
 
 function useItem(state, kart, bits) {
   const down = (bits & IN_ITEM) !== 0
-  const fire = down && !kart.itemDown && kart.item !== null && kart.finished === null
+  const fire =
+    down && !kart.itemDown && kart.item !== null && kart.finished === null && kart.respawn === 0
   kart.itemDown = down
   if (!fire) return
 
@@ -513,8 +591,8 @@ function stepShells(state, dt) {
     // The barrier turns a shell rather than eating it — a green shell bouncing
     // back down the road is half the point of firing one.
     const hit = project(shell.x, shell.y)
-    const limit = HALF_WIDTH + KERB
-    if (Math.abs(hit.lateral) > limit) {
+    const limit = halfWidthAt(hit.s) + KERB
+    if (Math.abs(hit.lateral) > limit && !overVoid(hit.s)) {
       const side = hit.lateral > 0 ? 1 : -1
       const nx = -hit.ty * side
       const ny = hit.tx * side
@@ -532,6 +610,7 @@ function stepShells(state, dt) {
       // Its own shell cannot hit it in the first moments, or firing one while
       // turning is a self-inflicted spin.
       if (kart.id === shell.owner && shell.life > SHELL_LIFE - 0.4) continue
+      if (kart.respawn > 0) continue
       if (Math.hypot(kart.x - shell.x, kart.y - shell.y) > KART_R + SHELL_R) continue
       shell.life = 0
       spinOut(kart)
@@ -542,6 +621,7 @@ function stepShells(state, dt) {
 }
 
 function hitHazards(state, kart) {
+  if (kart.respawn > 0) return
   for (const hazard of state.hazards) {
     if (hazard.dead) continue
     if (Math.hypot(hazard.x - kart.x, hazard.y - kart.y) > KART_R + HAZARD_R) continue
@@ -551,8 +631,24 @@ function hitHazards(state, kart) {
   state.hazards = state.hazards.filter((h) => !h.dead)
 }
 
+/**
+ * Off the edge. The kart stops where it went over — the renderer drops it out of
+ * sight from there — and is put back up the road once its time is served.
+ */
+function fall(kart, s) {
+  if (kart.respawn > 0 || kart.finished !== null) return
+  kart.respawn = RESPAWN_SECONDS
+  kart.recoverAt = s - RECOVER_BACK
+  kart.vx = 0
+  kart.vy = 0
+  kart.boost = 0
+  kart.spin = 0
+  // A star does not save you from a hole, and it does not survive the wait.
+  kart.star = 0
+}
+
 function spinOut(kart) {
-  if (kart.star > 0 || kart.finished !== null) return
+  if (kart.star > 0 || kart.finished !== null || kart.respawn > 0) return
   kart.spin = SPIN_SECONDS
   kart.boost = 0
   kart.vx *= 0.3
@@ -561,6 +657,7 @@ function spinOut(kart) {
 
 /** Kart on kart: a shove, not a crash. Nobody is stopped by being leant on. */
 function bump(a, b) {
+  if (a.respawn > 0 || b.respawn > 0) return
   const dx = b.x - a.x
   const dy = b.y - a.y
   const r = KART_R * 2
@@ -617,6 +714,9 @@ function aiBits(state, kart, dt) {
     // picks items up instead of driving the same line past every one of them.
     kart.offset = kart.offset * 0.995
   }
+  // A drop coming up: come back toward the middle. They still go over when they
+  // are shoved, which is the point — it just is not their default line.
+  if (overVoid(kart.s + 20) || overVoid(kart.s)) kart.offset *= 0.92
   // The bit has to fall on the next tick or the rising edge never comes.
   if (kart.itemDown) bits &= ~IN_ITEM
   return bits
@@ -652,7 +752,7 @@ function wrap(a) {
 export function hashRace(state) {
   const nums = [state.tick, state.phase.length, state.shells.length, state.hazards.length]
   for (const k of state.karts) {
-    nums.push(k.x, k.y, k.vx, k.vy, k.heading, k.prog, k.place, k.item ?? -1, k.spin, k.boost, k.star, k.shrink)
+    nums.push(k.x, k.y, k.vx, k.vy, k.heading, k.prog, k.place, k.item ?? -1, k.spin, k.boost, k.star, k.shrink, k.respawn)
   }
   let h = 2166136261
   for (const n of nums) {
