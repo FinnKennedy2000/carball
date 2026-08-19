@@ -48,13 +48,6 @@
         font-size: 12px;
         color: var(--color-neutral-500);
       }
-      #code {
-        width: 96px;
-        text-transform: uppercase;
-        letter-spacing: 0.24em;
-        text-align: center;
-      }
-
       #hud {
         position: fixed;
         inset: 0;
@@ -290,10 +283,6 @@
         text-align: center;
         line-height: 17px;
       }
-      .item-card .name em {
-        font-style: normal;
-        color: var(--item);
-      }
       #item-icon svg {
         width: 38px;
         height: 38px;
@@ -378,26 +367,12 @@
         display: none;
       }
       #results,
-      #gate,
       #waiting {
         position: fixed;
         inset: 0;
         display: grid;
         place-items: center;
         background: rgba(11, 14, 20, 0.78);
-      }
-      /* The way in carries the item set under it, which is taller than a short
-         window: this is the one overlay that scrolls. */
-      #gate {
-        overflow: auto;
-        padding: 40px;
-        align-content: center;
-      }
-      #gate-inner {
-        display: flex;
-        flex-direction: column;
-        gap: 34px;
-        align-items: center;
       }
       .over-card {
         box-sizing: border-box;
@@ -412,7 +387,6 @@
       #results-card {
         width: 520px;
       }
-      #gate-card,
       #waiting-card {
         width: 560px;
       }
@@ -483,127 +457,418 @@
         color: var(--color-accent-300);
       }
 
-      #gate-cols {
-        display: grid;
-        grid-template-columns: 1fr auto 1fr;
-        gap: var(--space-6);
-        align-items: start;
+      /* The way in ---------------------------------------------------------
+         One screen, no scroll: the start on the left and the roll table beside
+         it rather than under it. It paints its own sky rather than showing the
+         track through a scrim — the canvas behind it is the race, and the race
+         has not started. */
+      #gate {
+        position: fixed;
+        inset: 0;
+        overflow: hidden;
       }
-      #gate-cols .divider {
+      #gate .sky {
+        position: absolute;
+        inset: 0;
+        background:
+          radial-gradient(120% 90% at 18% 8%, rgba(145, 132, 217, 0.16) 0%, transparent 58%),
+          radial-gradient(90% 70% at 92% 96%, rgba(203, 185, 138, 0.08) 0%, transparent 60%),
+          linear-gradient(180deg, #10141f 0%, #0b0e14 62%);
+      }
+      /* A road across the lower half, seen at an angle: the only thing on the
+         screen that says racing before you have read a word of it. */
+      #gate .road {
+        position: absolute;
+        left: -120px;
+        right: -120px;
+        top: 52%;
+        height: 320px;
+        transform: rotate(-6deg);
+        opacity: 0.7;
+        background:
+          linear-gradient(180deg, transparent, rgba(233, 233, 237, 0.05) 40%, transparent),
+          repeating-linear-gradient(
+            90deg,
+            transparent 0 92px,
+            rgba(233, 233, 237, 0.07) 92px 138px
+          );
+      }
+      #gate .fade {
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(180deg, rgba(11, 14, 20, 0.55) 0%, transparent 26%),
+          linear-gradient(0deg, rgba(11, 14, 20, 0.6) 0%, transparent 30%);
+      }
+
+      #gate-cols {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        grid-template-columns: 540px minmax(0, 1fr);
+        /* Bounded, not max-content: without this the nineteen rows size the row
+           taller than the window and the column feet are cut off the bottom
+           instead of the table scrolling inside its own card. */
+        grid-template-rows: minmax(0, 1fr);
+        gap: 72px;
+        padding: 64px 72px;
+      }
+      #gate-start {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      #gate-head {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-8);
+      }
+      #gate-head h1 {
+        margin: 0;
+        font-weight: 500;
+        font-size: 52px;
+        line-height: 1.06;
+        letter-spacing: -0.03em;
+        max-width: 460px;
+        text-wrap: pretty;
+      }
+      #gate-forms {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+        max-width: 460px;
+      }
+      #gate-forms .field {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      /* The name is the one input on the screen that is always in play, so it
+         is the full width of the column rather than a box in a row. */
+      #name,
+      #code {
+        font: inherit;
+        color: var(--color-text);
+        caret-color: var(--color-accent);
+        border: 0;
+      }
+      #name {
+        padding: 13px var(--space-4);
+        border-radius: var(--radius-sm);
+        background: rgba(22, 24, 38, 0.72);
+        box-shadow: inset 0 0 0 1px var(--color-neutral-800);
+        font-size: 16px;
+      }
+      #name:focus-visible {
+        box-shadow: inset 0 0 0 1px var(--color-accent);
+      }
+
+      #solo-row,
+      #room-side {
+        display: flex;
+        border-radius: var(--radius-md);
+        padding: var(--space-4) var(--space-6);
+      }
+      /* Solo is the way in most people take: it gets the accent ring, and the
+         rooms below it are quieter on purpose. */
+      #solo-row {
+        align-items: center;
+        gap: var(--space-4);
+        background: rgba(22, 24, 38, 0.72);
+        box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-accent) 30%, transparent);
+      }
+      #solo-row .what {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        flex: 1;
+      }
+      #solo-row .hint {
+        font-size: 11px;
+      }
+      #solo-row .what b {
+        font-family: var(--font-heading);
+        font-weight: 500;
+        font-size: 17px;
+      }
+      #room-side {
+        flex-direction: column;
+        gap: var(--space-3);
+        background: rgba(22, 24, 38, 0.55);
+        box-shadow: inset 0 0 0 1px var(--color-neutral-900);
+      }
+      #room-side .row {
+        gap: var(--space-3);
+      }
+      #room-side .divider {
         width: 1px;
         align-self: stretch;
         background: var(--color-divider);
       }
-      #gate-cols .stack {
-        gap: var(--space-3);
-      }
-      /* A button that wraps its label reads as two buttons at this size. */
-      #gate-cols .btn {
+      #gate .btn {
+        padding: 9px var(--space-6);
+        border-radius: var(--radius-sm);
+        font-size: 13px;
         white-space: nowrap;
       }
-      #gate-cols .label {
-        white-space: nowrap;
+      #gate .btn-primary {
+        color: var(--color-accent-300);
+      }
+      #gate .btn-secondary {
+        border-color: var(--color-neutral-700);
+      }
+      #code {
+        width: 92px;
+        padding: 9px var(--space-4);
+        letter-spacing: 0.24em;
+        text-align: center;
+        text-transform: uppercase;
+        border-radius: var(--radius-sm);
+        background: rgba(11, 14, 20, 0.6);
+        box-shadow: inset 0 0 0 1px var(--color-neutral-800);
+        font-size: 13px;
+      }
+      #code::placeholder {
+        color: var(--color-neutral-600);
       }
       #gate-note {
+        margin: 0;
         min-height: 18px;
         font-size: 13px;
         color: var(--color-neutral-400);
       }
 
-      /* The item set, from the design's own card ---------------------------- */
-      #items-card {
-        width: 1024px;
-        max-width: 100%;
-        box-sizing: border-box;
-        padding: var(--space-8) 44px;
-        background: var(--color-bg);
-        box-shadow: var(--shadow-sm);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-8);
-      }
-      #items-grid {
-        /* Nineteen cards is a long page: the set scrolls inside its own card so
-           the way in stays where it was. */
-        max-height: 56vh;
-        overflow-y: auto;
-        padding-right: var(--space-3);
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-        gap: var(--space-4);
-      }
-      .item-card {
+      #gate-foot {
         display: flex;
         flex-direction: column;
         gap: var(--space-4);
-        padding: var(--space-6);
-        border-radius: var(--radius-md);
-        background: color-mix(in oklab, var(--color-neutral-900) 60%, transparent);
-        box-shadow: 0 0 0 1px var(--color-neutral-900);
       }
-      .item-card .head {
+      #gate-keys {
         display: flex;
-        align-items: center;
-        gap: var(--space-4);
-      }
-      .item-card .mark {
-        display: grid;
-        place-items: center;
-        width: 56px;
-        height: 56px;
-        border-radius: var(--radius-md);
-        background: radial-gradient(
-          70% 70% at 50% 35%,
-          color-mix(in oklab, var(--item) 26%, transparent) 0%,
-          transparent 72%
-        );
-        box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--item) 34%, transparent);
-      }
-      .item-card .mark svg {
-        width: 40px;
-        height: 40px;
-        display: block;
-      }
-      .item-card .name {
-        font-family: var(--font-heading);
-        font-weight: 500;
-        font-size: 17px;
-        letter-spacing: -0.01em;
-      }
-      .item-card .hint {
+        gap: var(--space-6);
         font-size: 12px;
         color: var(--color-neutral-500);
       }
-      .item-card .weights {
+      #gate-keys b {
+        color: var(--color-neutral-300);
+        font-weight: 500;
+      }
+      #gate-home {
+        font-size: 13px;
+        color: var(--color-accent-300);
+        text-decoration: none;
+        align-self: flex-start;
+      }
+
+      /* The roll table, beside the start ------------------------------------ */
+      #items-card {
         display: flex;
         flex-direction: column;
-        gap: var(--space-2);
+        gap: var(--space-6);
+        min-width: 0;
+        padding: var(--space-8) var(--space-8) var(--space-6);
+        border-radius: var(--radius-md);
+        background: rgba(16, 20, 31, 0.62);
+        box-shadow: inset 0 0 0 1px var(--color-neutral-900);
+        backdrop-filter: blur(8px);
       }
-      /* How likely the item is at the front of the field and at the back — the
-         rubber band, drawn from the same table the roll reads. */
-      .item-card .weight {
+      #items-head {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: var(--space-6);
+      }
+      #items-head h2 {
+        margin: 0;
+        font-weight: 500;
+        font-size: 28px;
+        letter-spacing: -0.02em;
+      }
+      /* Which third of the field the bars are drawn for. Three buttons rather
+         than three bars per row: nineteen items times three is a chart nobody
+         reads, and where you are running is one thing at a time. */
+      #band-switch {
+        display: flex;
+        gap: 2px;
+        padding: 3px;
+        border-radius: var(--radius-sm);
+        background: rgba(11, 14, 20, 0.6);
+        box-shadow: inset 0 0 0 1px var(--color-neutral-900);
+      }
+      #band-switch button {
+        padding: 6px var(--space-4);
+        border: 0;
+        border-radius: 5px;
+        background: transparent;
+        cursor: pointer;
+        font: inherit;
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--color-neutral-500);
+      }
+      #band-switch button[aria-selected='true'] {
+        background: color-mix(in oklab, var(--color-accent) 18%, transparent);
+        box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-accent) 40%, transparent);
+        color: var(--color-accent-300);
+      }
+      #items-blurb {
+        margin: 0;
+        max-width: 620px;
+        font-size: 13px;
+        line-height: 1.55;
+        color: var(--color-neutral-400);
+      }
+      #items-grid {
         display: grid;
-        grid-template-columns: 52px 1fr;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-6);
+        min-width: 0;
+        /* Two columns of ten fit the design's window. A shorter one scrolls the
+           table rather than the screen. */
+        min-height: 0;
+        overflow-y: auto;
+      }
+      #items-grid .col {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+      .item-row {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr) 56px;
         align-items: center;
         gap: var(--space-3);
+        padding: 7px var(--space-3);
+        border-radius: var(--radius-sm);
+        background: color-mix(in oklab, var(--color-neutral-900) 55%, transparent);
       }
-      .item-card .weight span:first-child {
+      /* Never rolled where you are running: still listed, so the set is the
+         whole set, but plainly out of play. */
+      .item-row.off {
+        background: transparent;
+        opacity: 0.42;
+      }
+      .item-row .mark {
+        display: grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        border-radius: var(--radius-sm);
+        background: radial-gradient(
+          70% 70% at 50% 35%,
+          color-mix(in oklab, var(--item) 22%, transparent) 0%,
+          transparent 74%
+        );
+      }
+      .item-row .mark svg {
+        display: block;
+        width: 24px;
+        height: 24px;
+      }
+      .item-row .what {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        min-width: 0;
+      }
+      .item-row .name,
+      .item-row .hint {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .item-row .name {
+        font-family: var(--font-heading);
+        font-size: 13px;
+        letter-spacing: -0.01em;
+      }
+      .item-row .name em {
+        font-style: normal;
+        color: var(--item);
+      }
+      .item-row .hint {
         font-size: 10px;
-        letter-spacing: 0.14em;
-        text-transform: uppercase;
         color: var(--color-neutral-600);
       }
-      .item-card .bar {
+      .item-row .bar {
         display: block;
         height: 3px;
+        border-radius: 2px;
         background: var(--color-neutral-900);
-        border-radius: 2px;
       }
-      .item-card .bar > i {
+      .item-row .bar > i {
         display: block;
         height: 3px;
-        background: var(--item);
         border-radius: 2px;
+        background: var(--item);
+      }
+      #items-legend {
+        margin-top: auto;
+        display: flex;
+        align-items: center;
+        gap: var(--space-4);
+        font-size: 11px;
+        color: var(--color-neutral-600);
+      }
+      #items-legend .key {
+        display: block;
+        width: 52px;
+        height: 3px;
+        border-radius: 2px;
+        background: linear-gradient(90deg, var(--color-accent), transparent);
+      }
+
+      /* A shorter window keeps the one screen and gives up type size for it —
+         a laptop is the common case, and restacking there would put the item set
+         off the bottom of a screen that could have held it. */
+      @media (max-height: 880px) {
+        #gate-cols {
+          gap: 56px;
+          padding: 44px 56px;
+        }
+        #gate-head {
+          gap: var(--space-6);
+        }
+        #gate-head h1 {
+          font-size: 44px;
+        }
+      }
+      @media (max-height: 780px) {
+        #gate-cols {
+          gap: 44px;
+          padding: 28px 44px;
+        }
+        #gate-head h1 {
+          font-size: 38px;
+        }
+      }
+
+      /* Too narrow or too short for two columns side by side: the screen goes
+         back to one and scrolls. */
+      @media (max-width: 1180px), (max-height: 600px) {
+        #gate {
+          overflow: auto;
+        }
+        #gate-cols {
+          position: relative;
+          inset: auto;
+          grid-template-columns: minmax(0, 1fr);
+          gap: var(--space-8);
+          padding: 32px;
+        }
+        #gate-head h1 {
+          font-size: 38px;
+        }
+        #items-grid {
+          overflow: visible;
+        }
+      }
+      @media (max-width: 760px) {
+        #items-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
       }
 
       #room-strip {
@@ -724,45 +989,77 @@
     </div>
 
     <div id="gate">
-      <div id="gate-inner">
-      <div id="gate-card" class="over-card">
-        <div class="over-head">
-          <span class="kicker accent">Kart</span>
-          <h2>Three laps. Items. First across the line wins.</h2>
-          <div class="over-rule"></div>
-        </div>
-        <input id="name" class="input" placeholder="your name" maxlength="16" autocomplete="off" />
-        <div id="gate-cols">
-          <div class="stack">
-            <span class="label">On your own</span>
-            <button id="solo" class="btn btn-primary">Race five AI</button>
-          </div>
-          <span class="divider"></span>
-          <div class="stack" id="room-side">
-            <span class="label">With other people</span>
-            <button id="create" class="btn btn-secondary">Create room</button>
-            <div class="row">
-              <input id="code" class="input" placeholder="CODE" maxlength="4" autocomplete="off" />
-              <button id="join" class="btn btn-secondary">Join</button>
+      <div class="sky"></div>
+      <div class="road"></div>
+      <div class="fade"></div>
+
+      <div id="gate-cols">
+        <div id="gate-start">
+          <div id="gate-head">
+            <div class="over-head">
+              <span class="kicker accent">Kart</span>
+              <h1>Three laps. Items.<br />First across the line wins.</h1>
+              <div class="over-rule"></div>
+            </div>
+
+            <div id="gate-forms">
+              <label class="field">
+                <span class="label">Your name</span>
+                <input id="name" placeholder="your name" maxlength="16" autocomplete="off" />
+              </label>
+
+              <div id="solo-row">
+                <span class="what">
+                  <b>Race five AI</b>
+                  <span class="hint">starts immediately, no room needed</span>
+                </span>
+                <button id="solo" class="btn btn-primary">Go</button>
+              </div>
+
+              <div id="room-side">
+                <span class="label">With other people</span>
+                <div class="row">
+                  <button id="create" class="btn btn-secondary">Create room</button>
+                  <span class="divider"></span>
+                  <input id="code" placeholder="CODE" maxlength="4" autocomplete="off" />
+                  <button id="join" class="btn btn-secondary">Join</button>
+                </div>
+              </div>
+
+              <p id="gate-note"></p>
             </div>
           </div>
-        </div>
-        <p id="gate-note"></p>
-        <div class="row">
-          <a class="btn btn-ghost" href="./">Back to home</a>
-        </div>
-      </div>
 
-      <!-- What is in a box, and how the roll leans by where you are running.
-           Filled in by kart.js from the item table itself. -->
-      <div id="items-card">
-        <div class="over-head">
-          <span class="kicker accent">Items</span>
-          <h2>Nineteen things to find in a box</h2>
-          <div class="over-rule"></div>
+          <div id="gate-foot">
+            <div id="gate-keys">
+              <span><b>WASD</b> steer</span>
+              <span><b>Shift</b> drift</span>
+              <span><b>Space</b> use item</span>
+            </div>
+            <a id="gate-home" href="./">Back to home</a>
+          </div>
         </div>
-        <div id="items-grid"></div>
-      </div>
+
+        <!-- What is in a box, and how the roll leans by where you are running.
+             Filled in by kart.js from the item table itself. -->
+        <div id="items-card">
+          <div id="items-head">
+            <div class="stack" style="gap: var(--space-2)">
+              <span class="kicker accent">Items</span>
+              <h2>Nineteen things to find in a box</h2>
+            </div>
+            <div id="band-switch" role="tablist" aria-label="Where you are running"></div>
+          </div>
+          <p id="items-blurb"></p>
+          <div id="items-grid"></div>
+          <div id="items-legend">
+            <span class="key"></span>
+            <span
+              >Bar length is the item's share of the roll in that third of the field. Dimmed
+              items never appear there.</span
+            >
+          </div>
+        </div>
       </div>
     </div>
 

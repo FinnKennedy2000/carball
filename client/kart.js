@@ -178,6 +178,38 @@ let flashUntil = 0
 // sends, and it is enough — nobody shrinks twice in a frame.
 let lastShrink = 0
 let boltAt = -9
+
+/**
+ * The three thirds of the field, and what the box is for in each. The roll table
+ * is twelve rows deep, so a third is four of them added up — a band rather than
+ * one row, because half the roster only shows up in part of a third and a single
+ * row would call those items impossible.
+ */
+const BANDS = [
+  {
+    label: 'Front',
+    blurb:
+      'Out in front the box is deliberately thin: peels, a trap box and a shell or two — things to leave behind you. Nothing in the front third is going to win you the race, only keep it.',
+  },
+  {
+    label: 'Mid',
+    blurb:
+      'Running mid-field, this is what the box gives you — sorted by how often, straight off the roll table. Fall back and the gold, the star and the bullet take over; lead and you are down to things you throw behind.',
+  },
+  {
+    label: 'Back',
+    blurb:
+      'Down the back the race is handed to you: the golden mushroom, the star and Bullet Bill, and the lightning that shrinks everyone in front of you at once.',
+  },
+]
+
+/** What each item is worth in one third of the field, added over its rows. */
+function bandWeights(band) {
+  const per = K.ROLL_TABLE.length / BANDS.length
+  const rows = K.ROLL_TABLE.slice(band * per, (band + 1) * per)
+  return K.ITEMS.map((_, i) => rows.reduce((sum, row) => sum + row[i], 0))
+}
+
 const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)')
 
 configure({
@@ -280,30 +312,44 @@ function wireGate() {
 }
 
 /**
- * The item set on the way-in screen: each mark, what it does, and how the roll
- * leans by where you are running. Drawn once, from the sim's own weight table
- * rather than a copy of it.
+ * The item set on the way-in screen: each mark, what it does, and how often the
+ * box hands it to you where you are running. Drawn from the sim's own weight
+ * table rather than a copy of it.
  */
-function showItemSet() {
-  const rows = K.ROLL_TABLE
-  const max = Math.max(...rows.flat())
-  // Front, middle and back of the field rather than only its two ends: half the
-  // roster — the bombs, the POW, the spiny shell — lives in the middle, and two
-  // bars could not show that it does.
-  const shown = [['Front', rows[0]], ['Mid', rows[5]], ['Back', rows[rows.length - 1]]]
-  const bar = (label, weight) =>
-    `<span class="weight"><span>${label}</span><span class="bar"><i style="width:${(weight / max) * 100}%"></i></span></span>`
-  el('items-grid').innerHTML = K.ITEMS.map((item, i) => {
+function showItemSet(band = 1) {
+  el('band-switch').innerHTML = BANDS.map(
+    (b, i) =>
+      `<button role="tab" data-band="${i}" aria-selected="${i === band}">${b.label}</button>`
+  ).join('')
+  for (const button of el('band-switch').children) {
+    button.addEventListener('click', () => showItemSet(Number(button.dataset.band)))
+  }
+  el('items-blurb').textContent = BANDS[band].blurb
+
+  const weights = bandWeights(band)
+  const max = Math.max(...weights)
+  // Commonest first, so the list reads as what to expect rather than as the
+  // order the table happens to be written in. The ones that never come up sort
+  // to the bottom on their own.
+  const order = K.ITEMS.map((item, i) => ({ item, weight: weights[i] })).sort(
+    (a, b) => b.weight - a.weight
+  )
+  const row = ({ item, weight }) => {
     const art = ITEM_ART[item.key]
     const count = item.count ?? 1
-    return `<div class="item-card" style="--item:${art.color}">
-      <div class="head">
-        <span class="mark"><svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">${art.svg}</svg></span>
-        <span><span class="name">${item.name}${count > 1 ? ` <em>×${count}</em>` : ''}</span><br /><span class="hint">${item.hint}</span></span>
-      </div>
-      <div class="weights">${shown.map(([label, row]) => bar(label, row[i])).join('')}</div>
+    return `<div class="item-row${weight > 0 ? '' : ' off'}" style="--item:${art.color}">
+      <span class="mark"><svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">${art.svg}</svg></span>
+      <span class="what">
+        <span class="name">${item.name}${count > 1 ? ` <em>×${count}</em>` : ''}</span>
+        <span class="hint">${item.hint}</span>
+      </span>
+      <span class="bar">${weight > 0 ? `<i style="width:${(weight / max) * 100}%"></i>` : ''}</span>
     </div>`
-  }).join('')
+  }
+  const half = Math.ceil(order.length / 2)
+  el('items-grid').innerHTML = [order.slice(0, half), order.slice(half)]
+    .map((column) => `<div class="col">${column.map(row).join('')}</div>`)
+    .join('')
 }
 
 function saveName() {
