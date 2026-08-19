@@ -850,3 +850,62 @@ test('an item fires on space as well as on the item key', () => {
   assert.equal(fired(IN_BOOST), 1, 'space did not fire')
   assert.equal(fired(0), 0, 'an item fired with nothing pressed')
 })
+
+test('a kart crawling in the road is something you go through, not a wall', () => {
+  // The complaint this is for: a spin lasts 1.3s but the kart it happened to is
+  // still at walking pace afterwards, and at full mass that is the same roadblock
+  // wearing a different flag.
+  const covered = (place) => {
+    // The kart in front is not an AI: an AI drives itself away and the run then
+    // measures following a slower car rather than being jammed behind a stopped
+    // one, which is what is being fixed.
+    const state = createRace([
+      { id: 1, name: 'me' },
+      { id: 2, name: 'stalled' },
+    ], 29)
+    begin(state)
+    state.phase = 'RACE'
+    const [me, other] = state.karts
+    const p = pointAt(400)
+    if (place) {
+      other.x = p.x
+      other.y = p.y
+      other.s = 400
+      other.vx = 0
+      other.vy = 0
+    } else {
+      other.x = 1e6 // out of the way entirely, as the control
+      other.y = 1e6
+    }
+    me.x = p.x - p.tx * 4.2
+    me.y = p.y - p.ty * 4.2
+    me.s = 400 - 4.2
+    me.prog = 0
+    me.heading = Math.atan2(p.ty, p.tx)
+    me.vx = p.tx * 30
+    me.vy = p.ty * 30
+    run(state, 90, { 1: IN_FWD })
+    return me.prog
+  }
+
+  const clear = covered(false)
+  const blocked = covered(true)
+  assert.ok(blocked > clear * 0.8, `a stopped kart cost ${(100 - (blocked / clear) * 100).toFixed(0)}% of the run`)
+})
+
+test('reversing swaps left and right', () => {
+  const state = started(1, 31)
+  state.phase = 'RACE'
+  const kart = state.karts[0]
+  const p = pointAt(400)
+  kart.x = p.x
+  kart.y = p.y
+  const facing = Math.atan2(p.ty, p.tx)
+  kart.heading = facing
+  // Rolling backwards, with the wheel to the left.
+  kart.vx = -p.tx * 8
+  kart.vy = -p.ty * 8
+  run(state, 20, { 1: IN_LEFT })
+  const swung = Math.atan2(Math.sin(kart.heading - facing), Math.cos(kart.heading - facing))
+  assert.ok(swung > 0.05, `the nose went the forward way: ${swung.toFixed(2)} rad`)
+})

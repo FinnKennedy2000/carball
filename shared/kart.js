@@ -79,6 +79,12 @@ const SPIN_DRAG = 1.2
 // Its share of a shove, as a fraction of an ordinary kart's. Low enough that
 // driving into a pirouette moves the pirouette rather than stopping you.
 const LOOSE = 0.3
+// The speed advantage at which a kart in front stops being a wall and starts
+// being something you go through. A spin is over in 1.3s but the kart it happened
+// to is still crawling, and at full mass that is the same roadblock wearing a
+// different flag — which is most of what "stuck behind people spinning out"
+// actually is.
+const PLOUGH = 14
 // How firm kart-on-kart contact is. Contact should be something you feel.
 const RESTITUTION = 2.2
 // What a kart on the receiving end of a shove gives back while it is spinning.
@@ -648,6 +654,10 @@ function stepKart(state, kart, bits, dt) {
     let steer = 0
     if (bits & IN_LEFT) steer -= 1
     if (bits & IN_RIGHT) steer += 1
+    // Reversing swaps left and right, the way a real car does: the wheels turn
+    // the same way and the nose swings the other. Backing off a barrier with the
+    // steering still reading forwards is how you end up wedged against it.
+    if (kart.vx * Math.cos(kart.heading) + kart.vy * Math.sin(kart.heading) < -0.5) steer = -steer
     kart.heading = wrap(kart.heading + steer * TURN_RATE * turnScale * dt)
   }
 
@@ -1079,9 +1089,13 @@ function bump(a, b) {
   else if (b.cloud > 0 && b.cloudLock === 0 && a.cloud === 0 && a.star === 0) handCloud(b, a)
 
   // Split the overlap and the impulse by inverse mass, not down the middle: a
-  // Mega should barrel through, and a kart mid-spin should be swept aside.
-  const ma = massOf(a)
-  const mb = massOf(b)
+  // Mega should barrel through, and a kart that is in no position to argue —
+  // spinning, or simply crawling while you arrive at speed — should be swept
+  // aside rather than stopping you dead.
+  const aLoose = givesWay(a, b)
+  const bLoose = givesWay(b, a)
+  const ma = massOf(a, aLoose)
+  const mb = massOf(b, bLoose)
   const share = mb / (ma + mb) // how much of it a takes
   const push = r - d
   a.x -= nx * push * share
@@ -1096,16 +1110,16 @@ function bump(a, b) {
   // whoever put it there hardly feels it. Straight two-body physics would hand
   // a third of your speed to a kart you drove through, which is the sensation
   // being fixed here rather than a detail of it.
-  a.vx -= ((j * nx) / ma) * (b.spin > 0 ? SHRUG : 1)
-  a.vy -= ((j * ny) / ma) * (b.spin > 0 ? SHRUG : 1)
-  b.vx += ((j * nx) / mb) * (a.spin > 0 ? SHRUG : 1)
-  b.vy += ((j * ny) / mb) * (a.spin > 0 ? SHRUG : 1)
+  a.vx -= ((j * nx) / ma) * (bLoose ? SHRUG : 1)
+  a.vy -= ((j * ny) / ma) * (bLoose ? SHRUG : 1)
+  b.vx += ((j * nx) / mb) * (aLoose ? SHRUG : 1)
+  b.vy += ((j * ny) / mb) * (aLoose ? SHRUG : 1)
   // Being light is not a licence to be fired off the circuit — and light is
   // shrunk as much as it is spinning. A shrunk kart tops out at 21 m/s of its
   // own, and a shove was sending it to fifty. Its own cap reasserts itself on
   // the way down, the way the end of a Turbo does.
-  if (massOf(a) < 1) clampSpeed(a, MAX_SPEED)
-  if (massOf(b) < 1) clampSpeed(b, MAX_SPEED)
+  if (ma < 1) clampSpeed(a, MAX_SPEED)
+  if (mb < 1) clampSpeed(b, MAX_SPEED)
 }
 
 /**
@@ -1113,9 +1127,21 @@ function bump(a, b) {
  * times as wide should not merely be 1.7 times as hard to move; and a fraction
  * of that while it is spinning, which is the whole of the roadblock fix.
  */
-function massOf(kart) {
+function massOf(kart, loose) {
   const scale = kartScale(kart)
-  return scale * scale * (kart.spin > 0 ? LOOSE : 1)
+  return scale * scale * (loose ? LOOSE : 1)
+}
+
+/**
+ * Whether `victim` gives way to `hitter` instead of standing its ground: it is
+ * spinning, or it is being caught at PLOUGH m/s more than it is doing. The second
+ * half is what stops the aftermath of a spin — a kart at walking pace in the
+ * middle of the road, no longer spinning — from being a wall.
+ */
+function givesWay(victim, hitter) {
+  if (victim.spin > 0) return true
+  if (victim.mega > 0 || victim.star > 0) return false
+  return Math.hypot(hitter.vx, hitter.vy) - Math.hypot(victim.vx, victim.vy) > PLOUGH
 }
 
 /** Pass the cloud on, and hold it there a moment so it does not flip back. */
