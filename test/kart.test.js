@@ -43,6 +43,46 @@ const run = (state, ticks, inputs = {}) => {
   return state
 }
 
+/**
+ * A driver that holds the drift button down and trims with the wheel — aim at a
+ * point up the road, nudge toward it — which is how a drift is actually held.
+ * Feeding a fixed steering bit instead just parks the kart in the outside wall.
+ */
+const driftAlong = (state, kart, ticks, extra = 0) => {
+  let peakSlip = 0
+  for (let i = 0; i < ticks; i++) {
+    const here = project(kart.x, kart.y)
+    const look = pointAt(here.s + 10 + Math.hypot(kart.vx, kart.vy) * 0.35)
+    let err = Math.atan2(look.y - kart.y, look.x - kart.x) - kart.heading
+    err = Math.atan2(Math.sin(err), Math.cos(err))
+    let bits = IN_FWD | IN_DRIFT | extra
+    if (err > 0.05) bits |= IN_RIGHT
+    else if (err < -0.05) bits |= IN_LEFT
+    step(state, { 1: bits })
+    peakSlip = Math.max(peakSlip, slipDeg(kart))
+  }
+  return peakSlip
+}
+
+/** How far the nose leads the direction of travel, in degrees: the slide. */
+const slipDeg = (kart) =>
+  Math.abs(
+    Math.atan2(
+      kart.vx * -Math.sin(kart.heading) + kart.vy * Math.cos(kart.heading),
+      kart.vx * Math.cos(kart.heading) + kart.vy * Math.sin(kart.heading)
+    )
+  ) * (180 / Math.PI)
+
+/** On the racing line at `s`, at speed, pointing the right way. */
+const onLine = (kart, s, speed = 30) => {
+  const p = pointAt(s)
+  kart.x = p.x
+  kart.y = p.y
+  kart.heading = Math.atan2(p.ty, p.tx)
+  kart.vx = p.tx * speed
+  kart.vy = p.ty * speed
+}
+
 test('the circuit closes and every point projects back onto it', () => {
   assert.ok(TRACK.length > 1100, `the circuit is only ${TRACK.length.toFixed(0)}m`)
   for (let i = 0; i < 20; i++) {
@@ -738,16 +778,12 @@ test('holding a drift charges a mini-turbo, and releasing it spends it', () => {
     const state = started(1, 13)
     state.phase = 'RACE'
     const kart = state.karts[0]
-    // Into the right-hander after the line, which is a corner a drift can
-    // actually be held through.
-    const p = pointAt(40)
-    kart.x = p.x
-    kart.y = p.y
-    kart.heading = Math.atan2(p.ty, p.tx)
-    kart.vx = p.tx * 30
-    kart.vy = p.ty * 30
-    run(state, ticks, { 1: IN_FWD | IN_DRIFT | IN_RIGHT })
+    onLine(kart, 500)
+    // The flick that starts it, then the drift held and trimmed down the road.
+    step(state, { 1: IN_FWD | IN_DRIFT | IN_RIGHT })
+    driftAlong(state, kart, ticks - 1)
     const charged = driftTier(kart)
+    kart.boost = 0 // a pad on the way past is not what this is measuring
     step(state, { 1: IN_FWD }) // let go
     return { charged, boost: kart.boost }
   }
@@ -766,17 +802,51 @@ test('holding a drift charges a mini-turbo, and releasing it spends it', () => {
   assert.ok(second.boost > first.boost, 'the second tier is not worth more')
 })
 
+test('a drift slides and holds its line rather than spinning on the spot', () => {
+  // The bug: a drift turned at more than twice the grip rate, which is a ten
+  // metre circle at speed. The kart pirouetted off the road inside half a
+  // second, so the mini-turbo was unreachable and it read as a snap turn rather
+  // than a slide.
+  const state = started(1, 13)
+  state.phase = 'RACE'
+  const kart = state.karts[0]
+  onLine(kart, 500)
+  step(state, { 1: IN_FWD | IN_DRIFT | IN_RIGHT })
+  const slid = driftAlong(state, kart, 129)
+  assert.equal(driftTier(kart), 2, 'a drift that cannot be held for two seconds')
+  const here = project(kart.x, kart.y)
+  assert.ok(Math.abs(here.lateral) < halfWidthAt(here.s), 'the drift left the road')
+  assert.ok(slid > 15, `the nose only ever led the line by ${slid.toFixed(0)} degrees`)
+
+  // A grip turn on the same stretch barely slides at all — that is the contrast
+  // the drift button is meant to buy.
+  const grip = started(1, 13)
+  grip.phase = 'RACE'
+  const plain = grip.karts[0]
+  onLine(plain, 500)
+  let gripSlip = 0
+  for (let i = 0; i < 40; i++) {
+    run(grip, 1, { 1: IN_FWD | IN_RIGHT })
+    gripSlip = Math.max(gripSlip, slipDeg(plain))
+  }
+  assert.ok(gripSlip < slid, `a grip turn slides as much as a drift: ${gripSlip.toFixed(0)} deg`)
+
+  // Steering out of a drift opens the line, it does not flip it over.
+  const dir = kart.driftDir
+  const before = kart.heading
+  run(state, 10, { 1: IN_FWD | IN_DRIFT | IN_LEFT })
+  assert.equal(kart.driftDir, dir, 'the wheel flipped the drift')
+  const turned = Math.atan2(Math.sin(kart.heading - before), Math.cos(kart.heading - before))
+  assert.ok(turned * dir > 0, 'steering out of a drift turned the kart the other way')
+})
+
 test('a spin-out throws away a charged drift', () => {
   const state = started(1, 13)
   state.phase = 'RACE'
   const kart = state.karts[0]
-  const p = pointAt(40)
-  kart.x = p.x
-  kart.y = p.y
-  kart.heading = Math.atan2(p.ty, p.tx)
-  kart.vx = p.tx * 30
-  kart.vy = p.ty * 30
-  run(state, 130, { 1: IN_FWD | IN_DRIFT | IN_RIGHT })
+  onLine(kart, 500)
+  step(state, { 1: IN_FWD | IN_DRIFT | IN_RIGHT })
+  driftAlong(state, kart, 129)
   assert.equal(driftTier(kart), 2)
   state.hazards.push({ kind: 'banana', x: kart.x, y: kart.y, owner: 99 })
   step(state, { 1: IN_FWD | IN_DRIFT | IN_RIGHT })
@@ -795,14 +865,11 @@ test('a charge held into a fall or a bullet does not pay out afterwards', () => 
     const state = started(1, 17)
     state.phase = 'RACE'
     const kart = state.karts[0]
-    const p = pointAt(40)
-    kart.x = p.x
-    kart.y = p.y
-    kart.heading = Math.atan2(p.ty, p.tx)
-    kart.vx = p.tx * 30
-    kart.vy = p.ty * 30
-    run(state, 130, { 1: IN_FWD | IN_DRIFT | IN_RIGHT })
+    onLine(kart, 500)
+    step(state, { 1: IN_FWD | IN_DRIFT | IN_RIGHT })
+    driftAlong(state, kart, 129)
     assert.ok(kart.driftTime > 1.9, 'the drift never charged')
+    kart.boost = 0 // as above: a pad on the way past would read as a payout
     Object.assign(kart, extra)
     return { state, kart }
   }
@@ -812,7 +879,7 @@ test('a charge held into a fall or a bullet does not pay out afterwards', () => 
   assert.equal(dropped.boost, 0, 'a fall paid out the charge it threw away')
 
   const { state: flew, kart: flying } = charged({ bullet: 0.2 })
-  run(flew, 60)
+  run(flew, 20) // just past the end of the flight, and short of the next pad
   assert.equal(flying.boost, 0, 'a bullet paid out a charge held into it')
 })
 

@@ -40,7 +40,6 @@ const DRAG = 0.45
 const GRIP = 10
 const GRIP_DRIFT = 3.2
 const TURN_RATE = 2.5
-const TURN_DRIFT = 1.5
 const TURN_MIN = 0.4
 const OFFROAD_MAX = 0.45 // fraction of top speed the grass allows
 const OFFROAD_DRAG = 2.6
@@ -56,6 +55,15 @@ const OVERSPEED_BLEED = 6
 export const DRIFT_TIERS = [0.9, 1.9] // seconds held for tier one and tier two
 const DRIFT_BOOST = [0.55, 0.95] // what each tier is worth
 const DRIFT_MIN_SPEED = 12 // below this a drift is a pirouette, not a line
+// A drift is held, not steered. Once it is locked in a direction the steering
+// only trims it: into the corner tightens, away from it opens the line out, and
+// neither can flip it over. Turning at the full rate for a second and a half —
+// which is what a drift used to do — is a ten metre circle, so the kart left
+// the road long before either tier, and the mini-turbo was unreachable in
+// practice. These are fractions of TURN_RATE.
+const DRIFT_TIGHT = 1 // steering into the drift
+const DRIFT_HOLD = 0.55 // no steering: the line it holds on its own
+const DRIFT_OPEN = 0.15 // steering out of it
 
 const COUNTDOWN = 3
 const FINISH_GRACE = 45 // seconds the race runs on after the winner is home
@@ -490,6 +498,8 @@ export function addKart(state, racer) {
     // reached is driftTier(kart) — a second field for it would be the same
     // number twice, on the wire and in every reset.
     driftTime: 0,
+    // Which way the current drift is locked: -1, 0 or 1.
+    driftDir: 0,
     star: 0,
     shrink: 0,
     spin: 0,
@@ -590,7 +600,10 @@ function stepKart(state, kart, bits, dt) {
   // below — being fished out, and flying a bullet — skip the drift block
   // entirely, so a charge left standing across one came back out the far side as
   // a free boost. One line here rather than one at each escape.
-  if (kart.respawn > 0 || kart.bullet > 0) kart.driftTime = 0
+  if (kart.respawn > 0 || kart.bullet > 0) {
+    kart.driftTime = 0
+    kart.driftDir = 0
+  }
   // Being fished out. Nothing it does counts, nothing reaches it, and its other
   // timers are held rather than burnt off while it waits.
   if (kart.respawn > 0) {
@@ -639,10 +652,18 @@ function stepKart(state, kart, bits, dt) {
     return
   }
 
-  const drifting = (bits & IN_DRIFT) !== 0 && !spinning
   const speed = Math.hypot(kart.vx, kart.vy)
-  const steering = (bits & (IN_LEFT | IN_RIGHT)) !== 0
-  if (drifting && steering && speed > DRIFT_MIN_SPEED) {
+  let steer = 0
+  if (bits & IN_LEFT) steer -= 1
+  if (bits & IN_RIGHT) steer += 1
+  // The button starts a drift, the wheel decides which way, and after that the
+  // direction is locked until the button comes up or the kart drops to walking
+  // pace. Holding it through a corner is the whole point.
+  const held = (bits & IN_DRIFT) !== 0 && !spinning
+  if (held && kart.driftDir === 0 && steer !== 0 && speed > DRIFT_MIN_SPEED) kart.driftDir = steer
+  if (!held || speed <= DRIFT_MIN_SPEED) kart.driftDir = 0
+  const drifting = kart.driftDir !== 0
+  if (drifting) {
     kart.driftTime += dt
   } else {
     // Letting go pays out whatever tier was reached — straightening up or
@@ -652,17 +673,16 @@ function stepKart(state, kart, bits, dt) {
     if (tier > 0) kart.boost = Math.max(kart.boost, DRIFT_BOOST[tier - 1])
     kart.driftTime = 0
   }
-  const turnScale =
-    (TURN_MIN + (1 - TURN_MIN) * Math.min(1, speed / (MAX_SPEED * 0.3))) * (drifting ? TURN_DRIFT : 1)
+  const turnScale = TURN_MIN + (1 - TURN_MIN) * Math.min(1, speed / (MAX_SPEED * 0.3))
 
   if (spinning) {
     // A spin-out: the kart pirouettes, the throttle does nothing, and the speed
     // bleeds away. Everything else this tick still applies.
     kart.heading = wrap(kart.heading + 9 * dt)
+  } else if (drifting) {
+    const trim = steer === kart.driftDir ? DRIFT_TIGHT : steer === 0 ? DRIFT_HOLD : DRIFT_OPEN
+    kart.heading = wrap(kart.heading + kart.driftDir * TURN_RATE * turnScale * trim * dt)
   } else {
-    let steer = 0
-    if (bits & IN_LEFT) steer -= 1
-    if (bits & IN_RIGHT) steer += 1
     // Reversing swaps left and right, the way a real car does: the wheels turn
     // the same way and the nose swings the other. Backing off a barrier with the
     // steering still reading forwards is how you end up wedged against it.
@@ -1258,7 +1278,7 @@ function wrap(a) {
 export function hashRace(state) {
   const nums = [state.tick, state.phase.length, state.shells.length, state.hazards.length]
   for (const k of state.karts) {
-    nums.push(k.x, k.y, k.vx, k.vy, k.heading, k.prog, k.place, k.item ?? -1, k.itemCount, k.spin, k.grace, k.driftTime, k.boost, k.star, k.shrink, k.respawn, k.mega, k.bullet, k.ink, k.cloud)
+    nums.push(k.x, k.y, k.vx, k.vy, k.heading, k.prog, k.place, k.item ?? -1, k.itemCount, k.spin, k.grace, k.driftTime, k.driftDir, k.boost, k.star, k.shrink, k.respawn, k.mega, k.bullet, k.ink, k.cloud)
   }
   let h = 2166136261
   for (const n of nums) {
