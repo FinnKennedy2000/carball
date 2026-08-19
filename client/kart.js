@@ -1650,6 +1650,9 @@ function paintItem(index, reeling, count = 1) {
 function showEffects(me) {
   const chips = []
   if (me.boost > 0) chips.push(['tag-accent', `Boost ${me.boost.toFixed(1)}s`])
+  // The tow. A number would be noise; what you need to know is whether you are
+  // in it, so it shows from the point where it is worth staying there.
+  if (me.draft > 0.2) chips.push(['tag-accent', 'Slipstream'])
   if (me.star > 0) chips.push(['tag-accent', `Star ${me.star.toFixed(1)}s`])
   if (me.mega > 0) chips.push(['tag-accent', `Mega ${me.mega.toFixed(1)}s`])
   if (me.bullet > 0) chips.push(['tag-accent', `Bullet ${me.bullet.toFixed(1)}s`])

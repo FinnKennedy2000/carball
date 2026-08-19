@@ -88,6 +88,19 @@ const WALL_BOUNCE = 0.3
 // How fast speed above the current cap is given up, per second.
 const OVERSPEED_BLEED = 6
 
+// Slipstream. Tucked in behind another kart you are in its hole in the air: a
+// cone SLIP_LEN long and SLIP_WIDE either side, strongest right on its bumper,
+// worth SLIP_ACCEL on the throttle and a few percent off the speed cap. It is
+// a tow, not a magnet — it pays only while you are pointed the same way as the
+// kart in front and moving quickly enough for air to matter, so it cannot be
+// farmed alongside someone, facing backwards, or off the line.
+const SLIP_LEN = 15
+const SLIP_WIDE = 3.5
+const SLIP_ACCEL = 13
+const SLIP_TOP = 1.06
+const SLIP_MIN_SPEED = 15
+const SLIP_ALIGN = 0.6 // cos of the biggest heading difference that still tows
+
 // Drift mini-turbo. Hold a drift with the wheel over and it charges; let go
 // with a charge and you are paid in the same boost a Mushroom gives, which is
 // the whole reason this is a small change.
@@ -630,6 +643,9 @@ export function addKart(state, racer) {
     itemCount: 0, // uses left of it, which is 3 for a triple and 1 for the rest
     itemDown: false,
     boost: 0,
+    // How hard this kart is being towed right now, 0..1. Derived every tick;
+    // it lives on the kart so the HUD can show it without redoing the search.
+    draft: 0,
     // Mini-turbo: how long the current drift has been held. The tier it has
     // reached is driftTier(kart) — a second field for it would be the same
     // number twice, on the wire and in every reset.
@@ -746,6 +762,10 @@ function stepKart(state, kart, bits, dt) {
     kart.driftTime = 0
     kart.driftDir = 0
   }
+  // Recomputed below for a kart that is actually driving. Cleared here so one
+  // left standing across a respawn or a jump does not read as a tow that ended
+  // several seconds ago.
+  kart.draft = 0
   // Being fished out. Nothing it does counts, nothing reaches it, and its other
   // timers are held rather than burnt off while it waits.
   if (kart.respawn > 0) {
@@ -851,11 +871,13 @@ function stepKart(state, kart, bits, dt) {
   const fy = Math.sin(kart.heading)
 
   const boosting = kart.boost > 0 || ((bits & IN_BOOST) !== 0 && kart.star > 0)
+  kart.draft = draftAt(state, kart, fx, fy, speed)
   let accel = 0
   if (!spinning) {
     if (bits & IN_FWD) accel += st.accel
     if (bits & IN_BACK) accel -= REVERSE
     if (boosting) accel += BOOST_ACCEL
+    accel += SLIP_ACCEL * kart.draft
   }
   kart.vx += fx * accel * dt
   kart.vy += fy * accel * dt
@@ -884,6 +906,7 @@ function stepKart(state, kart, bits, dt) {
   kart.vy = fy * newFwd + fx * newLat
 
   let max = boosting ? BOOST_MAX : st.top
+  max *= 1 + (SLIP_TOP - 1) * kart.draft
   if (kart.star > 0) max *= STAR_SPEED
   if (kart.shrink > 0) max *= SHRINK_SPEED
   if (kart.mega > 0) max *= MEGA_SPEED
@@ -905,6 +928,27 @@ function stepKart(state, kart, bits, dt) {
   kart.x += kart.vx * dt
   kart.y += kart.vy * dt
   confine(kart)
+}
+
+/**
+ * How hard `kart` is being towed: the strongest slipstream it sits in among the
+ * karts in front of it, 0 for none. A star, a mega and a bullet are already
+ * past the point where a tow means anything, and a pirouette is not tucked in
+ * behind anyone even when the geometry says it is.
+ */
+function draftAt(state, kart, fx, fy, speed) {
+  if (speed < SLIP_MIN_SPEED || kart.spin > 0 || kart.star > 0 || kart.mega > 0) return 0
+  let best = 0
+  for (const other of state.karts) {
+    if (other === kart || other.respawn > 0 || other.air > 0) continue
+    const ahead = (other.x - kart.x) * fx + (other.y - kart.y) * fy
+    if (ahead <= 0 || ahead > SLIP_LEN) continue
+    const side = Math.abs((other.x - kart.x) * -fy + (other.y - kart.y) * fx)
+    if (side > SLIP_WIDE) continue
+    if (Math.cos(other.heading - kart.heading) < SLIP_ALIGN) continue
+    best = Math.max(best, (1 - ahead / SLIP_LEN) * (1 - side / SLIP_WIDE))
+  }
+  return best
 }
 
 /**

@@ -1147,6 +1147,50 @@ test('the chassis is what the kart does: the Wedge runs away, the Van wins the s
   assert.ok(bike > van + 1, `the Van shoved the Bike to ${bike.toFixed(1)}, the Bike ${van.toFixed(1)}`)
 })
 
+test('tucking in behind someone tows you along, and only from behind', () => {
+  // Two karts nose to tail on the same line at the same speed, flat out. The
+  // one in front is the control: whatever the road does to it — the hill, the
+  // curve — it does to the one behind as well, so the only difference left
+  // between the two runs is the slipstream.
+  const place = (kart, s, side, speed, back = false) => {
+    const p = pointAt(s)
+    kart.chassis = 'coupe'
+    kart.ai = false
+    kart.x = p.x + p.nx * side
+    kart.y = p.y + p.ny * side
+    kart.s = s
+    kart.prog = s
+    kart.heading = Math.atan2(p.ty, p.tx) + (back ? Math.PI : 0)
+    kart.vx = Math.cos(kart.heading) * speed
+    kart.vy = Math.sin(kart.heading) * speed
+  }
+
+  // gap: how far up the road the other kart sits. side: how far across it sits.
+  const trail = (gap, side = 0, back = false) => {
+    const state = started(2, 5)
+    state.phase = 'RACE'
+    const [me, them] = state.karts
+    place(me, 300, 0, 30)
+    place(them, 300 + gap, side, 30, back)
+    run(state, 40, { 1: IN_FWD, 2: IN_FWD })
+    return { speed: Math.hypot(me.vx, me.vy), draft: me.draft }
+  }
+
+  const tucked = trail(8)
+  const alone = trail(80) // far enough up the road to be nothing to do with us
+  assert.ok(tucked.draft > 0.3, `no tow at 8m: ${tucked.draft.toFixed(2)}`)
+  assert.equal(alone.draft, 0, 'towed by a kart 80m up the road')
+  assert.ok(
+    tucked.speed > alone.speed + 0.5,
+    `tow was worth nothing: ${tucked.speed.toFixed(2)} vs ${alone.speed.toFixed(2)}`,
+  )
+
+  // Alongside is not behind, and neither is nose to nose.
+  assert.equal(trail(8, 6).draft, 0, 'towed by a kart in the next lane')
+  assert.equal(trail(8, 0, true).draft, 0, 'towed by a kart coming the other way')
+  assert.equal(trail(-8).draft, 0, 'towed by a kart behind us')
+})
+
 // Maps ----------------------------------------------------------------------
 
 test('every map is a closed circuit the sim can place a race on', () => {
