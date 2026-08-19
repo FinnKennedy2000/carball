@@ -106,6 +106,13 @@
         font-size: 12px;
         color: var(--color-neutral-500);
       }
+      .toolbar {
+        position: absolute;
+        right: var(--space-6);
+        bottom: var(--space-6);
+        display: flex;
+        gap: var(--space-2);
+      }
     </style>
   </head>
   <body>
@@ -118,13 +125,18 @@
         </div>
         <div class="list" id="list"></div>
         <p class="note">
-          Built from primitives in <code>kart-items.js</code> — no asset files. The race scales them
-          by 2.6 to sit beside a kart. Drag to turn one round.
+          Built from primitives in <code>kart-items.js</code> — no asset files. Each is about a unit
+          across, and the race scales them by 2.6 to sit beside a kart. Drag to orbit, scroll to
+          zoom, right-drag to pan; the toolbar exports the model as OBJ + MTL or GLB.
         </p>
         <p class="note"><a class="btn btn-ghost" href="./kart">Back to the race</a></p>
       </aside>
       <div class="stage">
         <div class="caption"><b id="cap-name">—</b><span id="cap-note"></span></div>
+        <div class="toolbar">
+          <button class="btn btn-secondary" id="export-obj" type="button">Download OBJ + MTL</button>
+          <button class="btn btn-secondary" id="export-glb" type="button">Download GLB</button>
+        </div>
       </div>
     </div>
     <script type="module" src="./kart-items-page.js"></script>
