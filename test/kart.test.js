@@ -18,6 +18,9 @@ import {
   halfWidthAt,
   overVoid,
   VOIDS,
+  JUMPS,
+  jumpAt,
+  JUMP_AIRTIME,
   RESPAWN_SECONDS,
   ITEMS,
   TRACK,
@@ -191,12 +194,47 @@ test('driving off a void is a fall, a wait, and a drop back onto the road', () =
   assert.ok(kart.prog < before, `progress went up: ${before} -> ${kart.prog}`)
 })
 
+test('the road stops at a jump: quick enough clears it, slow enough falls in', () => {
+  // Two jumps break the tarmac outright. The gap is a distance and the flight is
+  // a time, so between them they are a speed you have to be doing at the lip.
+  const mid = ((JUMPS[0][0] + JUMPS[0][1]) / 2) * TRACK.length
+  const [from, to] = jumpAt(mid)
+  const gap = to - from
+  assert.ok(gap / JUMP_AIRTIME < 38, `no speed on the circuit clears a ${gap.toFixed(0)}m gap`)
+
+  const over = (speed) => {
+    const state = started(1, 5)
+    state.phase = 'RACE'
+    const kart = state.karts[0]
+    onLine(kart, from - 12, speed)
+    kart.prog = from - 12
+    let flew = false
+    for (let i = 0; i < 60 * 6 && kart.respawn === 0; i++) {
+      step(state, { 1: IN_FWD })
+      if (kart.air > 0) flew = true
+      if (kart.air === 0 && flew && kart.respawn === 0) break
+    }
+    return { flew, fell: kart.respawn > 0, kart }
+  }
+
+  const cleared = over(36)
+  assert.ok(cleared.flew, 'the kart drove across thin air')
+  assert.ok(!cleared.fell, 'flat out over the lip and it still landed short')
+  assert.ok(!jumpAt(project(cleared.kart.x, cleared.kart.y).s), 'it came down in the gap')
+
+  const short = over(8)
+  assert.ok(short.flew, 'crawling off the lip did not leave the ground')
+  assert.ok(short.fell, 'a crawl carried it over a 40m gap')
+  // Put back on the road before the lip, not on the nothing it fell into.
+  assert.equal(jumpAt(short.kart.recoverAt), null)
+})
+
 test('a fall cannot happen where there is a barrier', () => {
   const state = started(1, 3)
   run(state, 200)
   const kart = state.karts[0]
   // A stretch with kerb and wall, driven straight at the edge for a good while.
-  const s = TRACK.length * 0.4
+  const s = TRACK.length * 0.05
   assert.equal(overVoid(s), false)
   const p = pointAt(s)
   kart.x = p.x
@@ -769,13 +807,13 @@ test('a boost pad gives you a boost, and missing it does not', () => {
   assert.equal(missed.boost, 0, 'the whole road is a boost pad')
 })
 
-test('every boost pad is on the tarmac and clear of the drops', () => {
+test('every boost pad is on the tarmac, wherever the road narrows under it', () => {
   for (const pad of padSpots()) {
-    assert.ok(!overVoid(pad.s), `pad over a void at ${pad.s}`)
     // The narrows are the tight ones: a pad whose edge hangs off the road is a
-    // reward for a line that puts you on the grass.
+    // reward for a line that puts you on the grass — or, over a drop, in it.
     const reach = Math.abs(pad.lane) + pad.halfWidth
     assert.ok(reach <= halfWidthAt(pad.s), `pad off the road at ${pad.s}: ${reach}`)
+    assert.ok(!jumpAt(pad.s), `pad over a jump at ${pad.s}`)
   }
 })
 
@@ -786,7 +824,7 @@ test('holding a drift charges a mini-turbo, and releasing it spends it', () => {
     const state = started(1, 13)
     state.phase = 'RACE'
     const kart = state.karts[0]
-    onLine(kart, 500)
+    onLine(kart, 625)
     // The flick that starts it, then the drift held and trimmed down the road.
     step(state, { 1: IN_FWD | IN_DRIFT | IN_RIGHT })
     driftAlong(state, kart, ticks - 1)
@@ -818,7 +856,7 @@ test('a drift slides and holds its line rather than spinning on the spot', () =>
   const state = started(1, 13)
   state.phase = 'RACE'
   const kart = state.karts[0]
-  onLine(kart, 500)
+  onLine(kart, 625)
   step(state, { 1: IN_FWD | IN_DRIFT | IN_RIGHT })
   const slid = driftAlong(state, kart, 129)
   assert.equal(driftTier(kart), 2, 'a drift that cannot be held for two seconds')
@@ -831,7 +869,7 @@ test('a drift slides and holds its line rather than spinning on the spot', () =>
   const grip = started(1, 13)
   grip.phase = 'RACE'
   const plain = grip.karts[0]
-  onLine(plain, 500)
+  onLine(plain, 625)
   let gripSlip = 0
   for (let i = 0; i < 40; i++) {
     run(grip, 1, { 1: IN_FWD | IN_RIGHT })
@@ -852,7 +890,7 @@ test('a spin-out throws away a charged drift', () => {
   const state = started(1, 13)
   state.phase = 'RACE'
   const kart = state.karts[0]
-  onLine(kart, 500)
+  onLine(kart, 625)
   step(state, { 1: IN_FWD | IN_DRIFT | IN_RIGHT })
   driftAlong(state, kart, 129)
   assert.equal(driftTier(kart), 2)
@@ -873,7 +911,7 @@ test('a charge held into a fall or a bullet does not pay out afterwards', () => 
     const state = started(1, 17)
     state.phase = 'RACE'
     const kart = state.karts[0]
-    onLine(kart, 500)
+    onLine(kart, 625)
     step(state, { 1: IN_FWD | IN_DRIFT | IN_RIGHT })
     driftAlong(state, kart, 129)
     assert.ok(kart.driftTime > 1.9, 'the drift never charged')

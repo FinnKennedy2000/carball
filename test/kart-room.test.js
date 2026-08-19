@@ -58,7 +58,7 @@ test('the field is filled with AI, and the result is the finishing order', (t) =
   assert.ok(snap.payload.s.boxes.every((b) => typeof b === 'number'))
 
   // Wind the clock through a whole race.
-  advance(t, 200)
+  advance(t, 300)
 
   const over = last('matchover')
   assert.ok(over, 'no result was broadcast')
@@ -78,7 +78,7 @@ test('the field is filled with AI, and the result is the finishing order', (t) =
 test('a race that is over can be put back on the grid', (t) => {
   const { host, last } = room(t)
   host.begin()
-  advance(t, 200)
+  advance(t, 300)
   assert.equal(last('snap').payload.s.phase, 'OVER')
   host.begin()
   advance(t, 0.2)

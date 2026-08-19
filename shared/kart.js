@@ -10,16 +10,14 @@
 import { DT, IN_FWD, IN_BACK, IN_LEFT, IN_RIGHT, IN_BOOST, IN_DRIFT, IN_ITEM } from './constants.js'
 
 // Track ---------------------------------------------------------------------
-// The circuit is a closed parametric curve sampled into a polyline. No asset
-// files, and the renderer builds its ribbon from the same numbers the physics
-// uses, so the road you see is the road you drive on.
-// Sampled finely enough for the hairpin: at 200 nodes the tight corners came
+// The circuit is a closed curve through a table of nodes, sampled into a
+// polyline. No asset files, and the renderer builds its ribbon from the same
+// numbers the physics uses, so the road you see is the road you drive on.
+// Sampled finely enough for the hairpins: at 200 nodes the tight corners came
 // out as flat spots, which project() then reads as a straight. Node count is
 // tied to the radius — the density is the thing that matters, not the count.
-export const TRACK_N = 400
-export const TRACK_R = 215
-export const HALF_WIDTH = 14 // the tarmac at its widest — see halfWidthAt
-const NARROWING = 6 // how much of that width the narrows take away
+export const TRACK_N = 512
+export const HALF_WIDTH = 16 // the tarmac across the line — see halfWidthAt
 export const KERB = 5 // grass past the tarmac before the wall
 export const LAPS = 3
 // A fall costs you this long sitting still, plus the metres you fell at.
@@ -70,11 +68,11 @@ const FINISH_GRACE = 45 // seconds the race runs on after the winner is home
 
 // Items ---------------------------------------------------------------------
 const BOX_RESPAWN = 5
-// Item boxes at this many points around the lap, 3 abreast. Ten rows over 1292m
-// puts a line of them about every 130 metres: often enough that a lap is never
-// dry, far enough apart that they are a thing you drive to rather than scenery
-// you cannot avoid.
-const BOX_ROWS = 10
+// Item boxes at this many points around the lap, 3 abreast. Eight rows over
+// 2279m puts a line of them about every 285 metres: often enough that a lap is
+// never dry, far enough apart that they are a thing you drive to rather than
+// scenery you cannot avoid.
+const BOX_ROWS = 8
 const BOOST_SECONDS = 1.6
 const STAR_SECONDS = 6
 const STAR_SPEED = 1.25
@@ -182,22 +180,58 @@ export const ROLL_TABLE = ROLL_ROWS.map((row) => ITEMS.map((item) => row[item.ke
 export const ROLL_FRONT = ROLL_TABLE[0]
 export const ROLL_BACK = ROLL_TABLE[ROLL_TABLE.length - 1]
 
+/**
+ * The centre line: 160 nodes at even spacing around the lap, x and y in metres,
+ * lifted straight out of the circuit's plan view. Eleven corners with real radii
+ * — a pair of 33m hairpins, three long sweepers you can carry, a hook with a
+ * blind exit — which is not a shape any sum of harmonics was going to give, and
+ * that is why the road is data now rather than a formula.
+ */
+const NODES = [
+  -109.6, -165.9, -95.4, -165.9, -81.1, -165.9, -66.9, -165.9, -52.6, -165.9, -38.4, -165.9, -24.1, -165.9, -9.9, -165.9,
+  4.4, -165.9, 18.6, -165.9, 32.8, -165.9, 47.1, -165.9, 61.3, -165.9, 75.6, -165.9, 89.8, -165.9, 104.1, -165.9,
+  118.3, -165.9, 132.5, -165.9, 146.8, -165.9, 161, -165.9, 175.3, -165.9, 189.5, -165.9, 203.8, -165.9, 218, -165.9,
+  232.3, -165.9, 246.5, -165.9, 260.7, -165.9, 275, -165.9, 289.2, -164.9, 303.1, -161.9, 316.4, -157, 329, -150.3,
+  340.4, -141.8, 350.5, -131.8, 359.1, -120.4, 366, -108, 371, -94.7, 374.2, -80.8, 375.3, -66.6, 375.3, -52.4,
+  375.3, -38.1, 375.3, -23.9, 375.3, -9.6, 372.9, 4.3, 365, 16, 352.9, 23.3, 338.8, 24.8, 325.4, 20.4,
+  315.1, 10.7, 308, -1.6, 300.8, -13.9, 291.8, -24.9, 280.4, -33.4, 267.3, -38.8, 253.2, -40.7, 239.1, -39.2,
+  225.8, -34.2, 214.2, -26, 204.9, -15.3, 198.6, -2.5, 193.8, 10.9, 188.9, 24.2, 184, 37.6, 179.1, 51,
+  174.3, 64.4, 169.4, 77.8, 164.5, 91.1, 159.7, 104.5, 154.8, 117.9, 148.9, 130.8, 139.4, 141.4, 127.3, 148.7,
+  113.4, 151.8, 99.3, 150.6, 85.5, 147, 71.8, 143.2, 58, 139.5, 44.3, 135.9, 30.5, 132.1, 17, 127.8,
+  4.2, 121.5, -7.5, 113.4, -17.8, 103.6, -26.6, 92.5, -33.6, 80.1, -38.7, 66.8, -41.7, 52.9, -44.2, 38.8,
+  -46.7, 24.8, -51.5, 11.5, -60.2, 0.3, -71.9, -7.7, -85.5, -11.8, -99.6, -11.6, -113.1, -7.1, -124.5, 1.4,
+  -132.7, 12.9, -137.9, 26.1, -142.8, 39.5, -147.6, 52.9, -152.6, 66.3, -157.4, 79.7, -162.3, 93, -167.1, 106.5,
+  -172, 119.8, -176.9, 133.2, -182.6, 146.2, -191.9, 156.9, -204.4, 163.7, -218.3, 166.1, -232.3, 163.7, -245.3, 157.8,
+  -258.2, 151.8, -271, 145.7, -284, 139.8, -296.9, 133.8, -309.7, 127.5, -321.4, 119.5, -332, 110, -341, 98.9,
+  -348.2, 86.7, -353.5, 73.5, -356.7, 59.6, -359.2, 45.6, -361.6, 31.5, -364.1, 17.5, -366.6, 3.5, -369.1, -10.5,
+  -371.6, -24.5, -374.1, -38.6, -375.1, -52.7, -370.6, -66.1, -361.1, -76.6, -348.1, -82.2, -334, -82.1, -321.2, -76.2,
+  -311.3, -66, -302.2, -55.1, -293, -44.2, -283.9, -33.3, -274.7, -22.4, -265.3, -11.8, -253.6, -3.6, -240.3, 1.1,
+  -226.1, 2, -212.2, -1, -199.6, -7.5, -189.4, -17.3, -182.1, -29.5, -178.3, -43.2, -175.8, -57.2, -173.3, -71.2,
+  -170.8, -85.3, -168.4, -99.3, -165.9, -113.3, -163.1, -127.3, -157.4, -140.3, -148.5, -151.3, -137, -159.7, -123.7, -164.7,
+]
+
+/**
+ * A point on the centre line, `t` being the fraction of the way round. A
+ * Catmull-Rom through the nodes rather than the nodes themselves: at 14m apart
+ * a straight join reads as a 160-sided polygon through the hairpins, and the
+ * spline costs nothing since this only runs TRACK_N times at load.
+ */
 export function trackPoint(t) {
-  const a = t * Math.PI * 2
-  // Three harmonics rather than two, and the 5th is what makes the corners
-  // uneven: a couple of sweepers you can carry speed through, a hairpin you
-  // cannot, and a kink between them that punishes a lazy line.
-  const r =
-    TRACK_R *
-    (1 +
-      0.2 * Math.sin(3 * a) -
-      0.13 * Math.cos(2 * a) +
-      0.07 * Math.sin(5 * a + 1.1) +
-      // The 7th: the circuit was made half again as long, and a longer lap that
-      // is only a longer straight is a worse lap. This is what the extra metres
-      // are spent on.
-      0.05 * Math.cos(7 * a + 0.4))
-  return { x: Math.cos(a) * r, y: Math.sin(a) * r * 0.66 }
+  const m = NODES.length / 2
+  const u = (((t % 1) + 1) % 1) * m
+  const i = Math.floor(u)
+  const f = u - i
+  const at = (k) => {
+    const j = (((i + k) % m) + m) % m
+    return [NODES[j * 2], NODES[j * 2 + 1]]
+  }
+  const [x0, y0] = at(-1)
+  const [x1, y1] = at(0)
+  const [x2, y2] = at(1)
+  const [x3, y3] = at(2)
+  const spline = (a, b, c, d) =>
+    0.5 * (2 * b + (c - a) * f + (2 * a - 5 * b + 4 * c - d) * f * f + (-a + 3 * b - 3 * c + d) * f * f * f)
+  return { x: spline(x0, x1, x2, x3), y: spline(y0, y1, y2, y3) }
 }
 
 /** Where `s` falls in the lap, as a fraction in [0, 1). */
@@ -207,13 +241,36 @@ function lapFraction(s) {
 }
 
 /**
- * The tarmac's half-width at a distance around the lap. Width is part of the
- * corner rather than a constant the corners sit in: two sections pinch to a
- * little over three kart-widths, and the line through them is the whole job.
- * Widest across the start line, so a six-kart grid still fits.
+ * The width profile, as (lap fraction, half-width in metres) read off the plan.
+ * The tarmac breathes: 32m across the line, down to 14m in four narrows, and
+ * back out over the last quarter. Wide enough to fight over, narrow enough that
+ * the line matters. Widest at the line, so a six-kart grid still fits.
  */
+const WIDTHS = [
+  [0, HALF_WIDTH],
+  [0.13, HALF_WIDTH],
+  [0.175, 10.6],
+  [0.219, 7.1],
+  [0.333, 11.9],
+  [0.42, 7.5],
+  [0.504, 11.7],
+  [0.565, 8.3],
+  [0.627, 11.9],
+  [0.74, 7],
+  [0.87, 12.4],
+  [1, HALF_WIDTH],
+]
+
+/** The tarmac's half-width at a distance around the lap, straight off WIDTHS. */
 export function halfWidthAt(s) {
-  return HALF_WIDTH - NARROWING * (0.5 - 0.5 * Math.cos(lapFraction(s) * Math.PI * 4))
+  const t = lapFraction(s)
+  // ponytail: linear scan over a dozen entries, in the physics' inner loop.
+  // Precompute per node if it ever shows up in a profile.
+  let i = 0
+  while (i < WIDTHS.length - 2 && WIDTHS[i + 1][0] <= t) i++
+  const [t0, w0] = WIDTHS[i]
+  const [t1, w1] = WIDTHS[i + 1]
+  return w0 + ((w1 - w0) * (t - t0)) / (t1 - t0)
 }
 
 // Elevation -----------------------------------------------------------------
@@ -221,33 +278,35 @@ export function halfWidthAt(s) {
 // the simulation stays a plan view — a kart's x and y are where it is on the
 // map — and the hills are what you see, plus a pull along the road that costs
 // you on a climb and pays it back on the way down.
-const HILL = 23 // metres from the mean to a crest
 // How hard a gradient pulls, in m/s^2 per unit of rise-over-run. Arcade rather
-// than g: at the steepest part of the circuit this is about an eighth of what
+// than g: at the steepest part of the circuit this is about a fifth of what
 // the engine gives you, which is felt without being fought.
 const GRAVITY = 22
-// The two waves the profile is made of: a long rise and fall, and a shorter one
-// laid across it so the crests are not evenly spaced. Whole numbers of cycles
-// per lap, or the road would not meet itself at the line.
+// The four waves the profile is made of, amplitudes in metres. Sixty metres from
+// the deepest dip to the highest crest, and the odd harmonics are what keep the
+// crests from falling at even intervals. Whole numbers of cycles per lap, or the
+// road would not meet itself at the line.
 const HILLS = [
-  { cycles: 2, weight: 0.62, phase: 0 },
-  { cycles: 3, weight: 0.38, phase: 1.9 },
+  { cycles: 2, metres: 20.1, phase: 0 },
+  { cycles: 3, metres: 12, phase: 1.9 },
+  { cycles: 5, metres: 5.6, phase: 0.6 },
+  { cycles: 7, metres: 2.4, phase: 2.4 },
 ]
 
 /** The height of the road at a distance around the lap. */
 export function heightAt(s) {
   const a = lapFraction(s) * Math.PI * 2
   let h = 0
-  for (const w of HILLS) h += w.weight * Math.sin(w.cycles * a + w.phase)
-  return HILL * h
+  for (const w of HILLS) h += w.metres * Math.sin(w.cycles * a + w.phase)
+  return h
 }
 
 /** Its gradient there — rise per metre along the road. */
 export function slopeAt(s) {
   const a = lapFraction(s) * Math.PI * 2
   let d = 0
-  for (const w of HILLS) d += w.weight * w.cycles * Math.cos(w.cycles * a + w.phase)
-  return ((HILL * Math.PI * 2) / TRACK.length) * d
+  for (const w of HILLS) d += w.metres * w.cycles * Math.cos(w.cycles * a + w.phase)
+  return ((Math.PI * 2) / TRACK.length) * d
 }
 
 /**
@@ -256,31 +315,67 @@ export function slopeAt(s) {
  * Exported because the renderer has to leave the same gaps in its scenery.
  */
 export const VOIDS = [
-  [0.17, 0.23],
-  [0.54, 0.6],
-  [0.79, 0.84],
+  [0.2, 0.26],
+  [0.37, 0.42],
+  [0.55, 0.6],
+  [0.72, 0.78],
+  [0.9, 0.94],
 ]
 
 /**
- * Boost pads, as lap fractions with a lane and a half-width in metres. Placed
- * on corner exits and the bottom of the two long drops — somewhere the extra
- * speed is worth carrying — and never inside a VOIDS stretch, where the reward
- * for a wide line would be a fall rather than a choice.
+ * The two places the road stops outright, as fractions of the lap. There is no
+ * tarmac between the two edges of one of these: you leave the ground at the near
+ * lip and either land on the far one or you do not. Exported so the renderer
+ * breaks its ribbon in exactly the same two places.
+ */
+export const JUMPS = [
+  [0.467, 0.487],
+  [0.792, 0.809],
+]
+/**
+ * How long a kart hangs in the air over a jump. The gap is a distance and this
+ * is a time, so together they are a speed: 46 metres in a second and a half is
+ * 31 m/s off the near lip, which is most but not all of flat out. Take one slow
+ * and you land short, which is a fall.
+ */
+export const JUMP_AIRTIME = 1.5
+const JUMP_RISE = 9 // how high the arc goes, for the renderer to draw
+
+/** The gap `s` is over, as [from, to] in metres, or null. */
+export function jumpAt(s) {
+  const t = lapFraction(s)
+  const gap = JUMPS.find(([from, to]) => t >= from && t <= to)
+  return gap ? [gap[0] * TRACK.length, gap[1] * TRACK.length] : null
+}
+
+/** How high a kart in flight sits above the road, given the air it has left. */
+export function airRise(air) {
+  if (air <= 0) return 0
+  return JUMP_RISE * Math.sin(Math.PI * (1 - air / JUMP_AIRTIME))
+}
+
+/**
+ * Boost pads, as lap fractions with a lane and a half-width in metres, read off
+ * the plan. On corner exits and the bottoms of the long drops, where the extra
+ * speed is worth carrying — and three of them out by a drop, which is where the
+ * lane matters most.
  *
  * Off the centre line on purpose: a pad you have to go and take is a decision,
  * and one laid down the middle of the road is a tax on not driving over it.
  */
 const PADS = [
-  { t: 0.06, lane: -5, half: 3.5 },
-  { t: 0.12, lane: 5, half: 3.5 },
-  { t: 0.29, lane: 0, half: 4 },
-  { t: 0.37, lane: -6, half: 3.5 },
-  { t: 0.44, lane: 6, half: 3.5 },
-  { t: 0.5, lane: -4, half: 3.5 },
-  { t: 0.66, lane: 5, half: 3.5 },
-  { t: 0.72, lane: 0, half: 4 },
-  { t: 0.9, lane: -5, half: 3.5 },
-  { t: 0.95, lane: 5, half: 3.5 },
+  { t: 0.049, lane: 6, half: 3.5 },
+  { t: 0.099, lane: -6, half: 3.5 },
+  { t: 0.16, lane: 0, half: 3.5 },
+  { t: 0.239, lane: 7, half: 3.5 },
+  { t: 0.3, lane: -7, half: 3.5 },
+  { t: 0.35, lane: 0, half: 3.5 },
+  { t: 0.439, lane: 6, half: 3.5 },
+  { t: 0.52, lane: -6, half: 3.5 },
+  { t: 0.599, lane: 5, half: 3.5 },
+  { t: 0.679, lane: -6, half: 3.5 },
+  { t: 0.83, lane: 0, half: 3.5 },
+  { t: 0.939, lane: 6, half: 3.5 },
 ]
 /**
  * A pad's length along the road. Long enough that a kart at full speed cannot
@@ -299,15 +394,27 @@ export function padSpots() {
   return PADS.map((pad) => {
     const s = pad.t * TRACK.length
     const p = pointAt(s)
+    const lane = padLane(pad, s)
     return {
-      x: p.x + p.nx * pad.lane,
-      y: p.y + p.ny * pad.lane,
+      x: p.x + p.nx * lane,
+      y: p.y + p.ny * lane,
       s,
-      lane: pad.lane,
+      lane,
       halfWidth: pad.half,
       heading: Math.atan2(p.ty, p.tx),
     }
   })
+}
+
+/**
+ * A pad's lane, pulled in far enough that the whole band is on the tarmac. The
+ * plan puts several of them against the edge of a wide part of the road, and the
+ * narrows move underneath them — a pad hanging over the drop is a trap, not a
+ * decision, so the road wins the argument.
+ */
+function padLane(pad, s) {
+  const room = halfWidthAt(s) - pad.half
+  return clamp(pad.lane, -room, room)
 }
 
 /**
@@ -331,7 +438,7 @@ function hitPads(kart) {
     if (along > TRACK.length / 2) along -= TRACK.length
     if (along < -TRACK.length / 2) along += TRACK.length
     if (Math.abs(along) > PAD_LENGTH / 2) continue
-    if (Math.abs(hit.lateral - pad.lane) > pad.half) continue
+    if (Math.abs(hit.lateral - padLane(pad, s)) > pad.half) continue
     kart.boost = Math.max(kart.boost, PAD_SECONDS)
     return
   }
@@ -356,6 +463,13 @@ export function buildTrack() {
 }
 
 export const TRACK = buildTrack()
+
+/**
+ * How far the circuit reaches from the origin. Measured off the road rather than
+ * declared, since the shape is a table now; the renderer sizes the horizon plate
+ * to it so the hills never poke through the far edge of the world.
+ */
+export const TRACK_R = TRACK.pts.reduce((r, p) => Math.max(r, Math.hypot(p.x, p.y)), 0)
 
 /** Centre line, tangent and normal at a distance `s` around the lap. */
 export function pointAt(s) {
@@ -431,11 +545,14 @@ export function boxSpots() {
   const out = []
   for (let i = 0; i < BOX_ROWS; i++) {
     const s = (i + 0.5) * (TRACK.length / BOX_ROWS)
-    for (const lane of [-6, 0, 6]) {
+    // Three abreast, but no wider than the road is at that point: a fixed six
+    // metres puts the outer pair over the edge in the narrows.
+    const lane = Math.min(6, halfWidthAt(s) - 3)
+    for (const off of [-lane, 0, lane]) {
       const p = pointAt(s)
       // `s` rides along so the renderer can stand the box on the road's height
       // without projecting it back onto the circuit to find out.
-      out.push({ x: p.x + p.nx * lane, y: p.y + p.ny * lane, s })
+      out.push({ x: p.x + p.nx * off, y: p.y + p.ny * off, s })
     }
   }
   return out
@@ -517,12 +634,16 @@ export function addKart(state, racer) {
     // Off the edge: seconds until it is put back, and where it is put back to.
     respawn: 0,
     recoverAt: 0,
+    // Over a jump: seconds of flight left. Nothing reaches a kart in the air.
+    air: 0,
     // AI only: how long it has held its item, and its line's offset.
     aiHold: 0,
     offset: 0,
   }
   // Drawn from the race's own PRNG, so a field is not six karts on one rail.
-  if (kart.ai) kart.offset = (rand(state) - 0.5) * (HALF_WIDTH - 4)
+  // Kept inside the narrows rather than inside the start line: a line four
+  // metres off centre still fits where the tarmac is only seven metres to a side.
+  if (kart.ai) kart.offset = (rand(state) - 0.5) * 8
   state.karts.push(kart)
   return kart
 }
@@ -580,6 +701,7 @@ export function step(state, inputs) {
   stepShells(state, dt)
   stepBombs(state, dt)
   for (const kart of state.karts) {
+    if (kart.air > 0) continue
     collectBox(state, kart)
     hitHazards(state, kart)
     hitPads(kart)
@@ -600,7 +722,7 @@ function stepKart(state, kart, bits, dt) {
   // below — being fished out, and flying a bullet — skip the drift block
   // entirely, so a charge left standing across one came back out the far side as
   // a free boost. One line here rather than one at each escape.
-  if (kart.respawn > 0 || kart.bullet > 0) {
+  if (kart.respawn > 0 || kart.bullet > 0 || kart.air > 0) {
     kart.driftTime = 0
     kart.driftDir = 0
   }
@@ -615,6 +737,20 @@ function stepKart(state, kart, bits, dt) {
       kart.x = p.x
       kart.y = p.y
       kart.heading = Math.atan2(p.ty, p.tx)
+    }
+    return
+  }
+
+  // Over a jump. It keeps the speed and the heading it left the near lip with —
+  // there is nothing under the wheels to steer against — and comes down JUMP_AIRTIME
+  // later, wherever that puts it. Short of the far lip is a fall.
+  if (kart.air > 0) {
+    kart.air = Math.max(0, kart.air - dt)
+    kart.x += kart.vx * dt
+    kart.y += kart.vy * dt
+    if (kart.air === 0) {
+      const hit = project(kart.x, kart.y)
+      if (jumpAt(hit.s) || Math.abs(hit.lateral) > halfWidthAt(hit.s)) fall(kart, hit.s)
     }
     return
   }
@@ -758,6 +894,12 @@ function stepKart(state, kart, bits, dt) {
 function confine(kart) {
   const hit = project(kart.x, kart.y)
   const half = halfWidthAt(hit.s)
+  if (jumpAt(hit.s)) {
+    // The road has stopped. A bullet is already flying the line and crosses on
+    // its own; anything else leaves the ground at the lip it just crossed.
+    if (kart.bullet === 0) kart.air = JUMP_AIRTIME
+    return
+  }
   if (overVoid(hit.s)) {
     if (Math.abs(hit.lateral) > half) fall(kart, hit.s)
     return
@@ -857,7 +999,7 @@ function useItem(state, kart, bits) {
   // did not, so space fired in a solo race and did nothing in a room.
   const down = (bits & (IN_ITEM | IN_BOOST)) !== 0
   const fire =
-    down && !kart.itemDown && kart.item !== null && kart.finished === null && kart.respawn === 0
+    down && !kart.itemDown && kart.item !== null && kart.finished === null && kart.respawn === 0 && kart.air === 0
   kart.itemDown = down
   if (!fire) return
 
@@ -998,7 +1140,7 @@ function stepShells(state, dt) {
       // Its own shell cannot hit it in the first moments, or firing one while
       // turning is a self-inflicted spin.
       if (kart.id === shell.owner && shell.life > SHELL_LIFE - 0.4) continue
-      if (kart.respawn > 0) continue
+      if (kart.respawn > 0 || kart.air > 0) continue
       if (Math.hypot(kart.x - shell.x, kart.y - shell.y) > KART_R + SHELL_R) continue
       shell.life = 0
       // A spiny shell arriving is an explosion, and whoever is running with the
@@ -1058,7 +1200,12 @@ function blast(state, x, y) {
 function fall(kart, s) {
   if (kart.respawn > 0 || kart.finished !== null) return
   kart.respawn = RESPAWN_SECONDS
+  kart.air = 0
   kart.recoverAt = s - RECOVER_BACK
+  // Dropped short of a jump, the metres behind you are still the gap. Back up to
+  // the near lip, or it is put down on nothing and falls again on the spot.
+  const gap = jumpAt(kart.recoverAt)
+  if (gap) kart.recoverAt = gap[0] - RECOVER_BACK
   kart.vx = 0
   kart.vy = 0
   kart.boost = 0
@@ -1085,7 +1232,7 @@ function flyBullet(kart, dt) {
 
 function spinOut(kart) {
   if (kart.star > 0 || kart.mega > 0 || kart.bullet > 0) return
-  if (kart.finished !== null || kart.respawn > 0) return
+  if (kart.finished !== null || kart.respawn > 0 || kart.air > 0) return
   // Just been hit: you get a moment to drive out of it before anything else
   // lands. Nothing shows this — it is felt, not read.
   if (kart.grace > 0) return
@@ -1099,7 +1246,7 @@ function spinOut(kart) {
 
 /** Kart on kart: a shove, not a crash. Nobody is stopped by being leant on. */
 function bump(a, b) {
-  if (a.respawn > 0 || b.respawn > 0) return
+  if (a.respawn > 0 || b.respawn > 0 || a.air > 0 || b.air > 0) return
   const dx = b.x - a.x
   const dy = b.y - a.y
   const r = KART_R * (kartScale(a) + kartScale(b))
@@ -1282,7 +1429,7 @@ function wrap(a) {
 export function hashRace(state) {
   const nums = [state.tick, state.phase.length, state.shells.length, state.hazards.length]
   for (const k of state.karts) {
-    nums.push(k.x, k.y, k.vx, k.vy, k.heading, k.prog, k.place, k.item ?? -1, k.itemCount, k.spin, k.grace, k.driftTime, k.driftDir, k.boost, k.star, k.shrink, k.respawn, k.mega, k.bullet, k.ink, k.cloud)
+    nums.push(k.x, k.y, k.vx, k.vy, k.heading, k.prog, k.place, k.item ?? -1, k.itemCount, k.spin, k.grace, k.driftTime, k.driftDir, k.boost, k.star, k.shrink, k.respawn, k.air, k.mega, k.bullet, k.ink, k.cloud)
   }
   let h = 2166136261
   for (const n of nums) {

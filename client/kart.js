@@ -506,8 +506,12 @@ function buildTrack() {
   // halfWidthAt rather than one number — the tarmac you see is the tarmac the
   // physics grips. The kerb stops where the drops are; the road does not.
   const half = (i) => K.halfWidthAt(K.TRACK.cum[i])
-  const onVoid = (i) => K.overVoid(K.TRACK.cum[i])
-  const solid = (i) => !onVoid(i) && !onVoid((i + 1) % K.TRACK_N)
+  const gone = (i) => K.overVoid(K.TRACK.cum[i]) || K.jumpAt(K.TRACK.cum[i]) !== null
+  const solid = (i) => !gone(i) && !gone((i + 1) % K.TRACK_N)
+  // The jumps take the tarmac with them, which the voids do not: over one of
+  // those two the road simply is not there, and neither is anything under it.
+  const gap = (i) => K.jumpAt(K.TRACK.cum[i]) !== null
+  const road = (i) => !gap(i) && !gap((i + 1) % K.TRACK_N)
 
   // Grass that climbs with the road, so the tarmac is laid on a hillside rather
   // than floating over a flat green plate. Kept in close: pushed much further
@@ -518,11 +522,11 @@ function buildTrack() {
   // enough down to read as somewhere you would not want to be.
   scene.add(ribbon((i) => half(i) + 22, -14, 0x05070c, 1, (i) => !solid(i)))
   scene.add(ribbon((i) => half(i) + K.KERB, 0.01, 0x6b4a22, 1, solid)) // the kerb, then
-  scene.add(ribbon(half, 0.03, 0x49536b)) // the tarmac on top of it
+  scene.add(ribbon(half, 0.03, 0x49536b, 1, road)) // the tarmac on top of it
   // The racing line, in dashes rather than one continuous stripe: a solid line
   // gives the eye nothing to track, and the dashes flicking past the nose are
   // most of what tells you how fast you are actually going.
-  scene.add(dashes(0.4, 0.05, 0xffffff, 0.4))
+  scene.add(dashes(0.4, 0.05, 0xffffff, 0.4, road))
 
   // The barrier, as a wall either side — with the void stretches left open,
   // which is what makes them look like somewhere you can go off.
@@ -663,11 +667,12 @@ function ribbon(halfWidth, y, color, opacity = 1, keep) {
 }
 
 /** Every other segment of the centre line, as a flat dash. */
-function dashes(halfWidth, y, color, opacity) {
+function dashes(halfWidth, y, color, opacity, keep = () => true) {
   const pts = K.TRACK.pts
   const verts = []
   const idx = []
   for (let i = 0; i < pts.length; i += 2) {
+    if (!keep(i)) continue
     const a = pts[i]
     const b = pts[(i + 1) % pts.length]
     const len = Math.hypot(b.x - a.x, b.y - a.y) || 1
@@ -1057,8 +1062,11 @@ function draw() {
       )
       mesh.rotation.set(0, -kart.heading - t * 6, 0)
     } else {
-      // A bullet flies rather than drives, so it is lifted clear of the tarmac.
-      mesh.position.set(kart.x, K.heightAt(kart.s) + (kart.bullet > 0 ? 1.4 : 0), kart.y)
+      // A bullet flies rather than drives, so it is lifted clear of the tarmac,
+      // and so does anything that has just left a jump — over one of those the
+      // road is not there to be lifted off, and airRise is the whole arc.
+      const lift = kart.air > 0 ? K.airRise(kart.air) : kart.bullet > 0 ? 1.4 : 0
+      mesh.position.set(kart.x, K.heightAt(kart.s) + lift, kart.y)
       // Nose up the climb and down the drop. 'YZX' so the pitch is taken about
       // the kart's own lateral axis, after it has been turned to its heading.
       mesh.rotation.set(0, -kart.heading, Math.atan(K.slopeAt(kart.s)), 'YZX')
