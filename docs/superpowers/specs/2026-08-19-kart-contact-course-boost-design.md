@@ -150,6 +150,12 @@ It gates damage only. A star, a mega or a bullet still shoves you aside on
 contact, a cloud can still be handed to you, and the pads and boxes still work
 — none of those are hits.
 
+It gates spin-outs specifically, which is every path that ends in `spinOut()`:
+peels, fake boxes, shells of all three colours, bombs, the POW, a star or a mega
+running you over. A Lightning bolt's shrink and a Thundercloud's are left
+ungated: the bolt hits the whole field at once, and making it randomly miss
+whoever was recently unlucky would be a worse race than the one being fixed.
+
 ## Testing
 
 New tests in `test/kart.test.js`, in the style of the existing ones:
