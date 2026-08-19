@@ -908,8 +908,12 @@ function useItem(state, kart, bits) {
       kind: item,
     })
   } else if (item === 'bolt') {
+    // Up the road only, the same reach the POW and the Blooper have: from the
+    // back it is still the whole field, and from the middle it no longer takes
+    // the lap off people you have already passed.
     for (const other of state.karts) {
-      if (other.id === kart.id || other.star > 0 || other.mega > 0 || other.bullet > 0) continue
+      if (other.id === kart.id || other.prog <= kart.prog) continue
+      if (other.star > 0 || other.mega > 0 || other.bullet > 0) continue
       other.shrink = SHRINK_SECONDS
       other.item = null
       other.itemCount = 0

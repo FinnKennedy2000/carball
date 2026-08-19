@@ -280,16 +280,24 @@ test('a red shell chases the kart ahead and takes it out', () => {
   assert.ok(ahead.spin > 0, 'the shell never arrived')
 })
 
-test('a bolt shrinks everyone else and leaves a star alone', () => {
-  const state = started(3, 13)
+test('a bolt shrinks everyone ahead, and leaves a star and the field behind alone', () => {
+  const state = started(4, 13)
   state.phase = 'RACE'
-  const [me, victim, starred] = state.karts
+  const [me, victim, starred, behind] = state.karts
+  me.prog = 100
+  victim.prog = 200
+  starred.prog = 300
+  behind.prog = 50
   starred.star = 5
+  behind.item = ITEMS.findIndex((i) => i.key === 'banana')
+  behind.itemCount = 1
   me.item = ITEMS.findIndex((i) => i.key === 'bolt')
   step(state, { 1: IN_ITEM })
   assert.ok(victim.shrink > 0)
   assert.equal(starred.shrink, 0)
   assert.equal(me.shrink, 0)
+  assert.equal(behind.shrink, 0, 'the bolt went backwards down the field')
+  assert.ok(behind.item !== null, 'a kart behind lost the item it was holding')
 })
 
 const holding = (kart, key) => {
