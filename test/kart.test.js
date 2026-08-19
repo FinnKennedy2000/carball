@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { IN_FWD, IN_ITEM, IN_LEFT } from '../shared/constants.js'
+import { IN_FWD, IN_ITEM, IN_LEFT, IN_RIGHT, IN_DRIFT } from '../shared/constants.js'
 import {
   createRace,
   addKart,
@@ -705,4 +705,60 @@ test('a boost pad gives you a boost, and missing it does not', () => {
 
 test('no boost pad is laid over a drop', () => {
   for (const pad of padSpots()) assert.ok(!overVoid(pad.s), `pad over a void at ${pad.s}`)
+})
+
+test('holding a drift charges a mini-turbo, and releasing it spends it', () => {
+  // Rolling into a drift with the wheel over. The charge is time, so the only
+  // thing that varies between these is how long the drift is held.
+  const held = (ticks) => {
+    const state = started(1, 13)
+    state.phase = 'RACE'
+    const kart = state.karts[0]
+    // Into the right-hander after the line, which is a corner a drift can
+    // actually be held through.
+    const p = pointAt(40)
+    kart.x = p.x
+    kart.y = p.y
+    kart.heading = Math.atan2(p.ty, p.tx)
+    kart.vx = p.tx * 30
+    kart.vy = p.ty * 30
+    run(state, ticks, { 1: IN_FWD | IN_DRIFT | IN_RIGHT })
+    const charged = kart.driftCharge
+    step(state, { 1: IN_FWD }) // let go
+    return { charged, boost: kart.boost }
+  }
+
+  const short = held(20) // a third of a second — nothing earned
+  assert.equal(short.charged, 0)
+  assert.equal(short.boost, 0)
+
+  const first = held(70) // past the first tier
+  assert.equal(first.charged, 1)
+  assert.ok(first.boost > 0.4 && first.boost < 0.7, `tier one gave ${first.boost}`)
+
+  const second = held(130) // past the second
+  assert.equal(second.charged, 2)
+  assert.ok(second.boost > 0.8, `tier two gave ${second.boost}`)
+  assert.ok(second.boost > first.boost, 'the second tier is not worth more')
+})
+
+test('a spin-out throws away a charged drift', () => {
+  const state = started(1, 13)
+  state.phase = 'RACE'
+  const kart = state.karts[0]
+  const p = pointAt(40)
+  kart.x = p.x
+  kart.y = p.y
+  kart.heading = Math.atan2(p.ty, p.tx)
+  kart.vx = p.tx * 30
+  kart.vy = p.ty * 30
+  run(state, 130, { 1: IN_FWD | IN_DRIFT | IN_RIGHT })
+  assert.equal(kart.driftCharge, 2)
+  state.hazards.push({ kind: 'banana', x: kart.x, y: kart.y, owner: 99 })
+  step(state, { 1: IN_FWD | IN_DRIFT | IN_RIGHT })
+  assert.ok(kart.spin > 0)
+  assert.equal(kart.driftCharge, 0)
+  assert.equal(kart.driftTime, 0)
+  step(state, { 1: IN_FWD })
+  assert.equal(kart.boost, 0, 'a spin-out paid out anyway')
 })

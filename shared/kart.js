@@ -48,6 +48,13 @@ const WALL_BOUNCE = 0.3
 // How fast speed above the current cap is given up, per second.
 const OVERSPEED_BLEED = 6
 
+// Drift mini-turbo. Hold a drift with the wheel over and it charges; let go
+// with a charge and you are paid in the same boost a Mushroom gives, which is
+// the whole reason this is a small change.
+const DRIFT_TIERS = [0.9, 1.9] // seconds held for tier one and tier two
+const DRIFT_BOOST = [0.55, 0.95] // what each tier is worth
+const DRIFT_MIN_SPEED = 12 // below this a drift is a pirouette, not a line
+
 const COUNTDOWN = 3
 const FINISH_GRACE = 45 // seconds the race runs on after the winner is home
 
@@ -453,6 +460,11 @@ export function addKart(state, racer) {
     itemCount: 0, // uses left of it, which is 3 for a triple and 1 for the rest
     itemDown: false,
     boost: 0,
+    // Mini-turbo: how long this drift has been held, and which tier that has
+    // reached. The tier is its own field so the renderer can colour the sparks
+    // without re-deriving the thresholds.
+    driftTime: 0,
+    driftCharge: 0,
     star: 0,
     shrink: 0,
     spin: 0,
@@ -597,6 +609,19 @@ function stepKart(state, kart, bits, dt) {
 
   const drifting = (bits & IN_DRIFT) !== 0 && !spinning
   const speed = Math.hypot(kart.vx, kart.vy)
+  const steering = (bits & (IN_LEFT | IN_RIGHT)) !== 0
+  if (drifting && steering && speed > DRIFT_MIN_SPEED) {
+    kart.driftTime += dt
+    kart.driftCharge = DRIFT_TIERS.filter((t) => kart.driftTime >= t).length
+  } else {
+    // Let go with something in hand and it pays out; let go early, or straighten
+    // up, or drop below walking pace, and the charge is simply gone.
+    if (kart.driftCharge > 0) {
+      kart.boost = Math.max(kart.boost, DRIFT_BOOST[kart.driftCharge - 1])
+    }
+    kart.driftTime = 0
+    kart.driftCharge = 0
+  }
   const turnScale =
     (TURN_MIN + (1 - TURN_MIN) * Math.min(1, speed / (MAX_SPEED * 0.3))) * (drifting ? TURN_DRIFT : 1)
 
@@ -636,8 +661,14 @@ function stepKart(state, kart, bits, dt) {
   const lat = kart.vx * -fy + kart.vy * fx
   const skims = boosting || kart.star > 0 || kart.mega > 0
   const drag = spinning ? SPIN_DRAG : offroad && !skims ? OFFROAD_DRAG : DRAG
-  const newFwd = fwd * damp(drag, dt)
+  let newFwd = fwd * damp(drag, dt)
   const newLat = lat * damp(drifting || spinning ? GRIP_DRIFT : GRIP, dt)
+  // A drift is meant to be fast. The scrub the tyres give up sideways is put
+  // back along the nose instead of thrown away: without this, holding a drift
+  // takes 30 m/s to 10 in under a second — there is nowhere on the circuit a
+  // drift can be held for two seconds — and a mini-turbo you cannot reach is
+  // dead code with a comment on it.
+  if (drifting) newFwd += Math.abs(lat) - Math.abs(newLat)
   kart.vx = fx * newFwd - fy * newLat
   kart.vy = fy * newFwd + fx * newLat
 
@@ -996,6 +1027,9 @@ function spinOut(kart) {
   if (kart.grace > 0) return
   kart.grace = SPIN_SECONDS + GRACE_AFTER
   kart.spin = SPIN_SECONDS
+  // Whatever was being charged is lost with everything else.
+  kart.driftTime = 0
+  kart.driftCharge = 0
   kart.boost = 0
   kart.vx *= 0.3
   kart.vy *= 0.3
@@ -1155,7 +1189,7 @@ function wrap(a) {
 export function hashRace(state) {
   const nums = [state.tick, state.phase.length, state.shells.length, state.hazards.length]
   for (const k of state.karts) {
-    nums.push(k.x, k.y, k.vx, k.vy, k.heading, k.prog, k.place, k.item ?? -1, k.itemCount, k.spin, k.grace, k.boost, k.star, k.shrink, k.respawn, k.mega, k.bullet, k.ink, k.cloud)
+    nums.push(k.x, k.y, k.vx, k.vy, k.heading, k.prog, k.place, k.item ?? -1, k.itemCount, k.spin, k.grace, k.driftTime, k.driftCharge, k.boost, k.star, k.shrink, k.respawn, k.mega, k.bullet, k.ink, k.cloud)
   }
   let h = 2166136261
   for (const n of nums) {
