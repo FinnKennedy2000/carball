@@ -59,6 +59,19 @@ const STAR_SPEED = 1.25
 const SHRINK_SECONDS = 4
 const SHRINK_SPEED = 0.55
 const SPIN_SECONDS = 1.3
+// A spinning kart has no purchase on the road: it neither holds its line nor
+// keeps the speed it is given, which is what lets a shove carry it clear.
+const SPIN_DRAG = 1.2
+// Its share of a shove, as a fraction of an ordinary kart's. Low enough that
+// driving into a pirouette moves the pirouette rather than stopping you.
+const LOOSE = 0.3
+// How firm kart-on-kart contact is. Contact should be something you feel.
+const RESTITUTION = 2.2
+// What a kart on the receiving end of a shove gives back while it is spinning.
+const SHRUG = 0.15
+// Seconds of immunity after a hit, on top of the spin itself. Unannounced by
+// design: it exists so one bad moment is not three.
+const GRACE_AFTER = 1.5
 const SHELL_SPEED = 55
 const SHELL_LIFE = 7
 const SHELL_R = 1.2
@@ -365,6 +378,7 @@ export function addKart(state, racer) {
     star: 0,
     shrink: 0,
     spin: 0,
+    grace: 0, // seconds of immunity after a hit — silent, no HUD
     mega: 0,
     bullet: 0,
     ink: 0,
@@ -470,7 +484,16 @@ function stepKart(state, kart, bits, dt) {
   }
 
   const spinning = kart.spin > 0
-  if (spinning) kart.spin = Math.max(0, kart.spin - dt)
+  if (spinning) {
+    kart.spin = Math.max(0, kart.spin - dt)
+    // Out of it, and pointing down the road. Left where the last frame of the
+    // pirouette happened to stop, half of these end facing the barrier.
+    if (kart.spin === 0) {
+      const p = pointAt(kart.s)
+      kart.heading = Math.atan2(p.ty, p.tx)
+    }
+  }
+  if (kart.grace > 0) kart.grace = Math.max(0, kart.grace - dt)
   if (kart.boost > 0) kart.boost = Math.max(0, kart.boost - dt)
   if (kart.star > 0) kart.star = Math.max(0, kart.star - dt)
   if (kart.shrink > 0) kart.shrink = Math.max(0, kart.shrink - dt)
@@ -533,9 +556,9 @@ function stepKart(state, kart, bits, dt) {
   const fwd = kart.vx * fx + kart.vy * fy
   const lat = kart.vx * -fy + kart.vy * fx
   const skims = boosting || kart.star > 0 || kart.mega > 0
-  const drag = spinning ? 3.5 : offroad && !skims ? OFFROAD_DRAG : DRAG
+  const drag = spinning ? SPIN_DRAG : offroad && !skims ? OFFROAD_DRAG : DRAG
   const newFwd = fwd * damp(drag, dt)
-  const newLat = lat * damp(drifting ? GRIP_DRIFT : GRIP, dt)
+  const newLat = lat * damp(drifting || spinning ? GRIP_DRIFT : GRIP, dt)
   kart.vx = fx * newFwd - fy * newLat
   kart.vy = fy * newFwd + fx * newLat
 
@@ -889,6 +912,10 @@ function flyBullet(kart, dt) {
 function spinOut(kart) {
   if (kart.star > 0 || kart.mega > 0 || kart.bullet > 0) return
   if (kart.finished !== null || kart.respawn > 0) return
+  // Just been hit: you get a moment to drive out of it before anything else
+  // lands. Nothing shows this — it is felt, not read.
+  if (kart.grace > 0) return
+  kart.grace = SPIN_SECONDS + GRACE_AFTER
   kart.spin = SPIN_SECONDS
   kart.boost = 0
   kart.vx *= 0.3
@@ -905,11 +932,16 @@ function bump(a, b) {
   if (d >= r || d < 1e-6) return
   const nx = dx / d
   const ny = dy / d
-  const push = (r - d) / 2
-  a.x -= nx * push
-  a.y -= ny * push
-  b.x += nx * push
-  b.y += ny * push
+  // Split the overlap and the impulse by inverse mass, not down the middle: a
+  // Mega should barrel through, and a kart mid-spin should be swept aside.
+  const ma = massOf(a)
+  const mb = massOf(b)
+  const share = mb / (ma + mb) // how much of it a takes
+  const push = r - d
+  a.x -= nx * push * share
+  a.y -= ny * push * share
+  b.x += nx * push * (1 - share)
+  b.y += ny * push * (1 - share)
   // Contact is contact: what a star, a mega, a bullet or a cloud does happens
   // whether or not the two are closing, or a kart caught from behind at the
   // moment it is already being pushed away gets away with it.
@@ -922,11 +954,28 @@ function bump(a, b) {
 
   const vn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny
   if (vn > 0) return
-  const j = -1.4 * vn * 0.5
-  a.vx -= j * nx
-  a.vy -= j * ny
-  b.vx += j * nx
-  b.vy += j * ny
+  const j = (-RESTITUTION * vn) / (1 / ma + 1 / mb)
+  // A kart mid-spin has nothing to push back with: it takes the shove, and
+  // whoever put it there hardly feels it. Straight two-body physics would hand
+  // a third of your speed to a kart you drove through, which is the sensation
+  // being fixed here rather than a detail of it.
+  a.vx -= ((j * nx) / ma) * (b.spin > 0 ? SHRUG : 1)
+  a.vy -= ((j * ny) / ma) * (b.spin > 0 ? SHRUG : 1)
+  b.vx += ((j * nx) / mb) * (a.spin > 0 ? SHRUG : 1)
+  b.vy += ((j * ny) / mb) * (a.spin > 0 ? SHRUG : 1)
+  // Being light is not a licence to be fired off the circuit.
+  if (a.spin > 0) clampSpeed(a, MAX_SPEED)
+  if (b.spin > 0) clampSpeed(b, MAX_SPEED)
+}
+
+/**
+ * How much a kart weighs in a shove. Size squared, because a Mega that is 1.7
+ * times as wide should not merely be 1.7 times as hard to move; and a fraction
+ * of that while it is spinning, which is the whole of the roadblock fix.
+ */
+function massOf(kart) {
+  const scale = kartScale(kart)
+  return scale * scale * (kart.spin > 0 ? LOOSE : 1)
 }
 
 /** Pass the cloud on, and hold it there a moment so it does not flip back. */
@@ -1027,7 +1076,7 @@ function wrap(a) {
 export function hashRace(state) {
   const nums = [state.tick, state.phase.length, state.shells.length, state.hazards.length]
   for (const k of state.karts) {
-    nums.push(k.x, k.y, k.vx, k.vy, k.heading, k.prog, k.place, k.item ?? -1, k.itemCount, k.spin, k.boost, k.star, k.shrink, k.respawn, k.mega, k.bullet, k.ink, k.cloud)
+    nums.push(k.x, k.y, k.vx, k.vy, k.heading, k.prog, k.place, k.item ?? -1, k.itemCount, k.spin, k.grace, k.boost, k.star, k.shrink, k.respawn, k.mega, k.bullet, k.ink, k.cloud)
   }
   let h = 2166136261
   for (const n of nums) {

@@ -590,3 +590,87 @@ test('a climb costs you speed, and the drop the other side gives it back', () =>
   const downhill = speedAfter(down)
   assert.ok(downhill > uphill + 1, `hill does nothing: ${uphill} vs ${downhill}`)
 })
+
+test('driving into a spinning kart shoves it out of the way', () => {
+  const state = started(2, 5)
+  const [me, other] = state.karts
+  state.phase = 'RACE'
+  const p = pointAt(200)
+  // Nose to tail on the centre line, both pointing down the road, the one in
+  // front spinning: the case that used to beach you.
+  other.x = p.x
+  other.y = p.y
+  other.s = 200
+  other.spin = 1
+  me.x = p.x - p.tx * (KART_R * 1.6)
+  me.y = p.y - p.ty * (KART_R * 1.6)
+  me.heading = Math.atan2(p.ty, p.tx)
+  me.vx = p.tx * 30
+  me.vy = p.ty * 30
+  const before = { x: other.x, y: other.y, speed: Math.hypot(me.vx, me.vy) }
+  run(state, 12, { 1: IN_FWD })
+  const moved = Math.hypot(other.x - before.x, other.y - before.y)
+  const mine = Math.hypot(me.x - before.x, me.y - before.y)
+  assert.ok(moved > 3, `the spinner barely moved: ${moved.toFixed(2)}m`)
+  assert.ok(moved > mine * 0.5, 'the spinner moved less than half as far as its attacker')
+  assert.ok(
+    Math.hypot(me.vx, me.vy) > before.speed * 0.7,
+    `driving through a spinner cost too much speed: ${Math.hypot(me.vx, me.vy).toFixed(1)}`,
+  )
+})
+
+test('a mega mushroom shoves harder than it is shoved', () => {
+  const state = started(2, 5)
+  const [big, small] = state.karts
+  state.phase = 'RACE'
+  const p = pointAt(200)
+  big.mega = 5
+  big.x = p.x
+  big.y = p.y
+  small.x = p.x + p.nx * (KART_R * 2)
+  small.y = p.y + p.ny * (KART_R * 2)
+  small.star = 9 // so the mega squashing it does not end the test early
+  const from = { bx: big.x, by: big.y, sx: small.x, sy: small.y }
+  step(state, {})
+  const bigMoved = Math.hypot(big.x - from.bx, big.y - from.by)
+  const smallMoved = Math.hypot(small.x - from.sx, small.y - from.sy)
+  assert.ok(smallMoved > bigMoved * 2, `mega moved ${bigMoved} vs ${smallMoved}`)
+})
+
+test('a spin-out ends with the kart pointing down the road', () => {
+  const state = started(1, 5)
+  const kart = state.karts[0]
+  const p = pointAt(300)
+  state.phase = 'RACE'
+  kart.x = p.x
+  kart.y = p.y
+  kart.spin = 1.2
+  kart.heading = Math.atan2(p.ty, p.tx) + Math.PI // backwards, mid-pirouette
+  run(state, 100)
+  assert.equal(kart.spin, 0)
+  const here = pointAt(kart.s)
+  const off = Math.abs(Math.atan2(
+    Math.sin(kart.heading - Math.atan2(here.ty, here.tx)),
+    Math.cos(kart.heading - Math.atan2(here.ty, here.tx)),
+  ))
+  assert.ok(off < 0.9, `left facing ${off.toFixed(2)} rad off the road`)
+})
+
+test('a kart just spun out cannot be spun out again straight away', () => {
+  const state = started(1, 5)
+  const kart = state.karts[0]
+  kart.spin = 0.01
+  state.phase = 'RACE'
+  kart.grace = 2
+  run(state, 2)
+  assert.equal(kart.spin, 0)
+  kart.grace = 0.5
+  // A banana under the wheels while the grace is running does nothing.
+  state.hazards.push({ kind: 'banana', x: kart.x, y: kart.y, owner: 99 })
+  step(state, {})
+  assert.equal(kart.spin, 0, 'hit through the grace period')
+  run(state, 40) // grace runs down
+  state.hazards.push({ kind: 'banana', x: kart.x, y: kart.y, owner: 99 })
+  step(state, {})
+  assert.ok(kart.spin > 0, 'still immune after the grace ran out')
+})
