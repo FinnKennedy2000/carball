@@ -8,6 +8,7 @@
 // setting the material named `paint`.
 
 import * as THREE from 'three'
+import { CHASSIS_STATS } from '../shared/kart.js'
 
 const mat = (name, color, opts = {}) => {
   const m = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.15, ...opts })
@@ -241,33 +242,71 @@ export function buildBike() {
   return g
 }
 
-/** The stats each chassis overrides, in the order the garage shows them. */
+/** The stats a chassis overrides, in the order the garage shows them. */
 export const STAT_LABELS = ['accel', 'top', 'grip', 'turn', 'mass', 'radius']
 
 /**
- * The lineup. `stats` are accel (m/s²), top speed (m/s), grip (lateral
- * damping, 1/s), turn rate (rad/s), mass (× the baseline) and collision radius
- * (m) — the Coupe's are the numbers shared/kart.js already races on. Balanced
- * so a clean lap of the circuit is within a tenth of a second across the set:
- * the differences are meant to show up in traffic.
+ * The lineup: the model, the one-line character, and the clean lap it turns.
+ *
+ * The numbers themselves live in shared/kart.js, because they are the sim's —
+ * this file only knows how to draw them. `lap` is the modelled clean lap of the
+ * circuit in seconds, corner by corner: seven hundredths covers all six, so the
+ * choice is a preference for a kind of corner rather than a fast car.
  */
 export const CHASSIS = {
-  coupe: { name: 'Coupe', build: buildCoupe, stats: [34, 38, 10, 2.5, 1.0, 2.2], note: 'the baseline' },
-  wedge: { name: 'Wedge', build: buildWedge, stats: [33, 41.5, 9.0, 2.35, 1.0, 2.2], note: 'top end' },
-  van: { name: 'Van', build: buildVan, stats: [31, 36.5, 11.0, 2.3, 1.25, 2.5], note: 'mass' },
+  coupe: {
+    name: 'Coupe',
+    build: buildCoupe,
+    note: 'the baseline',
+    lap: 69.62,
+    blurb:
+      'Nothing it does is remarkable, which is the point: every other chassis is described against this one.',
+  },
+  wedge: {
+    name: 'Wedge',
+    build: buildWedge,
+    note: 'top end',
+    lap: 69.62,
+    blurb:
+      'Longest and lowest. Fastest thing on the straight and the first to run wide when the road pinches.',
+  },
+  van: {
+    name: 'Van',
+    build: buildVan,
+    note: 'mass',
+    lap: 69.64,
+    blurb:
+      'A quarter more mass. It wins every shove it starts and takes four car-lengths longer to get going.',
+  },
   roadster: {
     name: 'Roadster',
     build: buildRoadster,
-    stats: [36, 37, 10.6, 2.8, 0.9, 2.1],
     note: 'turn-in',
+    lap: 69.64,
+    blurb:
+      'Quickest hands in the field. Takes the hairpins back off the Wedge and loses the straight to it.',
   },
   openwheel: {
     name: 'Open-wheel',
     build: buildOpenWheel,
-    stats: [35, 36, 11.4, 2.7, 0.95, 2.0],
     note: 'grip',
+    lap: 69.57,
+    blurb:
+      'Wheels outside the body: most grip on the set, and a contact that would bounce a Coupe puts this one into a spin.',
   },
-  bike: { name: 'Bike', build: buildBike, stats: [37, 40.5, 9.2, 2.9, 0.7, 1.6], note: 'two wheels' },
+  bike: {
+    name: 'Bike',
+    build: buildBike,
+    note: 'two wheels',
+    lap: 69.6,
+    blurb:
+      'Narrow enough to take a line nothing else fits through, and light enough that any contact ends its lap.',
+  },
+}
+
+/** A chassis' stats in STAT_LABELS order, which is the order they are shown. */
+export function statList(key) {
+  return STAT_LABELS.map((label) => CHASSIS_STATS[key][label])
 }
 
 export function buildChassis(key) {

@@ -13,6 +13,7 @@ onmessage = ({ data }) => {
         send: (event, payload) => postMessage({ type: 'send', event, payload }),
         live: (state) => postMessage({ type: 'live', s: state }),
         hostName: data.hostName,
+        hostChassis: data.hostChassis,
       })
       postMessage({ type: 'started', hostId: host.hostId, hostTeam: 0, roster: host.roster() })
       break

@@ -23,7 +23,7 @@ function randomSeed() {
   return Math.floor(Math.random() * 2 ** 32) >>> 0
 }
 
-export function startKartHost({ send, live = () => {}, hostName }) {
+export function startKartHost({ send, live = () => {}, hostName, hostChassis }) {
   let state = createRace([], randomSeed())
   const players = new Map() // cid -> { id, name, bits }
   let nextId = 1
@@ -33,14 +33,14 @@ export function startKartHost({ send, live = () => {}, hostName }) {
   let ticksSinceSnapshot = 0
   let announced = false
 
-  const host = seat(HOST_CID, hostName)
+  const host = seat(HOST_CID, hostName, hostChassis)
 
-  function seat(cid, name) {
-    const player = { id: nextId++, cid, name, bits: 0 }
+  function seat(cid, name, chassis) {
+    const player = { id: nextId++, cid, name, chassis, bits: 0 }
     players.set(cid, player)
     // Only before the lights: a race in progress is not somewhere to drop a new
     // kart, so a late arrival waits in the room and starts the next one.
-    if (state.phase === 'WAITING') addKart(state, { id: player.id, name })
+    if (state.phase === 'WAITING') addKart(state, { id: player.id, name, chassis })
     return player
   }
 
@@ -68,7 +68,7 @@ export function startKartHost({ send, live = () => {}, hostName }) {
         send('reject', { cid: msg.cid, reason: 'Room is full' })
         return
       }
-      const player = seat(msg.cid, msg.name)
+      const player = seat(msg.cid, msg.name, msg.chassis)
       send('welcome', { cid: msg.cid, id: player.id, code: null, team: 0 })
       broadcastRoster()
       return
@@ -96,7 +96,7 @@ export function startKartHost({ send, live = () => {}, hostName }) {
   /** A fresh race with everyone in the room, the field filled out with AI. */
   function beginRace() {
     state = createRace([], randomSeed())
-    for (const p of players.values()) addKart(state, { id: p.id, name: p.name })
+    for (const p of players.values()) addKart(state, { id: p.id, name: p.name, chassis: p.chassis })
     for (let i = 0; state.karts.length < GRID && i < AI_NAMES.length; i++) {
       addKart(state, { id: AI_ID_BASE + i, name: AI_NAMES[i], ai: true })
     }

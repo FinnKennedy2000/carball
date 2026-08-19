@@ -12,6 +12,7 @@
 import * as THREE from 'three'
 import * as K from '../shared/kart.js'
 import { buildItem } from './kart-items.js'
+import { CHASSIS, buildChassis, statList, STAT_LABELS } from './kart-chassis.js'
 import { cleanCode } from '../shared/protocol.js'
 import { startInput, currentBits, isTyping } from './input.js'
 import {
@@ -127,6 +128,25 @@ const ITEM_ART = {
       <path d="M22 21 L14 33 L20 33 L17 39 L27 27 L21 27 Z" fill="#facc15"/>`,
   },
 }
+/** The stat rows, in STAT_LABELS order: what each is called, and its unit. */
+const STAT_NAMES = ['Accel', 'Top speed', 'Grip', 'Turn rate', 'Mass', 'Radius']
+const STAT_UNITS = ['m/s²', 'm/s', '', 'rad/s', '×', 'm']
+
+/**
+ * The six chassis in profile, for the cards along the bottom of the pick screen.
+ * A silhouette at 190×72 is not a job for a WebGL context each — the turntable
+ * above the cards shows the real model, and these say which one is which.
+ * `--sil` is the paintwork, so the selected card is accented by CSS alone.
+ */
+const SILHOUETTE = {
+  coupe: `<svg viewBox="0 0 190 72" xmlns="http://www.w3.org/2000/svg"><path d="M7.6 61.92 L182.4 61.92" stroke="rgba(233,233,237,0.14)" stroke-width="1"/><circle cx="70.0" cy="50.9" r="11.0" fill="#10131c" stroke="#8e9ab5" stroke-width="1.54"/><circle cx="70.0" cy="50.9" r="3.3" fill="#8e9ab5" opacity="0.7"/><circle cx="120.0" cy="50.9" r="11.0" fill="#10131c" stroke="#8e9ab5" stroke-width="1.54"/><circle cx="120.0" cy="50.9" r="3.3" fill="#8e9ab5" opacity="0.7"/><polygon points="55.0,50.9 57.0,33.9 73.0,30.9 85.0,19.9 109.0,18.9 125.0,30.9 135.0,34.9 135.0,50.9" fill="var(--sil)" opacity="0.92"/><polygon points="86.0,21.9 108.0,20.9 121.0,30.5 75.0,31.3" fill="#0b0e14" opacity="0.6"/></svg>`,
+  wedge: `<svg viewBox="0 0 190 72" xmlns="http://www.w3.org/2000/svg"><path d="M7.6 61.92 L182.4 61.92" stroke="rgba(233,233,237,0.14)" stroke-width="1"/><circle cx="65.0" cy="51.9" r="10.0" fill="#10131c" stroke="#8e9ab5" stroke-width="1.54"/><circle cx="65.0" cy="51.9" r="3.0" fill="#8e9ab5" opacity="0.7"/><circle cx="123.0" cy="51.9" r="10.0" fill="#10131c" stroke="#8e9ab5" stroke-width="1.54"/><circle cx="123.0" cy="51.9" r="3.0" fill="#8e9ab5" opacity="0.7"/><polygon points="51.0,53.9 53.0,35.9 87.0,30.9 119.0,36.9 139.0,44.9 139.0,53.9" fill="var(--sil)" opacity="0.92"/><polygon points="75.0,33.5 99.0,32.3 115.0,37.5 87.0,37.9" fill="#0b0e14" opacity="0.6"/></svg>`,
+  van: `<svg viewBox="0 0 190 72" xmlns="http://www.w3.org/2000/svg"><path d="M7.6 61.92 L182.4 61.92" stroke="rgba(233,233,237,0.14)" stroke-width="1"/><circle cx="73.0" cy="49.9" r="12.0" fill="#10131c" stroke="#8e9ab5" stroke-width="1.54"/><circle cx="73.0" cy="49.9" r="3.6" fill="#8e9ab5" opacity="0.7"/><circle cx="119.0" cy="49.9" r="12.0" fill="#10131c" stroke="#8e9ab5" stroke-width="1.54"/><circle cx="119.0" cy="49.9" r="3.6" fill="#8e9ab5" opacity="0.7"/><polygon points="59.0,49.9 59.0,14.9 121.0,13.9 131.0,27.9 131.0,49.9" fill="var(--sil)" opacity="0.92"/><polygon points="65.0,17.9 115.0,17.5 125.0,27.5 65.0,27.9" fill="#0b0e14" opacity="0.6"/></svg>`,
+  roadster: `<svg viewBox="0 0 190 72" xmlns="http://www.w3.org/2000/svg"><path d="M7.6 61.92 L182.4 61.92" stroke="rgba(233,233,237,0.14)" stroke-width="1"/><circle cx="69.0" cy="51.5" r="10.4" fill="#10131c" stroke="#8e9ab5" stroke-width="1.54"/><circle cx="69.0" cy="51.5" r="3.1" fill="#8e9ab5" opacity="0.7"/><circle cx="121.0" cy="51.5" r="10.4" fill="#10131c" stroke="#8e9ab5" stroke-width="1.54"/><circle cx="121.0" cy="51.5" r="3.1" fill="#8e9ab5" opacity="0.7"/><polygon points="57.0,52.9 58.0,33.9 79.0,29.9 107.0,28.9 127.0,34.9 133.0,40.9 133.0,52.9" fill="var(--sil)" opacity="0.92"/><polygon points="81.0,31.9 105.0,30.9 119.0,35.9 80.0,35.9" fill="#0b0e14" opacity="0.6"/></svg>`,
+  openwheel: `<svg viewBox="0 0 190 72" xmlns="http://www.w3.org/2000/svg"><path d="M7.6 61.92 L182.4 61.92" stroke="rgba(233,233,237,0.14)" stroke-width="1"/><circle cx="72.0" cy="50.3" r="11.6" fill="#10131c" stroke="#cbb98a" stroke-width="1.54"/><circle cx="72.0" cy="50.3" r="3.5" fill="#cbb98a" opacity="0.7"/><circle cx="118.0" cy="50.3" r="11.6" fill="#10131c" stroke="#cbb98a" stroke-width="1.54"/><circle cx="118.0" cy="50.3" r="3.5" fill="#cbb98a" opacity="0.7"/><polygon points="63.0,55.9 65.0,45.9 85.0,44.9 91.0,36.9 105.0,36.9 111.0,45.9 127.0,47.5 127.0,55.9" fill="var(--sil)" opacity="0.92"/><polygon points="92.0,38.3 104.0,38.3 102.0,43.9 93.0,43.9" fill="#0b0e14" opacity="0.6"/></svg>`,
+  bike: `<svg viewBox="0 0 190 72" xmlns="http://www.w3.org/2000/svg"><path d="M7.6 61.92 L182.4 61.92" stroke="rgba(233,233,237,0.14)" stroke-width="1"/><circle cx="76.0" cy="49.5" r="12.4" fill="#10131c" stroke="#cbb98a" stroke-width="1.54"/><circle cx="76.0" cy="49.5" r="3.7" fill="#cbb98a" opacity="0.7"/><circle cx="114.0" cy="49.5" r="12.4" fill="#10131c" stroke="#cbb98a" stroke-width="1.54"/><circle cx="114.0" cy="49.5" r="3.7" fill="#cbb98a" opacity="0.7"/><polygon points="73.0,49.9 80.0,37.9 93.0,36.9 106.0,42.9 116.0,45.9 116.0,50.9 99.0,51.9 83.0,50.9" fill="var(--sil)" opacity="0.92"/><polygon points="85.0,35.9 96.0,34.9 101.0,40.9 88.0,40.9" fill="#0b0e14" opacity="0.6"/></svg>`,
+}
+
 const SHELL_KINDS = ['green', 'red', 'blue']
 const HAZARD_KINDS = ['banana', 'trap', 'bomb']
 const ITEM_SCALE = 2.6 // models are about 1.2 across; a kart is KART_R 2.2
@@ -136,6 +156,7 @@ const AI_NAMES = ['Bolt', 'Ripsaw', 'Comet', 'Nitro', 'Sledge']
 const SOLO_ID = 1
 const MAX_CATCHUP = 5
 const STORED_NAME = 'carball.name'
+const STORED_CHASSIS = 'carball.chassis'
 
 let scene
 let camera
@@ -178,6 +199,12 @@ let flashUntil = 0
 // sends, and it is enough — nobody shrinks twice in a frame.
 let lastShrink = 0
 let boltAt = -9
+
+// Which of the six we are driving, and what pressing Race does once it is
+// chosen: the way-in screen defers starting until the pick screen is done with.
+let myChassis = K.DEFAULT_CHASSIS
+let onPicked = null
+let preview = null // the turntable on the pick screen, built the first time it shows
 
 /**
  * The three thirds of the field, and what the box is for in each. The roll table
@@ -237,12 +264,28 @@ function wireGate() {
     el('gate-note').textContent = 'Rooms need a Supabase project configured. Solo works either way.'
   }
 
-  el('solo').addEventListener('click', startSolo)
-  el('create').addEventListener('click', () => enterRoom(null))
-  el('join').addEventListener('click', () => enterRoom(el('code').value))
+  // Nothing starts from this screen any more: every way in goes through the
+  // chassis pick, which is where the car is chosen and Race is pressed.
+  el('solo').addEventListener('click', () => showPick(startSolo))
+  el('create').addEventListener('click', () => showPick(() => enterRoom(null)))
+  el('join').addEventListener('click', () => pickThenJoin(el('code').value))
   el('code').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') enterRoom(el('code').value)
+    if (e.key === 'Enter') pickThenJoin(el('code').value)
   })
+  el('pick-race').addEventListener('click', startPicked)
+  el('pick-back').addEventListener('click', hidePick)
+  // The pick screen is driven from the keyboard as much as from the mouse: the
+  // arrows walk the six, Enter takes the one showing, Escape goes back.
+  addEventListener('keydown', (e) => {
+    if (el('pick').hidden || isTyping()) return
+    if (e.key === 'ArrowLeft') stepChassis(-1)
+    else if (e.key === 'ArrowRight') stepChassis(1)
+    else if (e.key === 'Enter') startPicked()
+    else if (e.key === 'Escape') hidePick()
+    else return
+    e.preventDefault()
+  })
+
   el('start').addEventListener('click', () => beginMatch())
   el('restart').addEventListener('click', () => {
     if (solo) {
@@ -302,7 +345,7 @@ function wireGate() {
 
   /** Straight in if we have a name to send, otherwise ask for one. */
   function join(code) {
-    if (name.value) enterRoom(code)
+    if (name.value) pickThenJoin(code)
     else {
       el('gate').hidden = false
       el('gate-note').textContent = `Room ${code} — your name, then Join.`
@@ -358,6 +401,167 @@ function saveName() {
   return value
 }
 
+// Picking a chassis ---------------------------------------------------------
+// The screen between the name and the grid. It is the same six cars the sim
+// races and the same numbers it races them on: everything below reads
+// CHASSIS_STATS rather than a copy of it, so a chassis tuned in the sim is a
+// chassis tuned here.
+
+/** The room code, checked before we spend a screen choosing a car for it. */
+function pickThenJoin(code) {
+  const clean = cleanCode(code || '')
+  if (!clean) {
+    el('gate-note').textContent = 'A room code is four letters.'
+    return
+  }
+  showPick(() => enterRoom(clean))
+}
+
+/** Show the pick screen; `race` is what pressing Race finally does. */
+function showPick(race) {
+  onPicked = race
+  const stored = localStorage.getItem(STORED_CHASSIS)
+  myChassis = K.CHASSIS_STATS[stored] ? stored : K.DEFAULT_CHASSIS
+  el('gate').hidden = true
+  el('pick').hidden = false
+  el('pick-list').innerHTML = K.CHASSIS_KEYS.map(
+    (key) => `<button type="button" class="chassis" data-key="${key}">
+      <span class="top"><b>${CHASSIS[key].name}</b><em>${CHASSIS[key].note}</em></span>
+      ${SILHOUETTE[key]}
+    </button>`
+  ).join('')
+  for (const button of el('pick-list').children) {
+    button.addEventListener('click', () => choose(button.dataset.key))
+  }
+  showChassis()
+  el('pick-race').focus()
+}
+
+/** Race, in whichever of the two ways brought us to this screen. */
+function startPicked() {
+  const race = onPicked
+  onPicked = null
+  el('pick').hidden = true
+  race?.()
+}
+
+function hidePick() {
+  onPicked = null
+  el('pick').hidden = true
+  el('gate').hidden = false
+}
+
+function choose(key) {
+  myChassis = key
+  localStorage.setItem(STORED_CHASSIS, key)
+  showChassis()
+}
+
+/** Step through the six, which is what the arrow keys do. */
+function stepChassis(by) {
+  const i = K.CHASSIS_KEYS.indexOf(myChassis)
+  choose(K.CHASSIS_KEYS[(i + by + K.CHASSIS_KEYS.length) % K.CHASSIS_KEYS.length])
+}
+
+/** The selected car: its model on the turntable, and its numbers beside it. */
+function showChassis() {
+  const entry = CHASSIS[myChassis]
+  for (const button of el('pick-list').children) {
+    button.setAttribute('aria-pressed', String(button.dataset.key === myChassis))
+  }
+  el('pick-name').textContent = entry.name
+  el('pick-tag').textContent = entry.note
+  el('pick-blurb').textContent = entry.blurb
+  el('pick-lap-time').innerHTML = `${entry.lap.toFixed(2)}<i>s</i>`
+
+  // Six bars, each against the Coupe: the fill is where this chassis sits in the
+  // spread of all six, the notch is where the Coupe sits, and the number on the
+  // right is the difference. Accel, top speed, grip and turn are gains; mass and
+  // radius are a trade, and are drawn in the trim colour rather than the accent.
+  const stats = statList(myChassis)
+  const base = statList('coupe')
+  el('pick-bars').innerHTML = STAT_LABELS.map((label, i) => {
+    const all = K.CHASSIS_KEYS.map((key) => K.CHASSIS_STATS[key][label])
+    const lo = Math.min(...all)
+    const span = Math.max(...all) - lo || 1
+    const at = (v) => 12 + ((v - lo) / span) * 80
+    const delta = stats[i] - base[i]
+    const gain = i < 4
+    return `<div class="stat-row${gain ? ' good' : ''}" style="--stat:${gain ? 'var(--color-accent)' : 'var(--color-trim, #cbb98a)'}">
+      <span class="label">${STAT_NAMES[i]}</span>
+      <span class="bar"><i style="width:${at(stats[i]).toFixed(1)}%"></i><u style="left:${at(base[i]).toFixed(1)}%"></u></span>
+      <span class="value">${stats[i]}${STAT_UNITS[i] ? `<span> ${STAT_UNITS[i]}</span>` : ''}</span>
+      <span class="delta">${delta === 0 ? '—' : `${delta > 0 ? '+' : ''}${Number(delta.toFixed(2))}`}</span>
+    </div>`
+  }).join('')
+
+  showPreview()
+}
+
+/**
+ * The car on the turntable: the model the race itself will put on the grid,
+ * built by the same buildChassis the workbench uses. Its own small renderer —
+ * the race's canvas is behind this screen, and the race has not started.
+ */
+function showPreview() {
+  const view = el('pick-view')
+  if (!preview) {
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+    renderer.setPixelRatio(Math.min(2, devicePixelRatio))
+    view.append(renderer.domElement)
+    const scene = new THREE.Scene()
+    scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x141824, 1.2))
+    const key = new THREE.DirectionalLight(0xffffff, 1.5)
+    key.position.set(4, 7, 5)
+    scene.add(key)
+    // A fill from below and behind, or the wheels and the underside are one
+    // black mass against a dark panel and the car reads as a floating box.
+    const fill = new THREE.DirectionalLight(0x8fb4ff, 0.6)
+    fill.position.set(-5, 1.5, -4)
+    scene.add(fill)
+    // A long lens: the panel is wide and shallow, and at a wider angle the car
+    // sits in the middle of it looking further away than it is.
+    const camera = new THREE.PerspectiveCamera(24, 1, 0.05, 100)
+    preview = { renderer, scene, camera, car: null, turn: 0 }
+  }
+  if (preview.car) preview.scene.remove(preview.car)
+  preview.car = buildChassis(myChassis)
+  // Painted the colour this kart will be on the track, so the pick and the car
+  // that comes out of it are recognisably the same thing.
+  preview.car.traverse((part) => {
+    if (part.isMesh && part.material.name === 'paint') part.material.color.set(kartColor(myId))
+  })
+  preview.scene.add(preview.car)
+  const size = new THREE.Box3().setFromObject(preview.car).getSize(new THREE.Vector3())
+  // Far enough back that the longest car is inside the frame with room to
+  // spare, so the six do not jump about as they are stepped through.
+  preview.reach = Math.max(size.x, size.z) * 1.7
+  preview.lift = size.y * 0.55
+  el('pick-size').textContent = `${size.x.toFixed(1)}m × ${size.z.toFixed(1)}m`
+}
+
+/** One frame of the turntable. Called from the render loop while it is up. */
+function drawPreview(dt) {
+  const view = el('pick-view')
+  const w = view.clientWidth
+  const h = view.clientHeight
+  if (!w || !h) return
+  const { renderer, scene, camera } = preview
+  if (renderer.domElement.width !== Math.round(w * renderer.getPixelRatio())) {
+    renderer.setSize(w, h, false)
+    camera.aspect = w / h
+  }
+  preview.turn += dt * 0.5
+  camera.position.set(
+    Math.cos(preview.turn) * preview.reach,
+    preview.reach * 0.28,
+    Math.sin(preview.turn) * preview.reach
+  )
+  camera.lookAt(0, preview.lift, 0)
+  camera.updateProjectionMatrix()
+  renderer.render(scene, camera)
+}
+
 function startSolo() {
   const name = saveName()
   solo = true
@@ -370,7 +574,7 @@ function startSolo() {
   flashUntil = 0
   el('gate').hidden = true
   el('room-strip').hidden = true
-  const racers = [{ id: SOLO_ID, name, ai: false }]
+  const racers = [{ id: SOLO_ID, name, ai: false, chassis: myChassis }]
   AI_NAMES.forEach((n, i) => racers.push({ id: i + 2, name: n, ai: true }))
   race = K.createRace(racers, (Math.random() * 2 ** 32) >>> 0)
   K.begin(race)
@@ -393,8 +597,8 @@ async function enterRoom(code) {
     isHost = !clean
     // Team and car mean nothing in a race; the channel's hello carries them
     // because it is the football game's message, and they are simply ignored.
-    if (clean) await joinRoom(name, clean, null, 0)
-    else await createRoom(name, null, 0, 'kart')
+    if (clean) await joinRoom(name, clean, null, 0, myChassis)
+    else await createRoom(name, null, 0, 'kart', myChassis)
   } catch (err) {
     isHost = false
     el('gate-note').textContent = err?.message ?? 'Could not reach the room.'
@@ -465,6 +669,9 @@ function frame(now) {
     updateHud()
   }
   renderer.render(scene, camera)
+  // The turntable on the pick screen turns on the same clock, and only while
+  // that screen is up: there is nothing else on it that moves.
+  if (preview && !el('pick').hidden) drawPreview(Math.min(0.25, (now - lastFrame) / 1000) || 1 / 60)
 }
 
 // Scene ---------------------------------------------------------------------
@@ -758,42 +965,47 @@ function geometryFrom(verts, n, keep = () => true) {
   return geo
 }
 
-function makeKart(color) {
+function makeKart(color, claimed) {
   const group = new THREE.Group()
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(4, 1.1, 2.4),
-    new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.45 }),
-  )
-  body.position.y = 0.9
-  group.add(body)
-  const driver = new THREE.Mesh(
-    new THREE.BoxGeometry(1.3, 1.2, 1.3),
-    new THREE.MeshStandardMaterial({ color: 0x11151d, flatShading: true }),
-  )
-  driver.position.set(-0.4, 2, 0)
-  group.add(driver)
-  // Four wheels on four hubs. The hub carries the steering, the wheel inside it
-  // carries the roll — one rotation each, rather than one Euler doing both and
-  // the second turn landing on an axis the first one moved.
-  const wheels = []
-  for (const [dx, dz] of [[1.4, 1.3], [1.4, -1.3], [-1.4, 1.3], [-1.4, -1.3]]) {
-    const hub = new THREE.Group()
-    hub.position.set(dx, 0.7, dz)
-    const wheel = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.7, 0.7, 0.6, 10),
-      new THREE.MeshStandardMaterial({ color: 0x1a1d26, flatShading: true }),
-    )
-    wheel.rotation.x = Math.PI / 2
-    hub.add(wheel)
-    group.add(hub)
-    wheels.push({ hub, wheel, front: dx > 0 })
-  }
+  // The car is the chassis the driver picked — the same model the workbench
+  // shows, at its real length in metres — painted the side's colour by way of
+  // the material every builder names `paint`. The key arrives in a snapshot off
+  // the channel, so an unrecognised one is a Coupe: buildChassis throws on a
+  // name it does not know, and it is called every frame a kart is on screen.
+  const key = K.CHASSIS_STATS[claimed] ? claimed : K.DEFAULT_CHASSIS
+  const car = buildChassis(key)
+  const parts = []
+  car.traverse((part) => {
+    if (!part.isMesh) return
+    parts.push(part)
+    if (part.material.name === 'paint') part.material.color.set(color)
+  })
+  group.add(car)
+  // How big it turned out, so everything hung off it below is placed against
+  // the car rather than against the one box this used to be: a Bike is 2.5m of
+  // kart and a Van is 4.1m, and jets sized for a Coupe read as neither.
+  const size = new THREE.Box3().setFromObject(car).getSize(new THREE.Vector3())
+  const k = size.x / 4 // against the Coupe, which is what the numbers below fitted
+  const wide = K.CHASSIS_STATS[key].radius / K.KART_R
+
+  // Each wheel group turns twice: about y for the steering it is doing and about
+  // z for the roll — one Euler, in that order, so the steering is applied to a
+  // rolling wheel rather than the roll landing on an axis the steering moved.
+  // The rolling radius comes off the tyre itself, or small wheels visibly slip.
+  const wheels = car.children
+    .filter((child) => child.name.startsWith('wheel'))
+    .map((wheel) => ({
+      wheel,
+      front: wheel.position.x > 0,
+      r: wheel.children[0]?.geometry.parameters.radiusTop ?? 0.35,
+    }))
 
   // Everything below is built once, hidden, and switched on by dressKart. A
   // kart under an item has to read at a glance from behind at 70 m/s, and a
   // tint on the paintwork does not survive that. parts[0] is the bodywork,
   // which is the piece an emissive goes on.
-  const parts = [body, driver, ...wheels.map((w) => w.wheel)]
+  const body = parts.find((part) => part.material.name === 'paint') ?? parts[0]
+  parts.sort((a, b) => (a === body ? -1 : b === body ? 1 : 0))
 
   // Bullet Bill: the kart does not carry the bullet, the kart becomes it. The
   // model is the same one the item roster shows, built at about 1.5 units and
@@ -806,13 +1018,13 @@ function makeKart(color) {
 
   // Twin jets out of the back, for a Mushroom, a pad or a mini-turbo alike.
   const flames = []
-  for (const dz of [0.8, -0.8]) {
+  for (const side of [1, -1]) {
     const flame = new THREE.Mesh(
-      new THREE.ConeGeometry(0.5, 3, 8),
+      new THREE.ConeGeometry(0.5 * k, 3 * k, 8),
       new THREE.MeshBasicMaterial({ color: 0xffa63d, transparent: true, opacity: 0.85 }),
     )
     flame.rotation.z = Math.PI / 2 // pointing backwards, out of the tail
-    flame.position.set(-3.2, 0.9, dz)
+    flame.position.set(-size.x / 2 - 1.2 * k, size.y * 0.4, side * size.z * 0.28)
     flame.visible = false
     group.add(flame)
     flames.push(flame)
@@ -820,12 +1032,12 @@ function makeKart(color) {
 
   // Drift sparks off the rear wheels: this is how you know when to let go.
   const sparks = []
-  for (const dz of [1.5, -1.5]) {
+  for (const side of [1, -1]) {
     const spark = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.55, 0),
+      new THREE.IcosahedronGeometry(0.55 * k, 0),
       new THREE.MeshBasicMaterial({ color: 0xffa63d, transparent: true, opacity: 0.9 }),
     )
-    spark.position.set(-1.4, 0.5, dz)
+    spark.position.set(-size.x * 0.35, size.y * 0.25, side * (size.z / 2 + 0.2))
     spark.visible = false
     group.add(spark)
     sparks.push(spark)
@@ -835,7 +1047,7 @@ function makeKart(color) {
   // that other karts drive through, pulsing at 800ms and twice as fast over the
   // last second, which is the warning.
   const halo = new THREE.Mesh(
-    new THREE.RingGeometry(2.6, 3.4, 28),
+    new THREE.RingGeometry(2.6 * wide, 3.4 * wide, 28),
     new THREE.MeshBasicMaterial({
       color: 0xffd166,
       transparent: true,
@@ -868,18 +1080,21 @@ function makeKart(color) {
   fuseRing.rotation.x = -Math.PI / 2
   fuseRing.position.y = -1.4
   cloud.add(fuseRing)
-  cloud.position.y = 4.6
+  // Over the roof, whatever the roof is: a Bike's storm should not float a metre
+  // above it. dressKart bobs it about this, so the height travels with it.
+  cloud.position.y = size.y + 2.9
+  cloud.userData.base = cloud.position.y
   cloud.visible = false
   group.add(cloud)
 
   // Ink on the bonnet, as well as over the victim's own camera: being inked is
   // public, and the kart in front should be able to see that it happened.
   const splat = new THREE.Mesh(
-    new THREE.CircleGeometry(0.85, 12),
+    new THREE.CircleGeometry(0.85 * k, 12),
     new THREE.MeshBasicMaterial({ color: 0x0a0c12, transparent: true, opacity: 0.9 }),
   )
   splat.rotation.x = -Math.PI / 2
-  splat.position.set(1, 1.47, 0.2)
+  splat.position.set(size.x * 0.22, size.y * 0.92, 0.2)
   splat.visible = false
   group.add(splat)
 
@@ -959,7 +1174,7 @@ function dressKart(mesh, kart, t) {
   // surfaces only, and its ring closes as the seconds go.
   cloud.visible = kart.cloud > 0
   if (cloud.visible) {
-    cloud.position.y = 4.6 + Math.sin(t * 1.6) * 0.3
+    cloud.position.y = cloud.userData.base + Math.sin(t * 1.6) * 0.3
     cloud.rotation.y = Math.sin(t * 0.7) * 0.4
     // A strike is a flicker, not a steady lamp — brief, and irregular enough
     // that it does not read as a running animation.
@@ -980,7 +1195,7 @@ function dressKart(mesh, kart, t) {
   // it is the same on every peer and survives a dropped frame — and it divides
   // by the kart's size, which is what makes a Mega's wheels turn slowly.
   const scale = K.kartScale(kart)
-  const roll = -kart.prog / (0.7 * scale)
+  const roll = -kart.prog / scale
   // Steering off the turn actually being taken. There is no steer angle on the
   // wire and there need not be: how fast the heading is moving is the same
   // information, and it reads on a kart you do not control too.
@@ -992,9 +1207,9 @@ function dressKart(mesh, kart, t) {
   // Locked mid-spin: wheels that keep steering through a spin-out make it look
   // driven, and the point of a spin is that it is not.
   const locked = kart.spin > 0
-  for (const { hub, wheel, front } of wheels) {
-    wheel.rotation.y = locked ? 0 : roll
-    hub.rotation.y = front && !locked ? anim.steer : 0
+  for (const { wheel, front, r } of wheels) {
+    wheel.rotation.z = locked ? 0 : roll / r
+    wheel.rotation.y = front && !locked ? anim.steer : 0
   }
 
   // Weight transfer, which is the whole of the throw and the launch: no arm, no
@@ -1046,7 +1261,7 @@ function draw() {
     seen.add(kart.id)
     let mesh = kartMeshes.get(kart.id)
     if (!mesh) {
-      mesh = makeKart(kartColor(kart.id))
+      mesh = makeKart(kartColor(kart.id), kart.chassis)
       kartMeshes.set(kart.id, mesh)
       scene.add(mesh)
     }

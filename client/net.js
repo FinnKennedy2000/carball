@@ -71,7 +71,7 @@ export function configure({ makeWorker, blend: blendFn }) {
 let newWorker = () => new Worker(new URL('./sim-worker.js', import.meta.url), { type: 'module' })
 let blendSnapshots = blend
 
-export async function createRoom(name, team, car, mode) {
+export async function createRoom(name, team, car, mode, chassis) {
   const code = randomCode()
   await open(code)
 
@@ -83,7 +83,15 @@ export async function createRoom(name, team, car, mode) {
       else if (data.type === 'started') resolve(data)
     }
   })
-  host.postMessage({ type: 'start', code, hostName: name, hostTeam: team, hostCar: car, mode })
+  host.postMessage({
+    type: 'start',
+    code,
+    hostName: name,
+    hostTeam: team,
+    hostCar: car,
+    hostChassis: chassis,
+    mode,
+  })
 
   const { hostId, hostTeam, roster } = await started
   handlers.onJoined({ id: hostId, code, team: hostTeam })
@@ -91,13 +99,13 @@ export async function createRoom(name, team, car, mode) {
   startSendingInput()
 }
 
-export async function joinRoom(name, code, team, car) {
+export async function joinRoom(name, code, team, car, chassis) {
   await open(code)
 
   const settled = waitForWelcome()
   // Everything aimed at the host goes on the one 'peer' event, so host.js has a
   // single validated entry point rather than a listener per message type.
-  send('peer', { t: 'hello', cid, name, team, car })
+  send('peer', { t: 'hello', cid, name, team, car, chassis })
   const welcome = await settled
   if (!welcome) {
     // We may have been seated after all, by a welcome that arrived too late to

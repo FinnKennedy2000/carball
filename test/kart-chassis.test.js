@@ -1,8 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import * as THREE from 'three'
-import { CHASSIS, STAT_LABELS, buildChassis } from '../client/kart-chassis.js'
-import { KART_R, MAX_SPEED } from '../shared/kart.js'
+import { CHASSIS, STAT_LABELS, buildChassis, statList } from '../client/kart-chassis.js'
+import { CHASSIS_STATS, KART_R, MAX_SPEED } from '../shared/kart.js'
 
 test('every chassis builds a named group of named meshes', () => {
   for (const key of Object.keys(CHASSIS)) {
@@ -30,15 +30,22 @@ test('every chassis sits on the ground plane, +x forward', () => {
   }
 })
 
-test('the stat table is complete and the Coupe is the numbers we race on', () => {
+test('every chassis the sim races has a model, a caption and a lap', () => {
+  assert.deepEqual(Object.keys(CHASSIS), Object.keys(CHASSIS_STATS))
   for (const [key, entry] of Object.entries(CHASSIS)) {
-    assert.equal(entry.stats.length, STAT_LABELS.length, `${key} has a stat per label`)
-    assert.ok(entry.name && entry.note, `${key} is captioned`)
+    assert.equal(statList(key).length, STAT_LABELS.length, `${key} has a stat per label`)
+    assert.ok(
+      statList(key).every((v) => typeof v === 'number'),
+      `${key}: every stat is a number`
+    )
+    assert.ok(entry.name && entry.note && entry.blurb, `${key} is captioned`)
+    assert.ok(entry.lap > 60 && entry.lap < 80, `${key} laps in ${entry.lap}s`)
   }
-  const [, top, , , mass, radius] = CHASSIS.coupe.stats
-  assert.equal(top, MAX_SPEED)
-  assert.equal(radius, KART_R)
-  assert.equal(mass, 1)
+  // The baseline the renderer and the grid scale against is the Coupe's own row,
+  // or the two drift apart the first time either is tuned.
+  assert.equal(CHASSIS_STATS.coupe.top, MAX_SPEED)
+  assert.equal(CHASSIS_STATS.coupe.radius, KART_R)
+  assert.equal(CHASSIS_STATS.coupe.mass, 1)
 })
 
 test('an unknown chassis is an error, not an empty scene', () => {

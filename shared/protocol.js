@@ -6,6 +6,7 @@
 
 import { IN_ALL, TEAM_BLUE, TEAM_ORANGE } from './constants.js'
 import { CARS, DEFAULT_CAR } from './cars.js'
+import { CHASSIS_STATS, DEFAULT_CHASSIS } from './kart.js'
 
 const CODE_RE = /^[A-Z]{4}$/
 const CONTROL_RE = /[\u0000-\u001f\u007f]/g
@@ -27,7 +28,14 @@ export function parse(msg) {
     case 'hello': {
       const name = cleanName(msg.name)
       if (name === null) return null
-      return { t: 'hello', cid, name, team: cleanTeam(msg.team), car: cleanCar(msg.car) }
+      return {
+        t: 'hello',
+        cid,
+        name,
+        team: cleanTeam(msg.team),
+        car: cleanCar(msg.car),
+        chassis: cleanChassis(msg.chassis),
+      }
     }
     case 'input': {
       if (!Number.isInteger(msg.seq) || msg.seq < 0) return null
@@ -62,6 +70,11 @@ export function cleanTeam(team) {
  * A chosen car model. Cosmetic, so anything unrecognised is the default rather
  * than a rejected message: a peer with a stale build should still get a seat.
  */
+/** Which of the six karts a joiner says it is driving. Anything else is a Coupe. */
+export function cleanChassis(chassis) {
+  return typeof chassis === 'string' && CHASSIS_STATS[chassis] ? chassis : DEFAULT_CHASSIS
+}
+
 export function cleanCar(car) {
   return Number.isInteger(car) && car >= 0 && car < CARS.length ? car : DEFAULT_CAR
 }

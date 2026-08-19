@@ -6,6 +6,7 @@ import { createState, addCar, resetPositions, step, kickoff, hashState } from '.
 import { ITEMS } from '../shared/rumble.js'
 import { parse } from '../shared/protocol.js'
 import { CARS, DEFAULT_CAR } from '../shared/cars.js'
+import { CHASSIS_KEYS, DEFAULT_CHASSIS } from '../shared/kart.js'
 import { buildRow } from '../api/record-match.js'
 import { renameProblem } from '../client/auth.js'
 
@@ -505,6 +506,16 @@ test('a claimed car model is bounded, not trusted', () => {
     assert.equal(hello(junk).car, DEFAULT_CAR, `should default: ${JSON.stringify(junk)}`)
   }
   for (let i = 0; i < CARS.length; i++) assert.equal(hello(i).car, i)
+})
+
+test('a claimed chassis is bounded, not trusted', () => {
+  const hello = (chassis) => parse({ t: 'hello', cid: 'peer-1', name: 'x', chassis })
+  // The host races what a joiner claims to be driving, so anything that is not
+  // one of the six is the Coupe rather than a seat refused or a crash in step().
+  for (const junk of [undefined, null, 0, 'hovercraft', 'Coupe', {}, ['bike']]) {
+    assert.equal(hello(junk).chassis, DEFAULT_CHASSIS, `should default: ${JSON.stringify(junk)}`)
+  }
+  for (const key of CHASSIS_KEYS) assert.equal(hello(key).chassis, key)
 })
 
 test('malformed peer messages are rejected without throwing', () => {

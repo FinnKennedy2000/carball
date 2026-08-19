@@ -29,6 +29,10 @@ import {
   KERB,
   KART_R,
   MAX_SPEED,
+  CHASSIS_STATS,
+  CHASSIS_KEYS,
+  statsOf,
+  radiusOf,
 } from '../shared/kart.js'
 
 const field = (n = 6) =>
@@ -945,7 +949,7 @@ test('a shove does not fire a shrunk kart across the circuit', () => {
   step(state, {})
   // Light, so it is shoved further than a full-size kart would be — but a shove
   // is not a catapult, and being small is not a way to be launched off the road.
-  assert.ok(Math.hypot(small.vx, small.vy) <= MAX_SPEED + 0.001,
+  assert.ok(Math.hypot(small.vx, small.vy) <= statsOf(small).top + 0.001,
     `a nudge sent it to ${Math.hypot(small.vx, small.vy).toFixed(1)} m/s`)
 })
 
@@ -1037,4 +1041,63 @@ test('reversing swaps left and right', () => {
   run(state, 20, { 1: IN_LEFT })
   const swung = Math.atan2(Math.sin(kart.heading - facing), Math.cos(kart.heading - facing))
   assert.ok(swung > 0.05, `the nose went the forward way: ${swung.toFixed(2)} rad`)
+})
+
+test('a chassis is six of the sim\'s own constants, and an unknown one is a Coupe', () => {
+  const state = createRace([], 5)
+  const van = addKart(state, { id: 1, name: 'van', chassis: 'van' })
+  const junk = addKart(state, { id: 2, name: 'junk', chassis: 'hovercraft' })
+  assert.equal(statsOf(van), CHASSIS_STATS.van)
+  assert.equal(statsOf(junk), CHASSIS_STATS.coupe, 'anything off a channel is a Coupe')
+  assert.equal(radiusOf(van), CHASSIS_STATS.van.radius)
+
+  // The AI is dealt a car out of the race's own PRNG: every one is real, the
+  // field is not six of the same, and the same seed deals the same six.
+  const deal = (seed) =>
+    createRace(
+      Array.from({ length: 6 }, (_, i) => ({ id: i + 1, name: `k${i}`, ai: true })),
+      seed
+    ).karts.map((k) => k.chassis)
+  const dealt = deal(11)
+  assert.ok(dealt.every((key) => CHASSIS_KEYS.includes(key)), dealt.join())
+  assert.ok(new Set(dealt).size > 1, `one rail: ${dealt.join()}`)
+  assert.deepEqual(deal(11), dealt)
+})
+
+test('the chassis is what the kart does: the Wedge runs away, the Van wins the shove', () => {
+  // Flat out from the same place: top end and acceleration are the chassis'.
+  const speedOf = (chassis) => {
+    const state = createRace([{ id: 1, name: 'a', chassis }], 4)
+    begin(state)
+    run(state, 200) // the lights
+    onLine(state.karts[0], 40, 0)
+    run(state, 240, { 1: IN_FWD })
+    return Math.hypot(state.karts[0].vx, state.karts[0].vy)
+  }
+  const wedge = speedOf('wedge')
+  assert.ok(wedge > speedOf('van') + 2, `the Wedge only reached ${wedge.toFixed(1)} m/s`)
+
+  // Driven into at the same speed from the same distance, the light kart is
+  // shoved further than the heavy one: mass is the whole of the Van.
+  const shoved = (hitter, victim) => {
+    const state = createRace(
+      [{ id: 1, name: 'h', chassis: hitter }, { id: 2, name: 'v', chassis: victim }],
+      6
+    )
+    begin(state)
+    state.phase = 'RACE'
+    const [me, them] = state.karts
+    const p = pointAt(300)
+    onLine(them, 300, 0)
+    me.x = p.x - p.tx * 3
+    me.y = p.y - p.ty * 3
+    me.heading = Math.atan2(p.ty, p.tx)
+    me.vx = p.tx * 30
+    me.vy = p.ty * 30
+    step(state, {})
+    return Math.hypot(them.vx, them.vy)
+  }
+  const bike = shoved('van', 'bike')
+  const van = shoved('bike', 'van')
+  assert.ok(bike > van + 1, `the Van shoved the Bike to ${bike.toFixed(1)}, the Bike ${van.toFixed(1)}`)
 })

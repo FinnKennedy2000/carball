@@ -467,7 +467,8 @@
         inset: 0;
         overflow: hidden;
       }
-      #gate .sky {
+      #gate .sky,
+      #pick .sky {
         position: absolute;
         inset: 0;
         background:
@@ -477,7 +478,8 @@
       }
       /* A road across the lower half, seen at an angle: the only thing on the
          screen that says racing before you have read a word of it. */
-      #gate .road {
+      #gate .road,
+      #pick .road {
         position: absolute;
         left: -120px;
         right: -120px;
@@ -493,7 +495,8 @@
             rgba(233, 233, 237, 0.07) 92px 138px
           );
       }
-      #gate .fade {
+      #gate .fade,
+      #pick .fade {
         position: absolute;
         inset: 0;
         background:
@@ -605,16 +608,19 @@
         align-self: stretch;
         background: var(--color-divider);
       }
-      #gate .btn {
+      #gate .btn,
+      #pick .btn {
         padding: 9px var(--space-6);
         border-radius: var(--radius-sm);
         font-size: 13px;
         white-space: nowrap;
       }
-      #gate .btn-primary {
+      #gate .btn-primary,
+      #pick .btn-primary {
         color: var(--color-accent-300);
       }
-      #gate .btn-secondary {
+      #gate .btn-secondary,
+      #pick .btn-secondary {
         border-color: var(--color-neutral-700);
       }
       #code {
@@ -871,6 +877,304 @@
         }
       }
 
+
+      /* Pick your chassis -------------------------------------------------
+         The screen between the name and the grid. Same painted sky as the way
+         in, because it is the same room: the header, the car and its numbers
+         side by side, and the six to choose from along the bottom. */
+      #pick[hidden] {
+        display: none;
+      }
+      #pick {
+        position: fixed;
+        inset: 0;
+        overflow: hidden;
+      }
+      #pick-cols {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        gap: var(--space-6);
+        padding: 48px 64px 40px;
+      }
+      #pick-head {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: var(--space-8);
+      }
+      #pick-head h1 {
+        margin: 0;
+        font-family: var(--font-heading);
+        font-weight: 500;
+        font-size: 40px;
+        letter-spacing: -0.03em;
+      }
+      #pick-lap {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 2px;
+      }
+      #pick-lap-time {
+        font-family: var(--font-heading);
+        font-size: 24px;
+        font-variant-numeric: tabular-nums;
+      }
+      #pick-lap-time i {
+        font-style: normal;
+        font-size: 15px;
+        color: var(--color-neutral-600);
+      }
+      #pick-main {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 452px;
+        gap: var(--space-8);
+        min-height: 0;
+      }
+      #pick-stage,
+      #pick-card {
+        border-radius: var(--radius-md);
+        box-shadow: inset 0 0 0 1px var(--color-neutral-900), var(--shadow-sm);
+      }
+      #pick-stage {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        gap: var(--space-4);
+        padding: var(--space-6) var(--space-8);
+        min-width: 0;
+        background: linear-gradient(180deg, rgba(145, 132, 217, 0.09), rgba(22, 24, 38, 0.35));
+      }
+      #pick-title {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-4);
+      }
+      #pick-name {
+        font-family: var(--font-heading);
+        font-weight: 500;
+        font-size: 34px;
+        letter-spacing: -0.02em;
+      }
+      /* The car itself, on a turntable: the model the race will actually put on
+         the grid, not a picture of it. */
+      #pick-view {
+        position: relative;
+        min-height: 0;
+      }
+      #pick-view canvas {
+        display: block;
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+      #pick-foot {
+        display: flex;
+        align-items: baseline;
+        justify-content: flex-end;
+        gap: var(--space-4);
+      }
+      #pick-size {
+        font-size: 15px;
+        color: var(--color-neutral-200);
+        font-variant-numeric: tabular-nums;
+      }
+      #pick-card {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-6);
+        padding: var(--space-6);
+        min-width: 0;
+        background: rgba(22, 24, 38, 0.6);
+      }
+      #pick-card-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+      }
+      #pick-bars {
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+      }
+      .stat-row {
+        display: grid;
+        grid-template-columns: 80px minmax(0, 1fr) 76px 52px;
+        align-items: center;
+        gap: var(--space-4);
+        font-variant-numeric: tabular-nums;
+      }
+      .stat-row .label {
+        letter-spacing: 0.12em;
+      }
+      /* The bar is the chassis, the notch is the Coupe: the comparison is the
+         whole point of the panel, so it is drawn rather than written out. */
+      .stat-row .bar {
+        position: relative;
+        display: block;
+        height: 4px;
+        border-radius: 2px;
+        background: var(--color-neutral-900);
+      }
+      .stat-row .bar > i {
+        display: block;
+        height: 4px;
+        border-radius: 2px;
+        background: var(--stat, var(--color-accent));
+      }
+      .stat-row .bar > u {
+        position: absolute;
+        top: -3px;
+        width: 1px;
+        height: 10px;
+        background: rgba(233, 233, 237, 0.45);
+      }
+      .stat-row .value {
+        font-size: 13px;
+        color: var(--color-neutral-200);
+      }
+      .stat-row .value span {
+        font-size: 11px;
+        color: var(--color-neutral-600);
+      }
+      .stat-row .delta {
+        font-size: 11px;
+        text-align: right;
+        color: var(--color-neutral-400);
+      }
+      .stat-row.good .delta {
+        color: var(--color-accent-300);
+      }
+      #pick-blurb {
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.6;
+        color: var(--color-neutral-400);
+      }
+      #pick-card-foot {
+        margin-top: auto;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+        padding-top: var(--space-4);
+        border-top: 1px solid var(--color-divider);
+      }
+      #pick-card-foot .row {
+        gap: var(--space-3);
+      }
+      #pick-race {
+        flex: 1;
+        justify-content: center;
+      }
+      #pick-rail {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+      }
+      #pick-list {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: var(--space-3);
+      }
+      .chassis {
+        --sil: var(--color-neutral-500);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        text-align: left;
+        padding: var(--space-3) var(--space-3) var(--space-4);
+        border: 0;
+        border-radius: var(--radius-md);
+        background: rgba(22, 24, 38, 0.55);
+        box-shadow: inset 0 0 0 1px var(--color-neutral-900);
+        color: var(--color-text);
+        font: inherit;
+        cursor: pointer;
+      }
+      .chassis:hover {
+        background: color-mix(in oklab, var(--color-accent) 8%, rgba(22, 24, 38, 0.55));
+      }
+      .chassis[aria-pressed='true'] {
+        --sil: var(--color-accent);
+        background: color-mix(in oklab, var(--color-accent) 12%, transparent);
+        box-shadow: inset 0 0 0 1.5px var(--color-accent);
+      }
+      .chassis .top {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--space-2);
+      }
+      .chassis b {
+        font-family: var(--font-heading);
+        font-weight: 500;
+        font-size: 14px;
+        color: var(--color-neutral-300);
+      }
+      .chassis[aria-pressed='true'] b {
+        color: var(--color-text);
+      }
+      .chassis em {
+        font-style: normal;
+        font-size: 9px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--color-neutral-600);
+      }
+      .chassis[aria-pressed='true'] em {
+        color: var(--color-accent-300);
+      }
+      .chassis svg {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      #pick-keys {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-6);
+      }
+      #pick-keys div {
+        display: flex;
+        gap: var(--space-6);
+        font-size: 12px;
+        color: var(--color-neutral-500);
+      }
+      #pick-keys b {
+        color: var(--color-neutral-300);
+        font-weight: 500;
+      }
+      /* Too short or too narrow for the car and its numbers side by side: the
+         turntable goes, since the numbers are the thing being chosen between.
+         The name stays — it is what the panel of bars is about. */
+      @media (max-height: 760px), (max-width: 1180px) {
+        #pick {
+          overflow: auto;
+        }
+        #pick-cols {
+          position: relative;
+          inset: auto;
+          grid-template-rows: none;
+          padding: 28px 32px;
+        }
+        #pick-main {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        #pick-stage {
+          display: flex;
+          box-shadow: none;
+          background: none;
+          padding: 0;
+        }
+        #pick-view,
+        #pick-foot {
+          display: none;
+        }
+      }
+
       #room-strip {
         position: fixed;
         /* Above the grid and the flag: those cover the screen, and the moment
@@ -1058,6 +1362,74 @@
               >Bar length is the item's share of the roll in that third of the field. Dimmed
               items never appear there.</span
             >
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pick your chassis: the screen between the name and the grid. Six cars,
+         the stats each one changes, and the lap they all turn in the same time.
+         Filled in by kart.js from the sim's own table. -->
+    <div id="pick" hidden>
+      <div class="sky"></div>
+      <div class="road"></div>
+      <div class="fade"></div>
+
+      <div id="pick-cols">
+        <div id="pick-head">
+          <div class="over-head">
+            <span class="kicker accent">Pick your chassis</span>
+            <h1>Six chassis, one lap time</h1>
+            <div class="over-rule"></div>
+          </div>
+          <div id="pick-lap">
+            <span class="label">Clean lap</span>
+            <span id="pick-lap-time">—</span>
+          </div>
+        </div>
+
+        <div id="pick-main">
+          <div id="pick-stage">
+            <div id="pick-title">
+              <b id="pick-name">—</b>
+              <span class="tag tag-outline" id="pick-tag"></span>
+            </div>
+            <div id="pick-view"></div>
+            <div id="pick-foot">
+              <span class="label">Footprint</span>
+              <span id="pick-size"></span>
+            </div>
+          </div>
+
+          <div id="pick-card">
+            <div id="pick-card-head">
+              <span class="label">Against the Coupe</span>
+              <span class="hint">notch is the baseline</span>
+            </div>
+            <div id="pick-bars"></div>
+            <p id="pick-blurb"></p>
+            <div id="pick-card-foot">
+              <span class="hint"
+                >Item odds, box cooldown, drift tiers and boost values are the same on every
+                chassis.</span
+              >
+              <div class="row">
+                <button id="pick-race" class="btn btn-primary">Race</button>
+                <a class="btn btn-secondary" href="./kart-chassis">Compare all six</a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="pick-rail">
+          <div id="pick-list"></div>
+          <div id="pick-keys">
+            <div>
+              <span><b>&larr; &rarr;</b> switch chassis</span>
+              <span><b>Enter</b> race</span>
+              <span><b>Esc</b> back</span>
+            </div>
+            <button id="pick-back" class="btn btn-ghost">Back</button>
           </div>
         </div>
       </div>

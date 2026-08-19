@@ -23,6 +23,29 @@ function room(t) {
   return { host, sent, last: (event) => [...sent].reverse().find((m) => m.event === event) }
 }
 
+test('a joiner races the chassis it said it was driving', (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'Date'] })
+  let state = null
+  const host = startKartHost({
+    send: () => {},
+    live: (s) => (state = s),
+    hostName: 'host',
+    hostChassis: 'bike',
+  })
+  t.after(() => host.stop())
+  host.onPeerMessage({ t: 'hello', cid: 'peer-1', name: 'joiner', chassis: 'van' })
+  host.onPeerMessage({ t: 'hello', cid: 'peer-2', name: 'other', chassis: 'hovercraft' })
+  host.begin()
+  advance(t, 0.1)
+  const grid = state.karts
+  assert.equal(grid.find((k) => k.name === 'host').chassis, 'bike')
+  assert.equal(grid.find((k) => k.name === 'joiner').chassis, 'van')
+  // Anything that is not one of the six is a Coupe, and the field the room fills
+  // out with AI is dealt its own cars.
+  assert.equal(grid.find((k) => k.name === 'other').chassis, 'coupe')
+  assert.ok(grid.filter((k) => k.ai).every((k) => k.chassis))
+})
+
 test('a peer is seated once, however often it says hello', (t) => {
   const { host, sent, last } = room(t)
   host.onPeerMessage({ t: 'hello', cid: 'peer-1', name: 'joiner' })

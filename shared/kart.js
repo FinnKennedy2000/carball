@@ -26,18 +26,53 @@ export const RESPAWN_SECONDS = 2.5
 // back over the edge you went off.
 const RECOVER_BACK = 6
 
+// The Coupe's radius and top speed, kept under their old names because they are
+// what everything not driving a particular kart scales against: the renderer's
+// speed cues, the size an item box is drawn at, the grid. Per-kart numbers come
+// off CHASSIS_STATS, and the test that pins these two to the Coupe's row is
+// what stops the baseline drifting away from the car it describes.
 export const KART_R = 2.2
-const ACCEL = 34
-const REVERSE = 20
-// Exported: the renderer scales its speed cues against flat out, and a second
-// copy of the number would drift the first time this is tuned.
 export const MAX_SPEED = 38
+const REVERSE = 20
+
+// Chassis -------------------------------------------------------------------
+// Six cars, and the only thing a chassis is: six constants the physics already
+// had, moved off the module and onto the kart. The Coupe's row is what the race
+// used before there was a choice, so a field of Coupes is the old race exactly.
+//
+// The spread is deliberately narrow — modelled corner by corner, a clean lap is
+// within a tenth of a second across the set, so a chassis is a preference for a
+// kind of corner rather than a tier list. Nothing here touches the item roll,
+// the box cooldown, the drift tiers or the boost values: a chassis can never
+// out-item you.
+export const CHASSIS_STATS = {
+  coupe: { accel: 34, top: 38, grip: 10, turn: 2.5, mass: 1, radius: 2.2 },
+  wedge: { accel: 33, top: 41.5, grip: 9, turn: 2.35, mass: 1, radius: 2.2 },
+  van: { accel: 31, top: 36.5, grip: 11, turn: 2.3, mass: 1.25, radius: 2.5 },
+  roadster: { accel: 36, top: 37, grip: 10.6, turn: 2.8, mass: 0.9, radius: 2.1 },
+  openwheel: { accel: 35, top: 36, grip: 11.4, turn: 2.7, mass: 0.95, radius: 2 },
+  bike: { accel: 37, top: 40.5, grip: 9.2, turn: 2.9, mass: 0.7, radius: 1.6 },
+}
+export const CHASSIS_KEYS = Object.keys(CHASSIS_STATS)
+export const DEFAULT_CHASSIS = 'coupe'
+
+/**
+ * What this kart is driving. A snapshot comes off a channel, so an unknown key
+ * is a Coupe rather than a crash — and the sim reads stats through here only,
+ * which is what keeps a missing field from being six different bugs.
+ */
+export function statsOf(kart) {
+  return CHASSIS_STATS[kart.chassis] ?? CHASSIS_STATS[DEFAULT_CHASSIS]
+}
+
+/** How wide this kart is in a collision: its chassis, and its size right now. */
+export function radiusOf(kart) {
+  return statsOf(kart).radius * kartScale(kart)
+}
 const BOOST_ACCEL = 46
 const BOOST_MAX = 56
 const DRAG = 0.45
-const GRIP = 10
 const GRIP_DRIFT = 3.2
-const TURN_RATE = 2.5
 const TURN_MIN = 0.4
 const OFFROAD_MAX = 0.45 // fraction of top speed the grass allows
 const OFFROAD_DRAG = 2.6
@@ -58,7 +93,7 @@ const DRIFT_MIN_SPEED = 12 // below this a drift is a pirouette, not a line
 // neither can flip it over. Turning at the full rate for a second and a half —
 // which is what a drift used to do — is a ten metre circle, so the kart left
 // the road long before either tier, and the mini-turbo was unreachable in
-// practice. These are fractions of TURN_RATE.
+// practice. These are fractions of the chassis' turn rate.
 const DRIFT_TIGHT = 1 // steering into the drift
 const DRIFT_HOLD = 0.55 // no steering: the line it holds on its own
 const DRIFT_OPEN = 0.15 // steering out of it
@@ -602,6 +637,10 @@ export function addKart(state, racer) {
     id: racer.id,
     name: racer.name,
     ai: Boolean(racer.ai),
+    // What it is driving. A racer arrives off a channel, so anything that is not
+    // one of the six is a Coupe; the AI is dealt one out of the race's own PRNG,
+    // so a field is six different cars and the same seed deals the same six.
+    chassis: CHASSIS_STATS[racer.chassis] ? racer.chassis : DEFAULT_CHASSIS,
     x: p.x + p.nx * side * 4.5,
     y: p.y + p.ny * side * 4.5,
     vx: 0,
@@ -640,6 +679,7 @@ export function addKart(state, racer) {
     aiHold: 0,
     offset: 0,
   }
+  if (kart.ai) kart.chassis = CHASSIS_KEYS[Math.floor(rand(state) * CHASSIS_KEYS.length)]
   // Drawn from the race's own PRNG, so a field is not six karts on one rail.
   // Kept inside the narrows rather than inside the start line: a line four
   // metres off centre still fits where the tarmac is only seven metres to a side.
@@ -809,7 +849,8 @@ function stepKart(state, kart, bits, dt) {
     if (tier > 0) kart.boost = Math.max(kart.boost, DRIFT_BOOST[tier - 1])
     kart.driftTime = 0
   }
-  const turnScale = TURN_MIN + (1 - TURN_MIN) * Math.min(1, speed / (MAX_SPEED * 0.3))
+  const st = statsOf(kart)
+  const turnScale = TURN_MIN + (1 - TURN_MIN) * Math.min(1, speed / (st.top * 0.3))
 
   if (spinning) {
     // A spin-out: the kart pirouettes, the throttle does nothing, and the speed
@@ -817,13 +858,13 @@ function stepKart(state, kart, bits, dt) {
     kart.heading = wrap(kart.heading + 9 * dt)
   } else if (drifting) {
     const trim = steer === kart.driftDir ? DRIFT_TIGHT : steer === 0 ? DRIFT_HOLD : DRIFT_OPEN
-    kart.heading = wrap(kart.heading + kart.driftDir * TURN_RATE * turnScale * trim * dt)
+    kart.heading = wrap(kart.heading + kart.driftDir * st.turn * turnScale * trim * dt)
   } else {
     // Reversing swaps left and right, the way a real car does: the wheels turn
     // the same way and the nose swings the other. Backing off a barrier with the
     // steering still reading forwards is how you end up wedged against it.
     if (kart.vx * Math.cos(kart.heading) + kart.vy * Math.sin(kart.heading) < -0.5) steer = -steer
-    kart.heading = wrap(kart.heading + steer * TURN_RATE * turnScale * dt)
+    kart.heading = wrap(kart.heading + steer * st.turn * turnScale * dt)
   }
 
   const fx = Math.cos(kart.heading)
@@ -832,7 +873,7 @@ function stepKart(state, kart, bits, dt) {
   const boosting = kart.boost > 0 || ((bits & IN_BOOST) !== 0 && kart.star > 0)
   let accel = 0
   if (!spinning) {
-    if (bits & IN_FWD) accel += ACCEL
+    if (bits & IN_FWD) accel += st.accel
     if (bits & IN_BACK) accel -= REVERSE
     if (boosting) accel += BOOST_ACCEL
   }
@@ -852,7 +893,7 @@ function stepKart(state, kart, bits, dt) {
   const skims = boosting || kart.star > 0 || kart.mega > 0
   const drag = spinning ? SPIN_DRAG : offroad && !skims ? OFFROAD_DRAG : DRAG
   let newFwd = fwd * damp(drag, dt)
-  const newLat = lat * damp(drifting || spinning ? GRIP_DRIFT : GRIP, dt)
+  const newLat = lat * damp(drifting || spinning ? GRIP_DRIFT : st.grip, dt)
   // A drift is meant to be fast. The scrub the tyres give up sideways is put
   // back along the nose instead of thrown away: without this, holding a drift
   // takes 30 m/s to 10 in under a second — there is nowhere on the circuit a
@@ -862,7 +903,7 @@ function stepKart(state, kart, bits, dt) {
   kart.vx = fx * newFwd - fy * newLat
   kart.vy = fy * newFwd + fx * newLat
 
-  let max = boosting ? BOOST_MAX : MAX_SPEED
+  let max = boosting ? BOOST_MAX : st.top
   if (kart.star > 0) max *= STAR_SPEED
   if (kart.shrink > 0) max *= SHRINK_SPEED
   if (kart.mega > 0) max *= MEGA_SPEED
@@ -904,7 +945,7 @@ function confine(kart) {
     if (Math.abs(hit.lateral) > half) fall(kart, hit.s)
     return
   }
-  const limit = half + KERB - KART_R
+  const limit = half + KERB - statsOf(kart).radius
   if (Math.abs(hit.lateral) <= limit) return
   const side = hit.lateral > 0 ? 1 : -1
   const nx = -hit.ty
@@ -968,7 +1009,7 @@ function collectBox(state, kart) {
     // A full hand drives straight through: a box you cannot use is a box you
     // have not taken, as in the game this is a clone of.
     if (box.cooldown > 0 || kart.item !== null) continue
-    if (Math.hypot(box.x - kart.x, box.y - kart.y) > KART_R + 1.8) continue
+    if (Math.hypot(box.x - kart.x, box.y - kart.y) > statsOf(kart).radius + 1.8) continue
     box.cooldown = BOX_RESPAWN
     kart.item = roll(state, kart)
     kart.itemCount = ITEMS[kart.item].count ?? 1
@@ -1027,16 +1068,16 @@ function useItem(state, kart, bits) {
   } else if (item === 'cloud') kart.cloud = CLOUD_SECONDS
   else if (item === 'banana' || item === 'fake' || item === 'bomb') {
     state.hazards.push({
-      x: kart.x - fx * (KART_R + 2),
-      y: kart.y - fy * (KART_R + 2),
+      x: kart.x - fx * (statsOf(kart).radius + 2),
+      y: kart.y - fy * (statsOf(kart).radius + 2),
       owner: kart.id,
       kind: item,
       fuse: item === 'bomb' ? BOMB_FUSE : 0,
     })
   } else if (item === 'green' || item === 'red' || item === 'blue') {
     state.shells.push({
-      x: kart.x + fx * (KART_R + 1.5),
-      y: kart.y + fy * (KART_R + 1.5),
+      x: kart.x + fx * (statsOf(kart).radius + 1.5),
+      y: kart.y + fy * (statsOf(kart).radius + 1.5),
       vx: fx * launchSpeed,
       vy: fy * launchSpeed,
       speed: item === 'blue' ? launchSpeed * 1.3 : launchSpeed,
@@ -1141,7 +1182,7 @@ function stepShells(state, dt) {
       // turning is a self-inflicted spin.
       if (kart.id === shell.owner && shell.life > SHELL_LIFE - 0.4) continue
       if (kart.respawn > 0 || kart.air > 0) continue
-      if (Math.hypot(kart.x - shell.x, kart.y - shell.y) > KART_R + SHELL_R) continue
+      if (Math.hypot(kart.x - shell.x, kart.y - shell.y) > statsOf(kart).radius + SHELL_R) continue
       shell.life = 0
       // A spiny shell arriving is an explosion, and whoever is running with the
       // leader goes up with them.
@@ -1173,7 +1214,7 @@ function hitHazards(state, kart) {
     // has had a moment to arm. Without that it goes off in the hand that set
     // it: it is dropped a kart's length behind, which is inside its own reach.
     if (hazard.kind === 'bomb' && hazard.fuse > BOMB_FUSE - 0.6) continue
-    const reach = hazard.kind === 'bomb' ? BOMB_TRIGGER : KART_R + HAZARD_R
+    const reach = hazard.kind === 'bomb' ? BOMB_TRIGGER : statsOf(kart).radius + HAZARD_R
     if (Math.hypot(hazard.x - kart.x, hazard.y - kart.y) > reach) continue
     hazard.dead = true
     // A peel or a fake box catches whoever drove into it; a bomb catches
@@ -1249,7 +1290,7 @@ function bump(a, b) {
   if (a.respawn > 0 || b.respawn > 0 || a.air > 0 || b.air > 0) return
   const dx = b.x - a.x
   const dy = b.y - a.y
-  const r = KART_R * (kartScale(a) + kartScale(b))
+  const r = radiusOf(a) + radiusOf(b)
   const d = Math.hypot(dx, dy)
   if (d >= r || d < 1e-6) return
   const nx = dx / d
@@ -1300,18 +1341,20 @@ function bump(a, b) {
   // shrunk as much as it is spinning. A shrunk kart tops out at 21 m/s of its
   // own, and a shove was sending it to fifty. Its own cap reasserts itself on
   // the way down, the way the end of a Turbo does.
-  if (ma < 1) clampSpeed(a, MAX_SPEED)
-  if (mb < 1) clampSpeed(b, MAX_SPEED)
+  if (ma < 1) clampSpeed(a, statsOf(a).top)
+  if (mb < 1) clampSpeed(b, statsOf(b).top)
 }
 
 /**
  * How much a kart weighs in a shove. Size squared, because a Mega that is 1.7
  * times as wide should not merely be 1.7 times as hard to move; and a fraction
- * of that while it is spinning, which is the whole of the roadblock fix.
+ * of that while it is spinning, which is the whole of the roadblock fix. The
+ * chassis' own mass is on top of that: the Van wins every shove it starts, the
+ * Bike loses every one it is in.
  */
 function massOf(kart, loose) {
   const scale = kartScale(kart)
-  return scale * scale * (loose ? LOOSE : 1)
+  return statsOf(kart).mass * scale * scale * (loose ? LOOSE : 1)
 }
 
 /**
