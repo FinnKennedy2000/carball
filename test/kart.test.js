@@ -33,6 +33,12 @@ import {
   CHASSIS_KEYS,
   statsOf,
   radiusOf,
+  setTrack,
+  trackFor,
+  activeTrack,
+  TRACKS,
+  TRACK_KEYS,
+  DEFAULT_TRACK,
 } from '../shared/kart.js'
 
 const field = (n = 6) =>
@@ -1139,4 +1145,79 @@ test('the chassis is what the kart does: the Wedge runs away, the Van wins the s
   const bike = shoved('van', 'bike')
   const van = shoved('bike', 'van')
   assert.ok(bike > van + 1, `the Van shoved the Bike to ${bike.toFixed(1)}, the Bike ${van.toFixed(1)}`)
+})
+
+// Maps ----------------------------------------------------------------------
+
+test('every map is a closed circuit the sim can place a race on', () => {
+  try {
+    for (const key of TRACK_KEYS) {
+      assert.equal(setTrack(key), key)
+      assert.equal(activeTrack(), key)
+      const t = TRACKS[key]
+      // The length falls out of a Catmull-Rom through the nodes rather than being
+      // declared beside them, so this is what catches a table with its decimal
+      // point in the wrong place.
+      assert.ok(TRACK.length > 1100, `${key} is only ${TRACK.length.toFixed(0)}m`)
+
+      // A six-kart grid stands on the widest part of the road, and the line is
+      // where the road is widest: the grid and the renderer's chequer band both
+      // assume it.
+      const widths = Array.from({ length: 60 }, (_, i) => halfWidthAt((i / 60) * TRACK.length))
+      assert.equal(halfWidthAt(0), Math.max(...widths), `${key} is not widest at the line`)
+      assert.equal(halfWidthAt(0), HALF_WIDTH, `${key}: HALF_WIDTH is not the line's width`)
+      assert.ok(Math.min(...widths) > 6, `${key} narrows to ${Math.min(...widths).toFixed(1)}m`)
+
+      // Nothing off the road: a pad hanging over a drop is a trap rather than a
+      // decision, and a box in the grass is one nobody takes.
+      for (const spot of padSpots()) {
+        const hit = project(spot.x, spot.y)
+        const room = halfWidthAt(hit.s) + 0.01
+        assert.ok(Math.abs(hit.lateral) + spot.halfWidth <= room, `${key}: a pad hangs off the tarmac`)
+      }
+      for (const spot of boxSpots()) {
+        const hit = project(spot.x, spot.y)
+        assert.ok(Math.abs(hit.lateral) <= halfWidthAt(hit.s), `${key}: a box is off the road`)
+      }
+      assert.equal(boxSpots().length, t.boxRows * 3)
+
+      // A gap you can clear flat out and not at a crawl, which is the whole
+      // point of one and the reason each map has its own airtime.
+      for (const [from, to] of JUMPS) {
+        const gap = (to - from) * TRACK.length
+        assert.ok(gap / JUMP_AIRTIME < 38, `${key}: nothing clears a ${gap.toFixed(0)}m gap`)
+        assert.ok(gap / JUMP_AIRTIME > 20, `${key}: a ${gap.toFixed(0)}m gap is a bump, not a jump`)
+      }
+      // The hills are whole cycles per lap, or the road has a step in it.
+      assert.ok(Math.abs(heightAt(0) - heightAt(TRACK.length)) < 0.001, `${key} steps at the line`)
+    }
+  } finally {
+    setTrack(DEFAULT_TRACK)
+  }
+})
+
+test('a race is dealt a map off its seed, and an AI field gets round all of them', () => {
+  try {
+    const seen = new Set()
+    for (let seed = 0; seed < TRACK_KEYS.length * 3; seed++) seen.add(trackFor(seed))
+    assert.equal(seen.size, TRACK_KEYS.length, 'the seeds do not reach every map')
+    // Same seed, same map: a replay has to land on the same road.
+    assert.equal(trackFor(12345), trackFor(12345))
+
+    for (const key of TRACK_KEYS) {
+      const state = createRace(
+        field().map((r) => ({ ...r, ai: true })),
+        7,
+        key,
+      )
+      assert.equal(state.track, key)
+      begin(state)
+      for (let i = 0; i < 60 * 700 && state.phase !== 'OVER'; i++) step(state, {})
+      assert.equal(state.phase, 'OVER', `nobody finished on ${key}`)
+      const winner = state.karts.find((k) => k.place === 1)
+      assert.ok(winner.lap >= LAPS, `the winner on ${key} only got to lap ${winner.lap}`)
+    }
+  } finally {
+    setTrack(DEFAULT_TRACK)
+  }
 })

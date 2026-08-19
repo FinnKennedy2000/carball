@@ -1,4 +1,4 @@
-// Kart: the racing game. A closed circuit, six karts, item boxes, three laps.
+// Kart: the racing game. Four circuits, six karts, item boxes, three laps.
 //
 // Same contract as sim.js — pure and deterministic, fixed timestep, no
 // Math.random and no Date — so the same seed and the same inputs give the same
@@ -8,16 +8,24 @@
 // different vehicle from a football car and wants its own numbers.
 
 import { DT, IN_FWD, IN_BACK, IN_LEFT, IN_RIGHT, IN_BOOST, IN_DRIFT, IN_ITEM, IN_AIM } from './constants.js'
+import { TRACKS, TRACK_KEYS, DEFAULT_TRACK } from './kart-tracks.js'
+
+export { TRACKS, TRACK_KEYS, DEFAULT_TRACK }
 
 // Track ---------------------------------------------------------------------
-// The circuit is a closed curve through a table of nodes, sampled into a
-// polyline. No asset files, and the renderer builds its ribbon from the same
-// numbers the physics uses, so the road you see is the road you drive on.
+// A circuit is a closed curve through a table of nodes, sampled into a polyline.
+// No asset files, and the renderer builds its ribbon from the same numbers the
+// physics uses, so the road you see is the road you drive on. The tables live in
+// kart-tracks.js, one set per map; setTrack picks which one is loaded.
 // Sampled finely enough for the hairpins: at 200 nodes the tight corners came
 // out as flat spots, which project() then reads as a straight. Node count is
 // tied to the radius — the density is the thing that matters, not the count.
 export const TRACK_N = 512
-export const HALF_WIDTH = 16 // the tarmac across the line — see halfWidthAt
+// The tarmac across the line of the track being driven, which is the widest
+// point of every one of them so that a six-kart grid always fits. Reassigned by
+// setTrack, and a let rather than a const because an importer reads the live
+// binding and so sees the swap.
+export let HALF_WIDTH = Math.max(...TRACKS[DEFAULT_TRACK].widths.map(([, w]) => w))
 export const KERB = 5 // grass past the tarmac before the wall
 export const LAPS = 3
 // A fall costs you this long sitting still, plus the metres you fell at.
@@ -107,7 +115,7 @@ const BOX_RESPAWN = 5
 // 2279m puts a line of them about every 285 metres: often enough that a lap is
 // never dry, far enough apart that they are a thing you drive to rather than
 // scenery you cannot avoid.
-const BOX_ROWS = 8
+let BOX_ROWS = TRACKS[DEFAULT_TRACK].boxRows
 const BOOST_SECONDS = 1.6
 const STAR_SECONDS = 6
 const STAR_SPEED = 1.25
@@ -216,41 +224,66 @@ export const ROLL_TABLE = ROLL_ROWS.map((row) => ITEMS.map((item) => row[item.ke
 export const ROLL_FRONT = ROLL_TABLE[0]
 export const ROLL_BACK = ROLL_TABLE[ROLL_TABLE.length - 1]
 
+// The road ------------------------------------------------------------------
+// The shape of the circuit is data, and there are four of them: the tables the
+// physics reads are whatever setTrack last put here, and everything below —
+// projection, widths, hills, jumps, pads, item boxes — is written against these
+// and so needs no per-track cases of its own.
+let NODES = TRACKS[DEFAULT_TRACK].nodes
+let WIDTHS = TRACKS[DEFAULT_TRACK].widths
+let HILLS = TRACKS[DEFAULT_TRACK].hills
+let PADS = TRACKS[DEFAULT_TRACK].pads
+let JUMP_RISE = 6 * TRACKS[DEFAULT_TRACK].airtime
+let ACTIVE = DEFAULT_TRACK
+
 /**
- * The centre line: 160 nodes at even spacing around the lap, x and y in metres,
- * lifted straight out of the circuit's plan view. Eleven corners with real radii
- * — a pair of 33m hairpins, three long sweepers you can carry, a hook with a
- * blind exit — which is not a shape any sum of harmonics was going to give, and
- * that is why the road is data now rather than a formula.
+ * Drive a different map. Every table that describes the road is swapped and the
+ * polyline rebuilt; the exported bindings are `let` so an importer — the
+ * renderer, a test — reads the new road rather than a copy of the old one.
+ *
+ * The sim stays deterministic: which map a race is on lives on the state and
+ * travels in the snapshot, so a peer sets the same one before it draws. An
+ * unknown key is the circuit rather than a crash, since it can come off a
+ * channel.
  */
-const NODES = [
-  -109.6, -165.9, -95.4, -165.9, -81.1, -165.9, -66.9, -165.9, -52.6, -165.9, -38.4, -165.9, -24.1, -165.9, -9.9, -165.9,
-  4.4, -165.9, 18.6, -165.9, 32.8, -165.9, 47.1, -165.9, 61.3, -165.9, 75.6, -165.9, 89.8, -165.9, 104.1, -165.9,
-  118.3, -165.9, 132.5, -165.9, 146.8, -165.9, 161, -165.9, 175.3, -165.9, 189.5, -165.9, 203.8, -165.9, 218, -165.9,
-  232.3, -165.9, 246.5, -165.9, 260.7, -165.9, 275, -165.9, 289.2, -164.9, 303.1, -161.9, 316.4, -157, 329, -150.3,
-  340.4, -141.8, 350.5, -131.8, 359.1, -120.4, 366, -108, 371, -94.7, 374.2, -80.8, 375.3, -66.6, 375.3, -52.4,
-  375.3, -38.1, 375.3, -23.9, 375.3, -9.6, 372.9, 4.3, 365, 16, 352.9, 23.3, 338.8, 24.8, 325.4, 20.4,
-  315.1, 10.7, 308, -1.6, 300.8, -13.9, 291.8, -24.9, 280.4, -33.4, 267.3, -38.8, 253.2, -40.7, 239.1, -39.2,
-  225.8, -34.2, 214.2, -26, 204.9, -15.3, 198.6, -2.5, 193.8, 10.9, 188.9, 24.2, 184, 37.6, 179.1, 51,
-  174.3, 64.4, 169.4, 77.8, 164.5, 91.1, 159.7, 104.5, 154.8, 117.9, 148.9, 130.8, 139.4, 141.4, 127.3, 148.7,
-  113.4, 151.8, 99.3, 150.6, 85.5, 147, 71.8, 143.2, 58, 139.5, 44.3, 135.9, 30.5, 132.1, 17, 127.8,
-  4.2, 121.5, -7.5, 113.4, -17.8, 103.6, -26.6, 92.5, -33.6, 80.1, -38.7, 66.8, -41.7, 52.9, -44.2, 38.8,
-  -46.7, 24.8, -51.5, 11.5, -60.2, 0.3, -71.9, -7.7, -85.5, -11.8, -99.6, -11.6, -113.1, -7.1, -124.5, 1.4,
-  -132.7, 12.9, -137.9, 26.1, -142.8, 39.5, -147.6, 52.9, -152.6, 66.3, -157.4, 79.7, -162.3, 93, -167.1, 106.5,
-  -172, 119.8, -176.9, 133.2, -182.6, 146.2, -191.9, 156.9, -204.4, 163.7, -218.3, 166.1, -232.3, 163.7, -245.3, 157.8,
-  -258.2, 151.8, -271, 145.7, -284, 139.8, -296.9, 133.8, -309.7, 127.5, -321.4, 119.5, -332, 110, -341, 98.9,
-  -348.2, 86.7, -353.5, 73.5, -356.7, 59.6, -359.2, 45.6, -361.6, 31.5, -364.1, 17.5, -366.6, 3.5, -369.1, -10.5,
-  -371.6, -24.5, -374.1, -38.6, -375.1, -52.7, -370.6, -66.1, -361.1, -76.6, -348.1, -82.2, -334, -82.1, -321.2, -76.2,
-  -311.3, -66, -302.2, -55.1, -293, -44.2, -283.9, -33.3, -274.7, -22.4, -265.3, -11.8, -253.6, -3.6, -240.3, 1.1,
-  -226.1, 2, -212.2, -1, -199.6, -7.5, -189.4, -17.3, -182.1, -29.5, -178.3, -43.2, -175.8, -57.2, -173.3, -71.2,
-  -170.8, -85.3, -168.4, -99.3, -165.9, -113.3, -163.1, -127.3, -157.4, -140.3, -148.5, -151.3, -137, -159.7, -123.7, -164.7,
-]
+export function setTrack(key) {
+  const track = TRACKS[key] ? key : DEFAULT_TRACK
+  const t = TRACKS[track]
+  NODES = t.nodes
+  WIDTHS = t.widths
+  HILLS = t.hills
+  PADS = t.pads
+  VOIDS = t.voids
+  JUMPS = t.jumps
+  JUMP_AIRTIME = t.airtime
+  // The arc the renderer draws over a gap, in proportion to the hop: the
+  // circuit's 1.5s flight goes 9m up, and a half-second hop that went as high
+  // would read as a ski jump.
+  JUMP_RISE = 6 * t.airtime
+  BOX_ROWS = t.boxRows
+  HALF_WIDTH = Math.max(...t.widths.map(([, w]) => w))
+  ACTIVE = track
+  TRACK = buildTrack()
+  TRACK_R = TRACK.pts.reduce((r, p) => Math.max(r, Math.hypot(p.x, p.y)), 0)
+  return track
+}
+
+/** Which map is loaded. */
+export function activeTrack() {
+  return ACTIVE
+}
+
+/** A map off a seed, so the same seed always deals the same road. */
+export function trackFor(seed) {
+  return TRACK_KEYS[(seed >>> 0) % TRACK_KEYS.length]
+}
 
 /**
  * A point on the centre line, `t` being the fraction of the way round. A
- * Catmull-Rom through the nodes rather than the nodes themselves: at 14m apart
- * a straight join reads as a 160-sided polygon through the hairpins, and the
- * spline costs nothing since this only runs TRACK_N times at load.
+ * Catmull-Rom through the nodes rather than the nodes themselves: the nodes are
+ * about 14m apart on every map, and a straight join between them reads as a
+ * many-sided polygon through the hairpins. The spline costs nothing, since this
+ * only runs TRACK_N times per map load.
  */
 export function trackPoint(t) {
   const m = NODES.length / 2
@@ -276,26 +309,6 @@ function lapFraction(s) {
   return (((s % L) + L) % L) / L
 }
 
-/**
- * The width profile, as (lap fraction, half-width in metres) read off the plan.
- * The tarmac breathes: 32m across the line, down to 14m in four narrows, and
- * back out over the last quarter. Wide enough to fight over, narrow enough that
- * the line matters. Widest at the line, so a six-kart grid still fits.
- */
-const WIDTHS = [
-  [0, HALF_WIDTH],
-  [0.13, HALF_WIDTH],
-  [0.175, 10.6],
-  [0.219, 7.1],
-  [0.333, 11.9],
-  [0.42, 7.5],
-  [0.504, 11.7],
-  [0.565, 8.3],
-  [0.627, 11.9],
-  [0.74, 7],
-  [0.87, 12.4],
-  [1, HALF_WIDTH],
-]
 
 /** The tarmac's half-width at a distance around the lap, straight off WIDTHS. */
 export function halfWidthAt(s) {
@@ -318,16 +331,6 @@ export function halfWidthAt(s) {
 // than g: at the steepest part of the circuit this is about a fifth of what
 // the engine gives you, which is felt without being fought.
 const GRAVITY = 22
-// The four waves the profile is made of, amplitudes in metres. Sixty metres from
-// the deepest dip to the highest crest, and the odd harmonics are what keep the
-// crests from falling at even intervals. Whole numbers of cycles per lap, or the
-// road would not meet itself at the line.
-const HILLS = [
-  { cycles: 2, metres: 20.1, phase: 0 },
-  { cycles: 3, metres: 12, phase: 1.9 },
-  { cycles: 5, metres: 5.6, phase: 0.6 },
-  { cycles: 7, metres: 2.4, phase: 2.4 },
-]
 
 /** The height of the road at a distance around the lap. */
 export function heightAt(s) {
@@ -350,13 +353,7 @@ export function slopeAt(s) {
  * here and there is no kerb and no barrier to catch you — only the drop.
  * Exported because the renderer has to leave the same gaps in its scenery.
  */
-export const VOIDS = [
-  [0.2, 0.26],
-  [0.37, 0.42],
-  [0.55, 0.6],
-  [0.72, 0.78],
-  [0.9, 0.94],
-]
+export let VOIDS = TRACKS[DEFAULT_TRACK].voids
 
 /**
  * The two places the road stops outright, as fractions of the lap. There is no
@@ -364,18 +361,14 @@ export const VOIDS = [
  * lip and either land on the far one or you do not. Exported so the renderer
  * breaks its ribbon in exactly the same two places.
  */
-export const JUMPS = [
-  [0.467, 0.487],
-  [0.792, 0.809],
-]
+export let JUMPS = TRACKS[DEFAULT_TRACK].jumps
 /**
  * How long a kart hangs in the air over a jump. The gap is a distance and this
  * is a time, so together they are a speed: 46 metres in a second and a half is
  * 31 m/s off the near lip, which is most but not all of flat out. Take one slow
  * and you land short, which is a fall.
  */
-export const JUMP_AIRTIME = 1.5
-const JUMP_RISE = 9 // how high the arc goes, for the renderer to draw
+export let JUMP_AIRTIME = TRACKS[DEFAULT_TRACK].airtime
 
 /** The gap `s` is over, as [from, to] in metres, or null. */
 export function jumpAt(s) {
@@ -390,29 +383,6 @@ export function airRise(air) {
   return JUMP_RISE * Math.sin(Math.PI * (1 - air / JUMP_AIRTIME))
 }
 
-/**
- * Boost pads, as lap fractions with a lane and a half-width in metres, read off
- * the plan. On corner exits and the bottoms of the long drops, where the extra
- * speed is worth carrying — and three of them out by a drop, which is where the
- * lane matters most.
- *
- * Off the centre line on purpose: a pad you have to go and take is a decision,
- * and one laid down the middle of the road is a tax on not driving over it.
- */
-const PADS = [
-  { t: 0.049, lane: 6, half: 3.5 },
-  { t: 0.099, lane: -6, half: 3.5 },
-  { t: 0.16, lane: 0, half: 3.5 },
-  { t: 0.239, lane: 7, half: 3.5 },
-  { t: 0.3, lane: -7, half: 3.5 },
-  { t: 0.35, lane: 0, half: 3.5 },
-  { t: 0.439, lane: 6, half: 3.5 },
-  { t: 0.52, lane: -6, half: 3.5 },
-  { t: 0.599, lane: 5, half: 3.5 },
-  { t: 0.679, lane: -6, half: 3.5 },
-  { t: 0.83, lane: 0, half: 3.5 },
-  { t: 0.939, lane: 6, half: 3.5 },
-]
 /**
  * A pad's length along the road. Long enough that a kart at full speed cannot
  * step over one between two ticks — flat out covers about a metre a tick — and
@@ -498,14 +468,14 @@ export function buildTrack() {
   return { pts, cum, length: cum[TRACK_N] }
 }
 
-export const TRACK = buildTrack()
+export let TRACK = buildTrack()
 
 /**
  * How far the circuit reaches from the origin. Measured off the road rather than
  * declared, since the shape is a table now; the renderer sizes the horizon plate
  * to it so the hills never poke through the far edge of the world.
  */
-export const TRACK_R = TRACK.pts.reduce((r, p) => Math.max(r, Math.hypot(p.x, p.y)), 0)
+export let TRACK_R = TRACK.pts.reduce((r, p) => Math.max(r, Math.hypot(p.x, p.y)), 0)
 
 /** Centre line, tangent and normal at a distance `s` around the lap. */
 export function pointAt(s) {
@@ -598,12 +568,21 @@ export function boxSpots() {
  * A race, empty or with a field already in it. `racers` is [{ id, name, ai }].
  * It starts in WAITING: in a room the karts sit on the grid until the host says
  * go, and the solo page simply calls begin() on the spot.
+ *
+ * `track` is the original circuit unless asked otherwise: a caller that wants a
+ * different map every race passes trackFor(seed), and a test that wants a fixed
+ * road gets one by saying nothing.
  */
-export function createRace(racers = [], seed = 1) {
+export function createRace(racers = [], seed = 1, track = DEFAULT_TRACK) {
   const state = {
     tick: 0,
     time: 0,
     seed: seed >>> 0,
+    // Which map this race is on. Set before anything is placed, because the
+    // grid, the item boxes and the pads all come off the road. It rides in the
+    // snapshot like every other field, so a peer knows what to draw without a
+    // message of its own.
+    track: setTrack(track),
     phase: 'WAITING',
     timer: 0,
     laps: LAPS,

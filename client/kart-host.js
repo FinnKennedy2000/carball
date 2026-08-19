@@ -9,7 +9,7 @@
 // the channel, the buffer, the input path — lives in net.js, which both use.
 
 import * as C from '../shared/constants.js'
-import { createRace, addKart, removeKart, begin, step } from '../shared/kart.js'
+import { createRace, addKart, removeKart, begin, step, trackFor } from '../shared/kart.js'
 import { parse } from '../shared/protocol.js'
 
 const HOST_CID = ' host'
@@ -23,8 +23,18 @@ function randomSeed() {
   return Math.floor(Math.random() * 2 ** 32) >>> 0
 }
 
+/**
+ * An empty race on one of the maps, dealt off the same seed the race is: every
+ * race in a room is on a road picked at random, and the choice rides in the
+ * snapshot so the peers draw the one their host is simulating.
+ */
+function freshRace() {
+  const seed = randomSeed()
+  return createRace([], seed, trackFor(seed))
+}
+
 export function startKartHost({ send, live = () => {}, hostName, hostChassis }) {
-  let state = createRace([], randomSeed())
+  let state = freshRace()
   const players = new Map() // cid -> { id, name, bits }
   let nextId = 1
   let timer = null
@@ -95,7 +105,7 @@ export function startKartHost({ send, live = () => {}, hostName, hostChassis }) 
 
   /** A fresh race with everyone in the room, the field filled out with AI. */
   function beginRace() {
-    state = createRace([], randomSeed())
+    state = freshRace()
     for (const p of players.values()) addKart(state, { id: p.id, name: p.name, chassis: p.chassis })
     for (let i = 0; state.karts.length < GRID && i < AI_NAMES.length; i++) {
       addKart(state, { id: AI_ID_BASE + i, name: AI_NAMES[i], ai: true })

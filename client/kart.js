@@ -163,6 +163,13 @@ let camera
 let renderer
 const kartMeshes = new Map()
 const boxMeshes = []
+// Everything that is the road rather than the race, in one group: a map change
+// throws the group away and builds the next one.
+let world = null
+let shownTrack = null
+// Set when the map changes: the camera eases after the kart, and easing it
+// across two circuits is a second of flying over scenery nobody is racing on.
+let snapCam = false
 const shellPool = []
 const hazardPool = []
 const blastPool = []
@@ -576,7 +583,8 @@ function startSolo() {
   el('room-strip').hidden = true
   const racers = [{ id: SOLO_ID, name, ai: false, chassis: myChassis }]
   AI_NAMES.forEach((n, i) => racers.push({ id: i + 2, name: n, ai: true }))
-  race = K.createRace(racers, (Math.random() * 2 ** 32) >>> 0)
+  const seed = (Math.random() * 2 ** 32) >>> 0
+  race = K.createRace(racers, seed, K.trackFor(seed))
   K.begin(race)
   clearKarts()
   accumulator = 0
@@ -665,6 +673,14 @@ function frame(now) {
   }
 
   if (race) {
+    // The map is on the state, which covers both a solo race that has just dealt
+    // itself one and a room whose host has moved on to the next track.
+    if (race.track && race.track !== shownTrack) {
+      shownTrack = K.setTrack(race.track)
+      buildWorld()
+      clearKarts()
+      snapCam = true
+    }
     draw()
     updateHud()
   }
@@ -693,12 +709,23 @@ function initRenderer() {
   sun.position.set(-60, 120, 40)
   scene.add(sun)
 
-  buildTrack()
+  buildWorld()
   resize()
   addEventListener('resize', resize)
 }
 
-function buildTrack() {
+function buildWorld() {
+  // The old road, gone with its buffers. A race lasts minutes, but the ribbons
+  // and the boxes are the biggest geometry on the page and leaving a dozen laps'
+  // worth of them on the GPU is a leak you would feel.
+  if (world) {
+    scene.remove(world)
+    world.traverse((o) => o.geometry?.dispose())
+    boxMeshes.length = 0
+  }
+  world = new THREE.Group()
+  scene.add(world)
+
   // Far below the lowest dip, so the hills never poke through it: at this
   // distance it is a horizon rather than ground you look at.
   const ground = new THREE.Mesh(
@@ -707,7 +734,7 @@ function buildTrack() {
   )
   ground.rotation.x = -Math.PI / 2
   ground.position.y = -34
-  scene.add(ground)
+  world.add(ground)
 
   // The road's width varies around the lap, so every strip is built from
   // halfWidthAt rather than one number — the tarmac you see is the tarmac the
@@ -723,22 +750,22 @@ function buildTrack() {
   // Grass that climbs with the road, so the tarmac is laid on a hillside rather
   // than floating over a flat green plate. Kept in close: pushed much further
   // out, the inside of the hairpin folds over itself.
-  scene.add(ribbon((i) => half(i) + 22, -0.35, 0x1c3a26, 1, solid))
+  world.add(ribbon((i) => half(i) + 22, -0.35, 0x1c3a26, 1, solid))
   // Only where the ground gives out: the drop. No wider than the grass it
   // replaces, or it wedges out past the hillside as a black shard, and far
   // enough down to read as somewhere you would not want to be.
-  scene.add(ribbon((i) => half(i) + 22, -14, 0x05070c, 1, (i) => !solid(i)))
-  scene.add(ribbon((i) => half(i) + K.KERB, 0.01, 0x6b4a22, 1, solid)) // the kerb, then
-  scene.add(ribbon(half, 0.03, 0x49536b, 1, road)) // the tarmac on top of it
+  world.add(ribbon((i) => half(i) + 22, -14, 0x05070c, 1, (i) => !solid(i)))
+  world.add(ribbon((i) => half(i) + K.KERB, 0.01, 0x6b4a22, 1, solid)) // the kerb, then
+  world.add(ribbon(half, 0.03, 0x49536b, 1, road)) // the tarmac on top of it
   // The racing line, in dashes rather than one continuous stripe: a solid line
   // gives the eye nothing to track, and the dashes flicking past the nose are
   // most of what tells you how fast you are actually going.
-  scene.add(dashes(0.4, 0.05, 0xffffff, 0.4, road))
+  world.add(dashes(0.4, 0.05, 0xffffff, 0.4, road))
 
   // The barrier, as a wall either side — with the void stretches left open,
   // which is what makes them look like somewhere you can go off.
   for (const side of [1, -1]) {
-    scene.add(wall((i) => side * (half(i) + K.KERB), 2.4, solid))
+    world.add(wall((i) => side * (half(i) + K.KERB), 2.4, solid))
   }
 
   buildFinish()
@@ -755,7 +782,7 @@ function buildTrack() {
     const mesh = new THREE.Group()
     mesh.add(model)
     mesh.position.set(box.x, K.heightAt(box.s) + BOX_HALF + 0.6, box.y)
-    scene.add(mesh)
+    world.add(mesh)
     boxMeshes.push(mesh)
   }
 }
@@ -797,7 +824,7 @@ function buildPads() {
     const mesh = new THREE.Mesh(geo, material)
     mesh.position.set(pad.x, K.heightAt(pad.s) + 0.06, pad.y)
     mesh.rotation.set(0, -pad.heading, Math.atan(K.slopeAt(pad.s)), 'YZX')
-    scene.add(mesh)
+    world.add(mesh)
   }
 }
 
@@ -828,7 +855,7 @@ function buildFinish() {
       const along = size * (row - 0.5)
       mesh.rotation.x = -Math.PI / 2
       mesh.position.set(p.x + bx * across + ax * along, base + 0.07, p.y + bz * across + az * along)
-      scene.add(mesh)
+      world.add(mesh)
     }
   }
 
@@ -841,7 +868,7 @@ function buildFinish() {
     const post = new THREE.Mesh(postGeo, postMat)
     const across = side * (half + 1.6)
     post.position.set(p.x + bx * across, base + postH / 2, p.y + bz * across)
-    scene.add(post)
+    world.add(post)
   }
   const beam = new THREE.Mesh(
     new THREE.BoxGeometry((half + 2.2) * 2, 2.2, 1),
@@ -851,7 +878,7 @@ function buildFinish() {
   // Its length runs across the road, not along it: a turn about y maps the
   // box's own +x onto the across vector.
   beam.rotation.y = Math.atan2(-bz, bx)
-  scene.add(beam)
+  world.add(beam)
 }
 
 /**
@@ -1377,7 +1404,8 @@ function draw() {
     // but the easing has to tighten with speed. At a Bullet Bill's 78 m/s a
     // fixed 0.12 leaves the camera 65 metres adrift, which is to say your own
     // kart is off the front of the screen for the whole item.
-    camera.position.lerp(camPos, Math.min(0.6, 0.12 + rush * 0.3))
+    camera.position.lerp(camPos, snapCam ? 1 : Math.min(0.6, 0.12 + rush * 0.3))
+    snapCam = false
     const aimX = me.x + fx * 16
     const aimZ = me.y + fy * 16
     camAim.set(aimX, groundY(aimX, aimZ) + 2.5, aimZ)
@@ -1480,6 +1508,7 @@ function updateHud() {
   el('place-suffix').textContent = ordinalSuffix(me.place)
   el('speed').textContent = Math.round(Math.hypot(me.vx, me.vy) * 3.6)
   el('time').textContent = clock(race.time)
+  el('track-name').textContent = K.TRACKS[race.track]?.name ?? ''
 
   showItem(me.item === undefined ? null : me.item, me.itemCount ?? 1)
   // Ink over the screen, thinning as it clears. A person can drive out of it
@@ -1643,6 +1672,10 @@ function showEffects(me) {
 /** Before the lights, in a room: who is in, and the host's start button. */
 function showWaitingRoom() {
   el('results').hidden = true
+  // Which road the next race is on. The host deals it with the seed, so it is
+  // already on the state everyone on the grid is looking at.
+  const track = K.TRACKS[race.track]
+  el('waiting-track').textContent = track ? ` · ${track.name}` : ''
   el('start').hidden = !isHost
   el('waiting-list').innerHTML = roster
     .map((p) => `<li class="${p.id === myId ? 'me' : ''}">${dot(p.id)} ${escapeHtml(p.name)}</li>`)
