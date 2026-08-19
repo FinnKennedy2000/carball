@@ -741,29 +741,12 @@ function makeKart(color) {
   // which is the piece an emissive goes on.
   const parts = [body, driver, ...wheels]
 
-  // Bullet Bill: the kart does not carry the bullet, the kart becomes it.
-  const bullet = new THREE.Group()
-  const hull = new THREE.Mesh(
-    new THREE.CapsuleGeometry(1.5, 2.6, 6, 14),
-    new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.6, roughness: 0.3 }),
-  )
-  hull.rotation.z = Math.PI / 2 // nose down the kart's own +x, which is forward
-  hull.position.y = 1.7
-  bullet.add(hull)
-  for (const dz of [1, -1]) {
-    const eye = new THREE.Mesh(
-      new THREE.SphereGeometry(0.42, 10, 8),
-      new THREE.MeshBasicMaterial({ color: 0xf8fafc }),
-    )
-    eye.position.set(1.5, 2.1, dz * 0.75)
-    bullet.add(eye)
-  }
-  const fin = new THREE.Mesh(
-    new THREE.BoxGeometry(1.6, 1.4, 0.25),
-    new THREE.MeshStandardMaterial({ color: 0x0f172a, flatShading: true }),
-  )
-  fin.position.set(-1.9, 2.6, 0)
-  bullet.add(fin)
+  // Bullet Bill: the kart does not carry the bullet, the kart becomes it. The
+  // model is the same one the item roster shows, built at about 1.5 units and
+  // scaled up to a kart — one bullet in the codebase, not two that drift apart.
+  const bullet = buildItem('bullet')
+  bullet.scale.setScalar(3.1)
+  bullet.position.y = 0.3
   bullet.visible = false
   group.add(bullet)
 
@@ -815,12 +798,14 @@ function dressKart(mesh, kart, t) {
 
   // Boost, from a Mushroom, a pad or a mini-turbo. The jets shorten as it runs
   // out, and flicker, so the tail of a boost is visible before it ends.
-  const jet = Math.min(1, kart.boost / 0.6)
+  // Not while flying: the bullet model carries its own exhaust, and the kart's
+  // two jets stick out either side of it like ears.
+  const jet = flying ? 0 : Math.min(1, kart.boost / 0.6)
   for (const flame of flames) {
-    flame.visible = jet > 0 || flying
+    flame.visible = jet > 0
     if (!flame.visible) continue
     const flicker = 0.75 + 0.25 * Math.sin(t * 40 + flame.position.z)
-    flame.scale.set(1, (flying ? 1.8 : jet) * flicker, 1)
+    flame.scale.set(1, jet * flicker, 1)
   }
 
   // The drift charge, in the colour the game this clones uses: orange first,
@@ -935,8 +920,15 @@ function draw() {
     const here = K.heightAt(me.s)
     // Normally the camera backs off with speed. On a Bullet Bill it does not:
     // the whole point of the kart turning into a rocket is being able to see it.
-    const back = me.bullet > 0 ? 18 : 20 + rush * 6
-    camPos.set(me.x - fx * back, here + 10.5 - rush * 2, me.y - fy * back)
+    // It also swings out to one side — dead astern you see nothing but the
+    // exhaust, and the bullet's whole shape is its profile.
+    const back = me.bullet > 0 ? 17 : 20 + rush * 6
+    const side = me.bullet > 0 ? 9 : 0
+    camPos.set(
+      me.x - fx * back - fy * side,
+      here + 10.5 - rush * 2 + (me.bullet > 0 ? 1.5 : 0),
+      me.y - fy * back + fx * side,
+    )
     // Eased rather than pinned, so a spin-out does not whip the camera round —
     // but the easing has to tighten with speed. At a Bullet Bill's 78 m/s a
     // fixed 0.12 leaves the camera 65 metres adrift, which is to say your own

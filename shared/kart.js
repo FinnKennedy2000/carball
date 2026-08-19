@@ -62,7 +62,11 @@ const FINISH_GRACE = 45 // seconds the race runs on after the winner is home
 
 // Items ---------------------------------------------------------------------
 const BOX_RESPAWN = 5
-const BOX_ROWS = 20 // item boxes at this many points around the lap, 3 abreast
+// Item boxes at this many points around the lap, 3 abreast. Ten rows over 1292m
+// puts a line of them about every 130 metres: often enough that a lap is never
+// dry, far enough apart that they are a thing you drive to rather than scenery
+// you cannot avoid.
+const BOX_ROWS = 10
 const BOOST_SECONDS = 1.6
 const STAR_SECONDS = 6
 const STAR_SPEED = 1.25

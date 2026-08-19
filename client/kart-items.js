@@ -367,6 +367,63 @@ export function buildSeeker() {
  * The catalogue. Keys line up with the item table in shared/kart.js where one
  * exists; the rest are roles the road needs a shape for.
  */
+// --- bullet -----------------------------------------------------------------
+/**
+ * The bullet, built to its own icon: a dark casing with a rounded nose, a flared
+ * tail, two eyes and a scowl. Nose down +x, which is a kart's own forward, so
+ * the kart's model can be swapped for this one without turning it.
+ */
+export function buildBullet() {
+  const g = group('bullet')
+  const casing = mat('bullet_casing', 0x2b3446, { roughness: 0.3, metalness: 0.55 })
+
+  const body = mesh('casing', new THREE.CapsuleGeometry(0.34, 0.95, 6, 18), casing)
+  body.rotation.z = Math.PI / 2 // laid along +x, nose leading
+  body.position.y = 0.36
+  g.add(body)
+
+  // The tail, flared out behind: it is what stops the silhouette reading as a
+  // plain black pill from any angle.
+  const tail = mesh('tail', new THREE.CylinderGeometry(0.42, 0.24, 0.3, 18), mat('bullet_tail', 0x161c28, { roughness: 0.5 }))
+  tail.rotation.z = Math.PI / 2
+  tail.position.set(-0.88, 0.36, 0)
+  g.add(tail)
+  const collar = mesh('collar', new THREE.TorusGeometry(0.36, 0.045, 8, 20), PAINT.steel())
+  collar.rotation.y = Math.PI / 2
+  collar.position.set(-0.66, 0.36, 0)
+  g.add(collar)
+
+  // Eyes and a scowl, both set into the nose. A face is most of what makes this
+  // a bullet rather than a projectile.
+  const white = mat('eye_white', 0xf4f7ff, { roughness: 0.25 })
+  const pupil = PAINT.ink()
+  for (const dz of [1, -1]) {
+    const eye = mesh('eye_' + (dz > 0 ? 'l' : 'r'), new THREE.SphereGeometry(0.15, 12, 8), white)
+    eye.position.set(0.56, 0.48, dz * 0.19)
+    g.add(eye)
+    const iris = mesh('pupil_' + (dz > 0 ? 'l' : 'r'), new THREE.SphereGeometry(0.075, 10, 8), pupil)
+    iris.position.set(0.67, 0.48, dz * 0.19)
+    g.add(iris)
+  }
+  const mouth = mesh('mouth', new THREE.BoxGeometry(0.06, 0.05, 0.34), pupil)
+  mouth.position.set(0.66, 0.26, 0)
+  g.add(mouth)
+
+  // The exhaust, lit and pointing back. From a chase camera the tail is the only
+  // part of this you ever see, so the tail has to be the part that says rocket:
+  // without it the whole model reads as a black dome with a face you cannot see.
+  const plume = mesh('plume', new THREE.ConeGeometry(0.26, 0.85, 16), mat('plume', 0xffa63d, { emissive: 0xff7a1a, roughness: 0.3 }))
+  plume.rotation.z = Math.PI / 2
+  plume.position.set(-1.45, 0.36, 0)
+  g.add(plume)
+  const ring = mesh('exhaust_ring', new THREE.TorusGeometry(0.3, 0.05, 8, 20), mat('exhaust_ring', 0xffd166, { emissive: 0xffa63d, roughness: 0.3 }))
+  ring.rotation.y = Math.PI / 2
+  ring.position.set(-1.03, 0.36, 0)
+  g.add(ring)
+
+  return g
+}
+
 export const ITEM_MODELS = {
   boost: { name: 'Turbo', build: buildTurbo, note: 'a burst of speed' },
   banana: { name: 'Banana', build: buildBanana, note: 'drops behind you' },
@@ -380,6 +437,7 @@ export const ITEM_MODELS = {
   bomb: { name: 'Bomb', build: buildBomb, note: 'drops, waits, and blasts a radius' },
   ink: { name: 'Ink Burst', build: buildInk, note: 'blinds the karts ahead' },
   seeker: { name: 'Seeker', build: buildSeeker, note: 'flies to whoever is leading' },
+  bullet: { name: 'Bullet', build: buildBullet, note: 'the kart becomes this and flies the line' },
 }
 
 export function buildItem(key) {
