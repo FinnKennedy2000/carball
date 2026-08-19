@@ -812,7 +812,11 @@ function roll(state, kart) {
 }
 
 function useItem(state, kart, bits) {
-  const down = (bits & IN_ITEM) !== 0
+  // Space fires as well as E — on a kart IN_BOOST has nothing else to do but
+  // help a star along, and the HUD has always said "space to fire". Here rather
+  // than in the client: the solo loop patched its own input and the room path
+  // did not, so space fired in a solo race and did nothing in a room.
+  const down = (bits & (IN_ITEM | IN_BOOST)) !== 0
   const fire =
     down && !kart.itemDown && kart.item !== null && kart.finished === null && kart.respawn === 0
   kart.itemDown = down

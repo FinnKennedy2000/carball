@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { IN_FWD, IN_ITEM, IN_LEFT, IN_RIGHT, IN_DRIFT } from '../shared/constants.js'
+import { IN_FWD, IN_ITEM, IN_LEFT, IN_RIGHT, IN_DRIFT, IN_BOOST } from '../shared/constants.js'
 import {
   createRace,
   addKart,
@@ -832,4 +832,21 @@ test('spinning out on a boost pad does not hand the boost straight back', () => 
   step(state, {})
   assert.ok(kart.spin > 0, 'the banana missed')
   assert.equal(kart.boost, 0, 'a spun-out kart is boosting off the pad under it')
+})
+
+test('an item fires on space as well as on the item key', () => {
+  // The HUD says "space to fire". It used to be true only in a solo race: the
+  // solo loop patched space into the item bit itself and the room path, which
+  // sends the raw keys, did not.
+  const fired = (bits) => {
+    const state = started(2, 29)
+    state.phase = 'RACE'
+    state.karts[0].item = ITEMS.findIndex((i) => i.key === 'banana')
+    state.karts[0].itemCount = 1
+    step(state, { 1: bits })
+    return state.hazards.length
+  }
+  assert.equal(fired(IN_ITEM), 1, 'E did not fire')
+  assert.equal(fired(IN_BOOST), 1, 'space did not fire')
+  assert.equal(fired(0), 0, 'an item fired with nothing pressed')
 })

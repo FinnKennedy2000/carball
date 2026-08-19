@@ -11,7 +11,6 @@
 
 import * as THREE from 'three'
 import * as K from '../shared/kart.js'
-import { IN_ITEM, IN_BOOST } from '../shared/constants.js'
 import { buildItem } from './kart-items.js'
 import { cleanCode } from '../shared/protocol.js'
 import { startInput, currentBits, isTyping } from './input.js'
@@ -398,7 +397,7 @@ function frame(now) {
   if (solo && race) {
     let steps = 0
     while (accumulator >= dt && steps < MAX_CATCHUP) {
-      K.step(race, { [myId]: playerBits() })
+      K.step(race, { [myId]: currentBits() })
       accumulator -= dt
       steps++
     }
@@ -414,13 +413,6 @@ function frame(now) {
     updateHud()
   }
   renderer.render(scene, camera)
-}
-
-function playerBits() {
-  let bits = currentBits()
-  // Space fires as well as E: on a kart there is nothing else for it to do.
-  if (bits & IN_BOOST) bits |= IN_ITEM
-  return bits
 }
 
 // Scene ---------------------------------------------------------------------
@@ -1121,7 +1113,7 @@ function paintItem(index, reeling, count = 1) {
   el('item-hint').textContent = reeling
     ? 'rolling…'
     : item
-      ? 'space to fire'
+      ? 'space or E to fire'
       : 'drive through a box'
   if (index === shownItem && count === shownCount) return
   shownItem = index
