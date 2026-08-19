@@ -21,7 +21,7 @@ const STORED_CAR = 'carball.car'
 const STORED_MODE = 'carball.mode'
 
 // Invite links used to point here. Keep the old ones working.
-if (/^#[A-Za-z]{4}$/.test(location.hash)) location.replace(`./game.html${location.hash}`)
+if (/^#[A-Za-z]{4}$/.test(location.hash)) location.replace(`./game${location.hash}`)
 
 const lobbyError = (reason) => {
   el('lobby-error').textContent = reason
@@ -66,7 +66,7 @@ paintCar()
 el('garage-link').addEventListener('click', () => {
   // The side goes with us: the garage paints the preview in it.
   sessionStorage.setItem(STORED_TEAM, String(wantedTeam))
-  location.href = './garage.html'
+  location.href = './garage'
 })
 
 /** Hand the choice to the game page. A room is only ever opened there. */
@@ -76,7 +76,7 @@ function play(hash) {
   sessionStorage.setItem(STORED_TEAM, String(wantedTeam))
   sessionStorage.setItem(STORED_MODE, wantedMode)
   localStorage.setItem(STORED_CAR, String(wantedCar))
-  location.href = `./game.html#${hash}`
+  location.href = `./game#${hash}`
 }
 
 el('create').addEventListener('click', () => {

@@ -92,7 +92,7 @@ async function copyInvite(btn) {
 el('over-copy').addEventListener('click', () => copyInvite(el('over-copy')))
 el('invite').addEventListener('click', () => copyInvite(el('invite')))
 el('over-home').addEventListener('click', () => {
-  location.href = './index.html' // dropping the socket leaves the room
+  location.href = './' // dropping the socket leaves the room
 })
 
 // Joining -------------------------------------------------------------------
@@ -105,7 +105,7 @@ const team = cleanTeam(Number.parseInt(sessionStorage.getItem(STORED_TEAM), 10))
 // player last picked on this device, or the default on their first visit.
 const car = cleanCar(Number.parseInt(localStorage.getItem(STORED_CAR), 10))
 
-if (!code && !opening) location.replace('./index.html') // nothing to join
+if (!code && !opening) location.replace('./') // nothing to join
 else if (!netEnabled) gateNote('Multiplayer is not configured on this deployment')
 else start()
 

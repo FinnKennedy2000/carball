@@ -85,12 +85,12 @@ function pick(i) {
 // does not change your car unless you say so.
 const save = () => {
   localStorage.setItem(STORED_CAR, String(chosen))
-  location.href = './index.html'
+  location.href = './'
 }
 
 el('garage-use').addEventListener('click', save)
 el('garage-back').addEventListener('click', () => {
-  location.href = './index.html'
+  location.href = './'
 })
 
 pick(chosen)
