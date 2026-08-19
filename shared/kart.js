@@ -14,9 +14,10 @@ import { DT, IN_FWD, IN_BACK, IN_LEFT, IN_RIGHT, IN_BOOST, IN_DRIFT, IN_ITEM } f
 // files, and the renderer builds its ribbon from the same numbers the physics
 // uses, so the road you see is the road you drive on.
 // Sampled finely enough for the hairpin: at 200 nodes the tight corners came
-// out as flat spots, which project() then reads as a straight.
-export const TRACK_N = 280
-export const TRACK_R = 150
+// out as flat spots, which project() then reads as a straight. Node count is
+// tied to the radius — the density is the thing that matters, not the count.
+export const TRACK_N = 400
+export const TRACK_R = 215
 export const HALF_WIDTH = 14 // the tarmac at its widest — see halfWidthAt
 const NARROWING = 6 // how much of that width the narrows take away
 export const KERB = 5 // grass past the tarmac before the wall
@@ -52,7 +53,7 @@ const FINISH_GRACE = 45 // seconds the race runs on after the winner is home
 
 // Items ---------------------------------------------------------------------
 const BOX_RESPAWN = 5
-const BOX_ROWS = 14 // item boxes at this many points around the lap, 3 abreast
+const BOX_ROWS = 20 // item boxes at this many points around the lap, 3 abreast
 const BOOST_SECONDS = 1.6
 const STAR_SECONDS = 6
 const STAR_SPEED = 1.25
@@ -158,7 +159,15 @@ export function trackPoint(t) {
   // uneven: a couple of sweepers you can carry speed through, a hairpin you
   // cannot, and a kink between them that punishes a lazy line.
   const r =
-    TRACK_R * (1 + 0.2 * Math.sin(3 * a) - 0.13 * Math.cos(2 * a) + 0.07 * Math.sin(5 * a + 1.1))
+    TRACK_R *
+    (1 +
+      0.2 * Math.sin(3 * a) -
+      0.13 * Math.cos(2 * a) +
+      0.07 * Math.sin(5 * a + 1.1) +
+      // The 7th: the circuit was made half again as long, and a longer lap that
+      // is only a longer straight is a worse lap. This is what the extra metres
+      // are spent on.
+      0.05 * Math.cos(7 * a + 0.4))
   return { x: Math.cos(a) * r, y: Math.sin(a) * r * 0.66 }
 }
 
@@ -183,7 +192,7 @@ export function halfWidthAt(s) {
 // the simulation stays a plan view — a kart's x and y are where it is on the
 // map — and the hills are what you see, plus a pull along the road that costs
 // you on a climb and pays it back on the way down.
-const HILL = 13 // metres from the mean to a crest
+const HILL = 23 // metres from the mean to a crest
 // How hard a gradient pulls, in m/s^2 per unit of rise-over-run. Arcade rather
 // than g: at the steepest part of the circuit this is about an eighth of what
 // the engine gives you, which is felt without being fought.

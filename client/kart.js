@@ -455,7 +455,7 @@ function buildTrack() {
     new THREE.MeshStandardMaterial({ color: 0x16301f, roughness: 1 }),
   )
   ground.rotation.x = -Math.PI / 2
-  ground.position.y = -20
+  ground.position.y = -34
   scene.add(ground)
 
   // The road's width varies around the lap, so every strip is built from

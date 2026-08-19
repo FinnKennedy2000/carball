@@ -41,7 +41,7 @@ const run = (state, ticks, inputs = {}) => {
 }
 
 test('the circuit closes and every point projects back onto it', () => {
-  assert.ok(TRACK.length > 500)
+  assert.ok(TRACK.length > 1100, `the circuit is only ${TRACK.length.toFixed(0)}m`)
   for (let i = 0; i < 20; i++) {
     const s = (i / 20) * TRACK.length
     const p = pointAt(s)
@@ -65,7 +65,7 @@ test('the countdown holds the field, then releases it', () => {
 test('a race that the player never finishes still ends', () => {
   const state = started(6, 21)
   // Kart 1 is handed no input at all: it sits on the grid while the AI race.
-  for (let i = 0; i < 60 * 400 && state.phase !== 'OVER'; i++) step(state, {})
+  for (let i = 0; i < 60 * 700 && state.phase !== 'OVER'; i++) step(state, {})
   assert.equal(state.phase, 'OVER')
   assert.equal(state.karts[0].finished, null)
 })
@@ -81,7 +81,7 @@ test('the same seed and inputs give the same race', () => {
 test('an AI field completes three laps and is placed in finishing order', () => {
   const state = createRace(field().map((r) => ({ ...r, ai: true })), 7)
   begin(state)
-  for (let i = 0; i < 60 * 400 && state.phase !== 'OVER'; i++) step(state, {})
+  for (let i = 0; i < 60 * 700 && state.phase !== 'OVER'; i++) step(state, {})
   assert.equal(state.phase, 'OVER')
   const winner = state.karts.find((k) => k.place === 1)
   assert.equal(winner.id, state.finishers[0])
@@ -582,7 +582,10 @@ test('a climb costs you speed, and the drop the other side gives it back', () =>
     // backwards off the road rather than driving anywhere.
     kart.vx = p.tx * 20
     kart.vy = p.ty * 20
-    run(state, 120, { 1: IN_FWD })
+    // Coasting rather than on the throttle. On full throttle both ends of the
+    // circuit reach the speed cap and the hill is invisible in the number: with
+    // the engine out of it, the gradient is the only thing acting.
+    run(state, 60)
     return Math.hypot(kart.vx, kart.vy)
   }
 
