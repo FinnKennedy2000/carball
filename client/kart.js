@@ -794,7 +794,10 @@ function makeKart(color) {
     sparks.push(spark)
   }
 
-  group.userData = { parts, bullet, flames, sparks }
+  // Everything the grace-period fade touches. The bullet is a group, so its own
+  // pieces go in the list rather than the group.
+  const fade = [...parts, ...bullet.children]
+  group.userData = { parts, bullet, flames, sparks, fade }
   return group
 }
 
@@ -804,7 +807,7 @@ function makeKart(color) {
  * with the kart and is only shown or hidden.
  */
 function dressKart(mesh, kart, t) {
-  const { parts, bullet, flames, sparks } = mesh.userData
+  const { parts, bullet, flames, sparks, fade } = mesh.userData
   const [body] = parts
   const flying = kart.bullet > 0
   for (const part of parts) part.visible = !flying
@@ -835,6 +838,16 @@ function dressKart(mesh, kart, t) {
   if (kart.star > 0) body.material.emissive.setHSL((t * 0.7) % 1, 0.85, 0.5)
   else if (kart.mega > 0) body.material.emissive.setHex(0x8a3d00)
   else body.material.emissive.setHex(0x000000)
+
+  // Immune after a hit: the kart fades in and out for as long as the grace
+  // period runs. It reads on other karts as much as on your own — a blinking
+  // kart is one there is no point throwing anything at. Every part fades, or a
+  // ghosted body drives past on four solid wheels.
+  const fading = kart.grace > 0 && kart.respawn === 0
+  for (const part of fade) {
+    part.material.transparent = fading
+    part.material.opacity = fading ? 0.55 + 0.45 * Math.sin(t * 16) : 1
+  }
 
   // A kart mid-spin rolls over onto one side and comes back level. It is what
   // tells you from a distance that the kart ahead is spinning — and therefore

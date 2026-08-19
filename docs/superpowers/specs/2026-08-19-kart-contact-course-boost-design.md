@@ -142,9 +142,12 @@ and `spinOut()` sets it to `SPIN_SECONDS + GRACE_AFTER` (1.3 + 1.5 = 2.8s) — s
 it covers the pirouette itself plus about a second and a half of driving out of
 it.
 
-**Silent, as asked.** No chip, no HUD timer, no tint. It applies to the AI field
-as well as to the player: the same rule for everyone keeps the race readable and
-the simulation deterministic.
+**Shown by a fade, not by a chip.** The kart fades in and out for as long as the
+grace runs — every part of it, so a ghosted body does not drive past on four
+solid wheels. It reads on the field as much as on your own kart: a blinking kart
+is one there is no point throwing anything at. No HUD timer and no tint. The rule
+applies to the AI as well as to the player, which keeps the race readable and the
+simulation deterministic.
 
 It gates damage only. A star, a mega or a bullet still shoves you aside on
 contact, a cloud can still be handed to you, and the pads and boxes still work
