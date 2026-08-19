@@ -298,6 +298,11 @@ export function padSpots() {
  */
 function hitPads(kart) {
   if (kart.respawn > 0 || kart.finished !== null) return
+  // Not while it is spinning. A banana taken on a pad had spinOut zero the boost
+  // and the pad hand 1.1s of it straight back, every tick the kart slid across
+  // it — so a spun-out kart kept its raised cap, kept its immunity to grass, and
+  // sat there with its jets lit.
+  if (kart.spin > 0) return
   const hit = project(kart.x, kart.y)
   for (const pad of PADS) {
     const s = pad.t * TRACK.length
@@ -337,7 +342,7 @@ export function pointAt(s) {
   const L = TRACK.length
   let d = s % L
   if (d < 0) d += L
-  // ponytail: linear scan over 200 nodes, called a handful of times a tick.
+  // ponytail: linear scan over TRACK_N nodes, called a handful of times a tick.
   // Binary search if the field ever grows by an order of magnitude.
   let i = 0
   while (i < TRACK_N - 1 && TRACK.cum[i + 1] <= d) i++
@@ -1049,6 +1054,22 @@ function bump(a, b) {
   if (d >= r || d < 1e-6) return
   const nx = dx / d
   const ny = dy / d
+
+  // What contact does happens first, so the shove is then worked out against one
+  // state of the world. Read the masses before this and the hit that starts a
+  // spin uses the pre-spin mass for the overlap and the post-spin one for
+  // everything after it.
+  //
+  // Contact is contact: what a star, a mega, a bullet or a cloud does happens
+  // whether or not the two are closing, or a kart caught from behind at the
+  // moment it is already being pushed away gets away with it.
+  if (a.star > 0 || a.mega > 0 || a.bullet > 0) spinOut(b)
+  if (b.star > 0 || b.mega > 0 || b.bullet > 0) spinOut(a)
+  // Hot potato: touch someone and the cloud is theirs, which is the only way
+  // out from under it.
+  if (a.cloud > 0 && a.cloudLock === 0 && b.cloud === 0 && b.star === 0) handCloud(a, b)
+  else if (b.cloud > 0 && b.cloudLock === 0 && a.cloud === 0 && a.star === 0) handCloud(b, a)
+
   // Split the overlap and the impulse by inverse mass, not down the middle: a
   // Mega should barrel through, and a kart mid-spin should be swept aside.
   const ma = massOf(a)
@@ -1059,15 +1080,6 @@ function bump(a, b) {
   a.y -= ny * push * share
   b.x += nx * push * (1 - share)
   b.y += ny * push * (1 - share)
-  // Contact is contact: what a star, a mega, a bullet or a cloud does happens
-  // whether or not the two are closing, or a kart caught from behind at the
-  // moment it is already being pushed away gets away with it.
-  if (a.star > 0 || a.mega > 0 || a.bullet > 0) spinOut(b)
-  if (b.star > 0 || b.mega > 0 || b.bullet > 0) spinOut(a)
-  // Hot potato: touch someone and the cloud is theirs, which is the only way
-  // out from under it.
-  if (a.cloud > 0 && a.cloudLock === 0 && b.cloud === 0 && b.star === 0) handCloud(a, b)
-  else if (b.cloud > 0 && b.cloudLock === 0 && a.cloud === 0 && a.star === 0) handCloud(b, a)
 
   const vn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny
   if (vn > 0) return
@@ -1080,9 +1092,12 @@ function bump(a, b) {
   a.vy -= ((j * ny) / ma) * (b.spin > 0 ? SHRUG : 1)
   b.vx += ((j * nx) / mb) * (a.spin > 0 ? SHRUG : 1)
   b.vy += ((j * ny) / mb) * (a.spin > 0 ? SHRUG : 1)
-  // Being light is not a licence to be fired off the circuit.
-  if (a.spin > 0) clampSpeed(a, MAX_SPEED)
-  if (b.spin > 0) clampSpeed(b, MAX_SPEED)
+  // Being light is not a licence to be fired off the circuit — and light is
+  // shrunk as much as it is spinning. A shrunk kart tops out at 21 m/s of its
+  // own, and a shove was sending it to fifty. Its own cap reasserts itself on
+  // the way down, the way the end of a Turbo does.
+  if (massOf(a) < 1) clampSpeed(a, MAX_SPEED)
+  if (massOf(b) < 1) clampSpeed(b, MAX_SPEED)
 }
 
 /**

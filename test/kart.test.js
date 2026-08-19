@@ -25,6 +25,7 @@ import {
   HALF_WIDTH,
   KERB,
   KART_R,
+  MAX_SPEED,
 } from '../shared/kart.js'
 
 const field = (n = 6) =>
@@ -797,4 +798,38 @@ test('a charge held into a fall or a bullet does not pay out afterwards', () => 
   const { state: flew, kart: flying } = charged({ bullet: 0.2 })
   run(flew, 60)
   assert.equal(flying.boost, 0, 'a bullet paid out a charge held into it')
+})
+
+test('a shove does not fire a shrunk kart across the circuit', () => {
+  const state = started(2, 21)
+  state.phase = 'RACE'
+  const [me, small] = state.karts
+  const p = pointAt(200)
+  small.shrink = 4
+  small.x = p.x
+  small.y = p.y
+  me.x = p.x - p.tx * (KART_R * 1.4)
+  me.y = p.y - p.ty * (KART_R * 1.4)
+  me.heading = Math.atan2(p.ty, p.tx)
+  me.vx = p.tx * 30
+  me.vy = p.ty * 30
+  step(state, {})
+  // Light, so it is shoved further than a full-size kart would be — but a shove
+  // is not a catapult, and being small is not a way to be launched off the road.
+  assert.ok(Math.hypot(small.vx, small.vy) <= MAX_SPEED + 0.001,
+    `a nudge sent it to ${Math.hypot(small.vx, small.vy).toFixed(1)} m/s`)
+})
+
+test('spinning out on a boost pad does not hand the boost straight back', () => {
+  const state = started(1, 23)
+  state.phase = 'RACE'
+  const pad = padSpots()[0]
+  const kart = state.karts[0]
+  kart.x = pad.x
+  kart.y = pad.y
+  kart.heading = pad.heading
+  state.hazards.push({ kind: 'banana', x: pad.x, y: pad.y, owner: 99 })
+  step(state, {})
+  assert.ok(kart.spin > 0, 'the banana missed')
+  assert.equal(kart.boost, 0, 'a spun-out kart is boosting off the pad under it')
 })
