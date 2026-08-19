@@ -12,6 +12,7 @@ import {
   pointAt,
   boxSpots,
   padSpots,
+  driftTier,
   heightAt,
   slopeAt,
   halfWidthAt,
@@ -703,8 +704,14 @@ test('a boost pad gives you a boost, and missing it does not', () => {
   assert.equal(missed.boost, 0, 'the whole road is a boost pad')
 })
 
-test('no boost pad is laid over a drop', () => {
-  for (const pad of padSpots()) assert.ok(!overVoid(pad.s), `pad over a void at ${pad.s}`)
+test('every boost pad is on the tarmac and clear of the drops', () => {
+  for (const pad of padSpots()) {
+    assert.ok(!overVoid(pad.s), `pad over a void at ${pad.s}`)
+    // The narrows are the tight ones: a pad whose edge hangs off the road is a
+    // reward for a line that puts you on the grass.
+    const reach = Math.abs(pad.lane) + pad.halfWidth
+    assert.ok(reach <= halfWidthAt(pad.s), `pad off the road at ${pad.s}: ${reach}`)
+  }
 })
 
 test('holding a drift charges a mini-turbo, and releasing it spends it', () => {
@@ -723,7 +730,7 @@ test('holding a drift charges a mini-turbo, and releasing it spends it', () => {
     kart.vx = p.tx * 30
     kart.vy = p.ty * 30
     run(state, ticks, { 1: IN_FWD | IN_DRIFT | IN_RIGHT })
-    const charged = kart.driftCharge
+    const charged = driftTier(kart)
     step(state, { 1: IN_FWD }) // let go
     return { charged, boost: kart.boost }
   }
@@ -753,12 +760,41 @@ test('a spin-out throws away a charged drift', () => {
   kart.vx = p.tx * 30
   kart.vy = p.ty * 30
   run(state, 130, { 1: IN_FWD | IN_DRIFT | IN_RIGHT })
-  assert.equal(kart.driftCharge, 2)
+  assert.equal(driftTier(kart), 2)
   state.hazards.push({ kind: 'banana', x: kart.x, y: kart.y, owner: 99 })
   step(state, { 1: IN_FWD | IN_DRIFT | IN_RIGHT })
   assert.ok(kart.spin > 0)
-  assert.equal(kart.driftCharge, 0)
+  assert.equal(driftTier(kart), 0)
   assert.equal(kart.driftTime, 0)
   step(state, { 1: IN_FWD })
   assert.equal(kart.boost, 0, 'a spin-out paid out anyway')
+})
+
+test('a charge held into a fall or a bullet does not pay out afterwards', () => {
+  // Both of these return out of stepKart before the drift block, so a charge
+  // held at the moment they start is never spent — and was then handed over as
+  // a free boost on the first tick the kart drove again.
+  const charged = (extra) => {
+    const state = started(1, 17)
+    state.phase = 'RACE'
+    const kart = state.karts[0]
+    const p = pointAt(40)
+    kart.x = p.x
+    kart.y = p.y
+    kart.heading = Math.atan2(p.ty, p.tx)
+    kart.vx = p.tx * 30
+    kart.vy = p.ty * 30
+    run(state, 130, { 1: IN_FWD | IN_DRIFT | IN_RIGHT })
+    assert.ok(kart.driftTime > 1.9, 'the drift never charged')
+    Object.assign(kart, extra)
+    return { state, kart }
+  }
+
+  const { state: fell, kart: dropped } = charged({ respawn: RESPAWN_SECONDS })
+  run(fell, 200)
+  assert.equal(dropped.boost, 0, 'a fall paid out the charge it threw away')
+
+  const { state: flew, kart: flying } = charged({ bullet: 0.2 })
+  run(flew, 60)
+  assert.equal(flying.boost, 0, 'a bullet paid out a charge held into it')
 })

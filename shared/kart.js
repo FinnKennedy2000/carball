@@ -51,7 +51,9 @@ const OVERSPEED_BLEED = 6
 // Drift mini-turbo. Hold a drift with the wheel over and it charges; let go
 // with a charge and you are paid in the same boost a Mushroom gives, which is
 // the whole reason this is a small change.
-const DRIFT_TIERS = [0.9, 1.9] // seconds held for tier one and tier two
+// Exported: the renderer colours the sparks off these, and a second copy of the
+// thresholds would disagree with these the first time they are tuned.
+export const DRIFT_TIERS = [0.9, 1.9] // seconds held for tier one and tier two
 const DRIFT_BOOST = [0.55, 0.95] // what each tier is worth
 const DRIFT_MIN_SPEED = 12 // below this a drift is a pirouette, not a line
 
@@ -248,7 +250,7 @@ export const VOIDS = [
  * Off the centre line on purpose: a pad you have to go and take is a decision,
  * and one laid down the middle of the road is a tax on not driving over it.
  */
-export const PADS = [
+const PADS = [
   { t: 0.06, lane: -5, half: 3.5 },
   { t: 0.12, lane: 5, half: 3.5 },
   { t: 0.29, lane: 0, half: 4 },
@@ -260,13 +262,14 @@ export const PADS = [
   { t: 0.9, lane: -5, half: 3.5 },
   { t: 0.95, lane: 5, half: 3.5 },
 ]
-// Half a pad's length along the road. Long enough that a kart at full speed
-// cannot step over one between two ticks — flat out covers about a metre a tick
-// — and long enough to be something you see and aim at rather than a smudge.
-const PAD_HALF_LEN = 7
-/** The whole length of one, which is what the renderer paints. */
-export const PAD_LENGTH = PAD_HALF_LEN * 2
-export const PAD_SECONDS = 1.1
+/**
+ * A pad's length along the road. Long enough that a kart at full speed cannot
+ * step over one between two ticks — flat out covers about a metre a tick — and
+ * long enough to be something you see and aim at rather than a smudge. Exported
+ * in one unit, so the paint and the trigger cannot come to disagree.
+ */
+export const PAD_LENGTH = 14
+const PAD_SECONDS = 1.1
 
 /**
  * Where the pads sit on the map. Same shape as boxSpots: the renderer paints
@@ -281,7 +284,7 @@ export function padSpots() {
       y: p.y + p.ny * pad.lane,
       s,
       lane: pad.lane,
-      half: pad.half,
+      halfWidth: pad.half,
       heading: Math.atan2(p.ty, p.tx),
     }
   })
@@ -302,7 +305,7 @@ function hitPads(kart) {
     // Wrap, so a pad near the line is not missed by a kart just short of it.
     if (along > TRACK.length / 2) along -= TRACK.length
     if (along < -TRACK.length / 2) along += TRACK.length
-    if (Math.abs(along) > PAD_HALF_LEN) continue
+    if (Math.abs(along) > PAD_LENGTH / 2) continue
     if (Math.abs(hit.lateral - pad.lane) > pad.half) continue
     kart.boost = Math.max(kart.boost, PAD_SECONDS)
     return
@@ -461,11 +464,10 @@ export function addKart(state, racer) {
     itemCount: 0, // uses left of it, which is 3 for a triple and 1 for the rest
     itemDown: false,
     boost: 0,
-    // Mini-turbo: how long this drift has been held, and which tier that has
-    // reached. The tier is its own field so the renderer can colour the sparks
-    // without re-deriving the thresholds.
+    // Mini-turbo: how long the current drift has been held. The tier it has
+    // reached is driftTier(kart) — a second field for it would be the same
+    // number twice, on the wire and in every reset.
     driftTime: 0,
-    driftCharge: 0,
     star: 0,
     shrink: 0,
     spin: 0,
@@ -560,6 +562,11 @@ export function step(state, inputs) {
 }
 
 function stepKart(state, kart, bits, dt) {
+  // A drift only charges while the kart is driving itself. Both early returns
+  // below — being fished out, and flying a bullet — skip the drift block
+  // entirely, so a charge left standing across one came back out the far side as
+  // a free boost. One line here rather than one at each escape.
+  if (kart.respawn > 0 || kart.bullet > 0) kart.driftTime = 0
   // Being fished out. Nothing it does counts, nothing reaches it, and its other
   // timers are held rather than burnt off while it waits.
   if (kart.respawn > 0) {
@@ -613,15 +620,13 @@ function stepKart(state, kart, bits, dt) {
   const steering = (bits & (IN_LEFT | IN_RIGHT)) !== 0
   if (drifting && steering && speed > DRIFT_MIN_SPEED) {
     kart.driftTime += dt
-    kart.driftCharge = DRIFT_TIERS.filter((t) => kart.driftTime >= t).length
   } else {
-    // Let go with something in hand and it pays out; let go early, or straighten
-    // up, or drop below walking pace, and the charge is simply gone.
-    if (kart.driftCharge > 0) {
-      kart.boost = Math.max(kart.boost, DRIFT_BOOST[kart.driftCharge - 1])
-    }
+    // Letting go pays out whatever tier was reached — straightening up or
+    // dropping below walking pace pay out too, since the charge was earned
+    // either way. Short of the first tier there is simply nothing to pay.
+    const tier = driftTier(kart)
+    if (tier > 0) kart.boost = Math.max(kart.boost, DRIFT_BOOST[tier - 1])
     kart.driftTime = 0
-    kart.driftCharge = 0
   }
   const turnScale =
     (TURN_MIN + (1 - TURN_MIN) * Math.min(1, speed / (MAX_SPEED * 0.3))) * (drifting ? TURN_DRIFT : 1)
@@ -1028,9 +1033,7 @@ function spinOut(kart) {
   if (kart.grace > 0) return
   kart.grace = SPIN_SECONDS + GRACE_AFTER
   kart.spin = SPIN_SECONDS
-  // Whatever was being charged is lost with everything else.
-  kart.driftTime = 0
-  kart.driftCharge = 0
+  kart.driftTime = 0 // whatever was being charged is lost with everything else
   kart.boost = 0
   kart.vx *= 0.3
   kart.vy *= 0.3
@@ -1098,6 +1101,11 @@ function handCloud(from, to) {
   to.cloudLock = CLOUD_LOCK
   from.cloud = 0
   from.cloudLock = 0
+}
+
+/** Which mini-turbo tier the current drift has reached: 0, 1 or 2. */
+export function driftTier(kart) {
+  return DRIFT_TIERS.filter((t) => kart.driftTime >= t).length
 }
 
 /** How big a kart is right now: mega is a real size, and so is a shrink. */
@@ -1190,7 +1198,7 @@ function wrap(a) {
 export function hashRace(state) {
   const nums = [state.tick, state.phase.length, state.shells.length, state.hazards.length]
   for (const k of state.karts) {
-    nums.push(k.x, k.y, k.vx, k.vy, k.heading, k.prog, k.place, k.item ?? -1, k.itemCount, k.spin, k.grace, k.driftTime, k.driftCharge, k.boost, k.star, k.shrink, k.respawn, k.mega, k.bullet, k.ink, k.cloud)
+    nums.push(k.x, k.y, k.vx, k.vy, k.heading, k.prog, k.place, k.item ?? -1, k.itemCount, k.spin, k.grace, k.driftTime, k.boost, k.star, k.shrink, k.respawn, k.mega, k.bullet, k.ink, k.cloud)
   }
   let h = 2166136261
   for (const n of nums) {

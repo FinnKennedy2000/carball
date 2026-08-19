@@ -537,7 +537,7 @@ function buildPads() {
     // Length along the road first, width across it second: the geometry is laid
     // flat here so the mesh's own axes match a kart's, and the same rotation
     // order then works for both.
-    const geo = new THREE.PlaneGeometry(K.PAD_LENGTH, pad.half * 2)
+    const geo = new THREE.PlaneGeometry(K.PAD_LENGTH, pad.halfWidth * 2)
     geo.rotateX(-Math.PI / 2)
     const mesh = new THREE.Mesh(geo, material)
     mesh.position.set(pad.x, K.heightAt(pad.s) + 0.06, pad.y)
@@ -737,8 +737,9 @@ function makeKart(color) {
 
   // Everything below is built once, hidden, and switched on by dressKart. A
   // kart under an item has to read at a glance from behind at 70 m/s, and a
-  // tint on the paintwork does not survive that.
-  const kart = [body, driver, ...wheels]
+  // tint on the paintwork does not survive that. parts[0] is the bodywork,
+  // which is the piece an emissive goes on.
+  const parts = [body, driver, ...wheels]
 
   // Bullet Bill: the kart does not carry the bullet, the kart becomes it.
   const bullet = new THREE.Group()
@@ -793,7 +794,7 @@ function makeKart(color) {
     sparks.push(spark)
   }
 
-  group.userData = { body, kart, bullet, flames, sparks }
+  group.userData = { parts, bullet, flames, sparks }
   return group
 }
 
@@ -803,7 +804,8 @@ function makeKart(color) {
  * with the kart and is only shown or hidden.
  */
 function dressKart(mesh, kart, t) {
-  const { body, kart: parts, bullet, flames, sparks } = mesh.userData
+  const { parts, bullet, flames, sparks } = mesh.userData
+  const [body] = parts
   const flying = kart.bullet > 0
   for (const part of parts) part.visible = !flying
   bullet.visible = flying
@@ -820,10 +822,11 @@ function dressKart(mesh, kart, t) {
 
   // The drift charge, in the colour the game this clones uses: orange first,
   // blue when it is worth holding on for.
+  const tier = K.driftTier(kart)
   for (const spark of sparks) {
-    spark.visible = kart.driftCharge > 0
+    spark.visible = tier > 0
     if (!spark.visible) continue
-    spark.material.color.setHex(kart.driftCharge > 1 ? 0x7ec8ff : 0xffa63d)
+    spark.material.color.setHex(tier > 1 ? 0x7ec8ff : 0xffa63d)
     spark.scale.setScalar(0.7 + 0.3 * Math.sin(t * 30 + spark.position.z))
   }
 
@@ -831,7 +834,6 @@ function dressKart(mesh, kart, t) {
   // and everything else leaves the paint alone.
   if (kart.star > 0) body.material.emissive.setHSL((t * 0.7) % 1, 0.85, 0.5)
   else if (kart.mega > 0) body.material.emissive.setHex(0x8a3d00)
-  else if (flying) body.material.emissive.setHex(0x000000)
   else body.material.emissive.setHex(0x000000)
 
   // A kart mid-spin rolls over onto one side and comes back level. It is what
