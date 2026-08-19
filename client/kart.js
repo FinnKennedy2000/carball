@@ -516,10 +516,10 @@ function buildPads() {
   canvas.width = 128
   canvas.height = 64
   const g = canvas.getContext('2d')
-  g.fillStyle = '#2f2a4d'
+  g.fillStyle = '#241f3d'
   g.fillRect(0, 0, 128, 64)
-  g.strokeStyle = '#7ef0d8'
-  g.lineWidth = 9
+  g.strokeStyle = '#8bffe4'
+  g.lineWidth = 11
   g.lineCap = 'butt'
   // Three chevrons pointing along +x, which the plane below lines up with the
   // direction of travel.
@@ -723,6 +723,7 @@ function makeKart(color) {
   )
   driver.position.set(-0.4, 2, 0)
   group.add(driver)
+  const wheels = []
   for (const [dx, dz] of [[1.4, 1.3], [1.4, -1.3], [-1.4, 1.3], [-1.4, -1.3]]) {
     const wheel = new THREE.Mesh(
       new THREE.CylinderGeometry(0.7, 0.7, 0.6, 10),
@@ -731,8 +732,115 @@ function makeKart(color) {
     wheel.rotation.x = Math.PI / 2
     wheel.position.set(dx, 0.7, dz)
     group.add(wheel)
+    wheels.push(wheel)
   }
+
+  // Everything below is built once, hidden, and switched on by dressKart. A
+  // kart under an item has to read at a glance from behind at 70 m/s, and a
+  // tint on the paintwork does not survive that.
+  const kart = [body, driver, ...wheels]
+
+  // Bullet Bill: the kart does not carry the bullet, the kart becomes it.
+  const bullet = new THREE.Group()
+  const hull = new THREE.Mesh(
+    new THREE.CapsuleGeometry(1.5, 2.6, 6, 14),
+    new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.6, roughness: 0.3 }),
+  )
+  hull.rotation.z = Math.PI / 2 // nose down the kart's own +x, which is forward
+  hull.position.y = 1.7
+  bullet.add(hull)
+  for (const dz of [1, -1]) {
+    const eye = new THREE.Mesh(
+      new THREE.SphereGeometry(0.42, 10, 8),
+      new THREE.MeshBasicMaterial({ color: 0xf8fafc }),
+    )
+    eye.position.set(1.5, 2.1, dz * 0.75)
+    bullet.add(eye)
+  }
+  const fin = new THREE.Mesh(
+    new THREE.BoxGeometry(1.6, 1.4, 0.25),
+    new THREE.MeshStandardMaterial({ color: 0x0f172a, flatShading: true }),
+  )
+  fin.position.set(-1.9, 2.6, 0)
+  bullet.add(fin)
+  bullet.visible = false
+  group.add(bullet)
+
+  // Twin jets out of the back, for a Mushroom, a pad or a mini-turbo alike.
+  const flames = []
+  for (const dz of [0.8, -0.8]) {
+    const flame = new THREE.Mesh(
+      new THREE.ConeGeometry(0.5, 3, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffa63d, transparent: true, opacity: 0.85 }),
+    )
+    flame.rotation.z = Math.PI / 2 // pointing backwards, out of the tail
+    flame.position.set(-3.2, 0.9, dz)
+    flame.visible = false
+    group.add(flame)
+    flames.push(flame)
+  }
+
+  // Drift sparks off the rear wheels: this is how you know when to let go.
+  const sparks = []
+  for (const dz of [1.5, -1.5]) {
+    const spark = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(0.55, 0),
+      new THREE.MeshBasicMaterial({ color: 0xffa63d, transparent: true, opacity: 0.9 }),
+    )
+    spark.position.set(-1.4, 0.5, dz)
+    spark.visible = false
+    group.add(spark)
+    sparks.push(spark)
+  }
+
+  group.userData = { body, kart, bullet, flames, sparks }
   return group
+}
+
+/**
+ * What an item looks like from the driving seat. The sim already carries every
+ * timer this reads; nothing here is allocated per frame — each part was built
+ * with the kart and is only shown or hidden.
+ */
+function dressKart(mesh, kart, t) {
+  const { body, kart: parts, bullet, flames, sparks } = mesh.userData
+  const flying = kart.bullet > 0
+  for (const part of parts) part.visible = !flying
+  bullet.visible = flying
+
+  // Boost, from a Mushroom, a pad or a mini-turbo. The jets shorten as it runs
+  // out, and flicker, so the tail of a boost is visible before it ends.
+  const jet = Math.min(1, kart.boost / 0.6)
+  for (const flame of flames) {
+    flame.visible = jet > 0 || flying
+    if (!flame.visible) continue
+    const flicker = 0.75 + 0.25 * Math.sin(t * 40 + flame.position.z)
+    flame.scale.set(1, (flying ? 1.8 : jet) * flicker, 1)
+  }
+
+  // The drift charge, in the colour the game this clones uses: orange first,
+  // blue when it is worth holding on for.
+  for (const spark of sparks) {
+    spark.visible = kart.driftCharge > 0
+    if (!spark.visible) continue
+    spark.material.color.setHex(kart.driftCharge > 1 ? 0x7ec8ff : 0xffa63d)
+    spark.scale.setScalar(0.7 + 0.3 * Math.sin(t * 30 + spark.position.z))
+  }
+
+  // A star cycles rather than sitting on one yellow, a mega glows and breathes,
+  // and everything else leaves the paint alone.
+  if (kart.star > 0) body.material.emissive.setHSL((t * 0.7) % 1, 0.85, 0.5)
+  else if (kart.mega > 0) body.material.emissive.setHex(0x8a3d00)
+  else if (flying) body.material.emissive.setHex(0x000000)
+  else body.material.emissive.setHex(0x000000)
+
+  // A kart mid-spin rolls over onto one side and comes back level. It is what
+  // tells you from a distance that the kart ahead is spinning — and therefore
+  // that you can go straight through it.
+  const rolled = kart.spin > 0 ? Math.sin((1 - kart.spin / K.SPIN_SECONDS) * Math.PI) * 0.5 : 0
+  mesh.rotation.x = rolled
+  // Mega bobs, so 1.7 times the size reads as weight rather than as a big kart.
+  if (kart.mega > 0) mesh.position.y += Math.sin(t * 4) * 0.35
 }
 
 function draw() {
@@ -757,7 +865,8 @@ function draw() {
       )
       mesh.rotation.set(0, -kart.heading - t * 6, 0)
     } else {
-      mesh.position.set(kart.x, K.heightAt(kart.s), kart.y)
+      // A bullet flies rather than drives, so it is lifted clear of the tarmac.
+      mesh.position.set(kart.x, K.heightAt(kart.s) + (kart.bullet > 0 ? 1.4 : 0), kart.y)
       // Nose up the climb and down the drop. 'YZX' so the pitch is taken about
       // the kart's own lateral axis, after it has been turned to its heading.
       mesh.rotation.set(0, -kart.heading, Math.atan(K.slopeAt(kart.s)), 'YZX')
@@ -765,9 +874,7 @@ function draw() {
     // Shrunk by a Bolt, or lit up by a star: both have to be readable at a
     // glance from behind, so they change the shape rather than only a number.
     mesh.scale.setScalar(K.kartScale(kart))
-    mesh.children[0].material.emissive.setHex(
-      kart.star > 0 ? 0xffe066 : kart.bullet > 0 ? 0x2b3a55 : kart.mega > 0 ? 0x5a2a00 : 0x000000,
-    )
+    dressKart(mesh, kart, race.time)
   }
   for (const [id, mesh] of kartMeshes) {
     if (seen.has(id)) continue
@@ -811,9 +918,15 @@ function draw() {
     // The camera rides the road too, or a crest throws it underground and the
     // next dip leaves it looking at the sky.
     const here = K.heightAt(me.s)
-    camPos.set(me.x - fx * (20 + rush * 6), here + 10.5 - rush * 2, me.y - fy * (20 + rush * 6))
-    // Eased rather than pinned, so a spin-out does not whip the camera round.
-    camera.position.lerp(camPos, 0.12)
+    // Normally the camera backs off with speed. On a Bullet Bill it does not:
+    // the whole point of the kart turning into a rocket is being able to see it.
+    const back = me.bullet > 0 ? 18 : 20 + rush * 6
+    camPos.set(me.x - fx * back, here + 10.5 - rush * 2, me.y - fy * back)
+    // Eased rather than pinned, so a spin-out does not whip the camera round —
+    // but the easing has to tighten with speed. At a Bullet Bill's 78 m/s a
+    // fixed 0.12 leaves the camera 65 metres adrift, which is to say your own
+    // kart is off the front of the screen for the whole item.
+    camera.position.lerp(camPos, Math.min(0.6, 0.12 + rush * 0.3))
     const aimX = me.x + fx * 16
     const aimZ = me.y + fy * 16
     camAim.set(aimX, groundY(aimX, aimZ) + 2.5, aimZ)

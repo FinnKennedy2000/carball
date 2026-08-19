@@ -66,7 +66,7 @@ const STAR_SECONDS = 6
 const STAR_SPEED = 1.25
 const SHRINK_SECONDS = 4
 const SHRINK_SPEED = 0.55
-const SPIN_SECONDS = 1.3
+export const SPIN_SECONDS = 1.3
 // A spinning kart has no purchase on the road: it neither holds its line nor
 // keeps the speed it is given, which is what lets a shove carry it clear.
 const SPIN_DRAG = 1.2
@@ -261,8 +261,9 @@ export const PADS = [
   { t: 0.95, lane: 5, half: 3.5 },
 ]
 // Half a pad's length along the road. Long enough that a kart at full speed
-// cannot step over one between two ticks: flat out covers about a metre a tick.
-const PAD_HALF_LEN = 4
+// cannot step over one between two ticks — flat out covers about a metre a tick
+// — and long enough to be something you see and aim at rather than a smudge.
+const PAD_HALF_LEN = 7
 /** The whole length of one, which is what the renderer paints. */
 export const PAD_LENGTH = PAD_HALF_LEN * 2
 export const PAD_SECONDS = 1.1
