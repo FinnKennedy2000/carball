@@ -232,6 +232,75 @@ export const VOIDS = [
   [0.79, 0.84],
 ]
 
+/**
+ * Boost pads, as lap fractions with a lane and a half-width in metres. Placed
+ * on corner exits and the bottom of the two long drops — somewhere the extra
+ * speed is worth carrying — and never inside a VOIDS stretch, where the reward
+ * for a wide line would be a fall rather than a choice.
+ *
+ * Off the centre line on purpose: a pad you have to go and take is a decision,
+ * and one laid down the middle of the road is a tax on not driving over it.
+ */
+export const PADS = [
+  { t: 0.06, lane: -5, half: 3.5 },
+  { t: 0.12, lane: 5, half: 3.5 },
+  { t: 0.29, lane: 0, half: 4 },
+  { t: 0.37, lane: -6, half: 3.5 },
+  { t: 0.44, lane: 6, half: 3.5 },
+  { t: 0.5, lane: -4, half: 3.5 },
+  { t: 0.66, lane: 5, half: 3.5 },
+  { t: 0.72, lane: 0, half: 4 },
+  { t: 0.9, lane: -5, half: 3.5 },
+  { t: 0.95, lane: 5, half: 3.5 },
+]
+// Half a pad's length along the road. Long enough that a kart at full speed
+// cannot step over one between two ticks: flat out covers about a metre a tick.
+const PAD_HALF_LEN = 4
+/** The whole length of one, which is what the renderer paints. */
+export const PAD_LENGTH = PAD_HALF_LEN * 2
+export const PAD_SECONDS = 1.1
+
+/**
+ * Where the pads sit on the map. Same shape as boxSpots: the renderer paints
+ * its chevrons from this rather than working the geometry out a second time.
+ */
+export function padSpots() {
+  return PADS.map((pad) => {
+    const s = pad.t * TRACK.length
+    const p = pointAt(s)
+    return {
+      x: p.x + p.nx * pad.lane,
+      y: p.y + p.ny * pad.lane,
+      s,
+      lane: pad.lane,
+      half: pad.half,
+      heading: Math.atan2(p.ty, p.tx),
+    }
+  })
+}
+
+/**
+ * Standing on a pad tops the boost timer up. Deliberately stateless — no
+ * cooldown and nothing in the snapshot, because a pad is a pure test of where a
+ * kart is this tick. It sets the same field a Mushroom does, so it inherits the
+ * cap, the bleed-off, the camera and the immunity to grass for free.
+ */
+function hitPads(kart) {
+  if (kart.respawn > 0 || kart.finished !== null) return
+  const hit = project(kart.x, kart.y)
+  for (const pad of PADS) {
+    const s = pad.t * TRACK.length
+    let along = hit.s - s
+    // Wrap, so a pad near the line is not missed by a kart just short of it.
+    if (along > TRACK.length / 2) along -= TRACK.length
+    if (along < -TRACK.length / 2) along += TRACK.length
+    if (Math.abs(along) > PAD_HALF_LEN) continue
+    if (Math.abs(hit.lateral - pad.lane) > pad.half) continue
+    kart.boost = Math.max(kart.boost, PAD_SECONDS)
+    return
+  }
+}
+
 export function overVoid(s) {
   const t = lapFraction(s)
   return VOIDS.some(([from, to]) => t >= from && t <= to)
@@ -466,6 +535,7 @@ export function step(state, inputs) {
   for (const kart of state.karts) {
     collectBox(state, kart)
     hitHazards(state, kart)
+    hitPads(kart)
   }
   for (let i = 0; i < state.karts.length; i++) {
     for (let j = i + 1; j < state.karts.length; j++) bump(state.karts[i], state.karts[j])

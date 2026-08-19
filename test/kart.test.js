@@ -11,6 +11,7 @@ import {
   project,
   pointAt,
   boxSpots,
+  padSpots,
   heightAt,
   slopeAt,
   halfWidthAt,
@@ -676,4 +677,32 @@ test('a kart just spun out cannot be spun out again straight away', () => {
   state.hazards.push({ kind: 'banana', x: kart.x, y: kart.y, owner: 99 })
   step(state, {})
   assert.ok(kart.spin > 0, 'still immune after the grace ran out')
+})
+
+test('a boost pad gives you a boost, and missing it does not', () => {
+  const on = started(1, 9)
+  on.phase = 'RACE'
+  const pad = padSpots()[0]
+  const kart = on.karts[0]
+  kart.x = pad.x
+  kart.y = pad.y
+  kart.heading = pad.heading
+  step(on, {})
+  assert.ok(kart.boost > 1, `no boost on the pad: ${kart.boost}`)
+
+  const off = started(1, 9)
+  off.phase = 'RACE'
+  const missed = off.karts[0]
+  const p = pointAt(pad.s)
+  // The same point on the road, but out at the far edge of the tarmac.
+  const edge = halfWidthAt(pad.s) - 1
+  missed.x = p.x + p.nx * (pad.lane > 0 ? -edge : edge)
+  missed.y = p.y + p.ny * (pad.lane > 0 ? -edge : edge)
+  missed.heading = pad.heading
+  step(off, {})
+  assert.equal(missed.boost, 0, 'the whole road is a boost pad')
+})
+
+test('no boost pad is laid over a drop', () => {
+  for (const pad of padSpots()) assert.ok(!overVoid(pad.s), `pad over a void at ${pad.s}`)
 })

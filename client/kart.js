@@ -487,6 +487,7 @@ function buildTrack() {
   }
 
   buildFinish()
+  buildPads()
 
   // Item boxes: one model per spot, hidden while that box is on its cooldown.
   for (const box of K.boxSpots()) {
@@ -501,6 +502,47 @@ function buildTrack() {
     mesh.position.set(box.x, K.heightAt(box.s) + BOX_HALF + 0.6, box.y)
     scene.add(mesh)
     boxMeshes.push(mesh)
+  }
+}
+
+/**
+ * The boost pads: a painted band with chevrons pointing the way you are going.
+ * One texture between all of them, and one plane each. Turned to the road's
+ * heading and pitched to its gradient, or a flat panel laid on a hillside cuts
+ * into the tarmac at one end and floats off it at the other.
+ */
+function buildPads() {
+  const canvas = document.createElement('canvas')
+  canvas.width = 128
+  canvas.height = 64
+  const g = canvas.getContext('2d')
+  g.fillStyle = '#2f2a4d'
+  g.fillRect(0, 0, 128, 64)
+  g.strokeStyle = '#7ef0d8'
+  g.lineWidth = 9
+  g.lineCap = 'butt'
+  // Three chevrons pointing along +x, which the plane below lines up with the
+  // direction of travel.
+  for (const x of [14, 54, 94]) {
+    g.beginPath()
+    g.moveTo(x, 6)
+    g.lineTo(x + 26, 32)
+    g.lineTo(x, 58)
+    g.stroke()
+  }
+  const texture = new THREE.CanvasTexture(canvas)
+  const material = new THREE.MeshBasicMaterial({ map: texture })
+
+  for (const pad of K.padSpots()) {
+    // Length along the road first, width across it second: the geometry is laid
+    // flat here so the mesh's own axes match a kart's, and the same rotation
+    // order then works for both.
+    const geo = new THREE.PlaneGeometry(K.PAD_LENGTH, pad.half * 2)
+    geo.rotateX(-Math.PI / 2)
+    const mesh = new THREE.Mesh(geo, material)
+    mesh.position.set(pad.x, K.heightAt(pad.s) + 0.06, pad.y)
+    mesh.rotation.set(0, -pad.heading, Math.atan(K.slopeAt(pad.s)), 'YZX')
+    scene.add(mesh)
   }
 }
 
