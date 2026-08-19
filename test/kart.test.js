@@ -298,6 +298,22 @@ test('a bob-omb catches everything standing near it', () => {
   assert.ok(!hitFar, 'the blast reached across the circuit')
 })
 
+test('a bang leaves a ring behind it for the renderer, and then clears', () => {
+  const state = started(2, 24)
+  state.phase = 'RACE'
+  const [me] = state.karts
+  holding(me, 'bomb')
+  step(state, { 1: IN_ITEM })
+  assert.equal(state.blasts.length, 0, 'the ring came before the bang')
+  // Let the fuse burn all the way down rather than driving anyone into it.
+  for (let i = 0; i < 250 && state.hazards.length; i++) step(state, {})
+  assert.equal(state.blasts.length, 1, 'the bang left no ring')
+  assert.ok(state.blasts[0].r > 0, 'the ring has no radius to draw')
+  // It is a one-shot, not a state: a peer joining a second later sees nothing.
+  for (let i = 0; i < 60; i++) step(state, {})
+  assert.equal(state.blasts.length, 0, 'the ring never cleared')
+})
+
 test('a POW spins everyone ahead and nobody behind', () => {
   const state = started(3, 23)
   state.phase = 'RACE'

@@ -144,6 +144,7 @@ const kartMeshes = new Map()
 const boxMeshes = []
 const shellPool = []
 const hazardPool = []
+const blastPool = []
 const camPos = new THREE.Vector3()
 const camAim = new THREE.Vector3()
 
@@ -173,6 +174,11 @@ let reelIndex = 0
 // turning over is a moment, and the banner has to be told to stop showing it.
 let calledLap = -1
 let flashUntil = 0
+// A bolt landing on us: the shrink timer going up is the only signal the sim
+// sends, and it is enough — nobody shrinks twice in a frame.
+let lastShrink = 0
+let boltAt = -9
+const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)')
 
 configure({
   makeWorker: () => new Worker(new URL('./kart-sim-worker.js', import.meta.url), { type: 'module' }),
@@ -715,23 +721,28 @@ function makeKart(color) {
   )
   driver.position.set(-0.4, 2, 0)
   group.add(driver)
+  // Four wheels on four hubs. The hub carries the steering, the wheel inside it
+  // carries the roll — one rotation each, rather than one Euler doing both and
+  // the second turn landing on an axis the first one moved.
   const wheels = []
   for (const [dx, dz] of [[1.4, 1.3], [1.4, -1.3], [-1.4, 1.3], [-1.4, -1.3]]) {
+    const hub = new THREE.Group()
+    hub.position.set(dx, 0.7, dz)
     const wheel = new THREE.Mesh(
       new THREE.CylinderGeometry(0.7, 0.7, 0.6, 10),
       new THREE.MeshStandardMaterial({ color: 0x1a1d26, flatShading: true }),
     )
     wheel.rotation.x = Math.PI / 2
-    wheel.position.set(dx, 0.7, dz)
-    group.add(wheel)
-    wheels.push(wheel)
+    hub.add(wheel)
+    group.add(hub)
+    wheels.push({ hub, wheel, front: dx > 0 })
   }
 
   // Everything below is built once, hidden, and switched on by dressKart. A
   // kart under an item has to read at a glance from behind at 70 m/s, and a
   // tint on the paintwork does not survive that. parts[0] is the bodywork,
   // which is the piece an emissive goes on.
-  const parts = [body, driver, ...wheels]
+  const parts = [body, driver, ...wheels.map((w) => w.wheel)]
 
   // Bullet Bill: the kart does not carry the bullet, the kart becomes it. The
   // model is the same one the item roster shows, built at about 1.5 units and
@@ -769,10 +780,65 @@ function makeKart(color) {
     sparks.push(spark)
   }
 
+  // A star does not tint the paint, it lights the road: a ring on the tarmac
+  // that other karts drive through, pulsing at 800ms and twice as fast over the
+  // last second, which is the warning.
+  const halo = new THREE.Mesh(
+    new THREE.RingGeometry(2.6, 3.4, 28),
+    new THREE.MeshBasicMaterial({
+      color: 0xffd166,
+      transparent: true,
+      opacity: 0.6,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
+  )
+  halo.rotation.x = -Math.PI / 2
+  halo.position.y = 0.12
+  halo.visible = false
+  group.add(halo)
+
+  // The thundercloud sits over the roof and lights the top surfaces only, so a
+  // carrier is obvious from any angle — which is the whole point of a hot
+  // potato. Three lumps and a ring that closes as the eight seconds run down.
+  const cloud = new THREE.Group()
+  for (const [cx, cy, cz, r] of [[0, 0, 0, 1.5], [1.1, -0.2, 0.5, 1.1], [-1.1, -0.15, -0.4, 1.2]]) {
+    const puff = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(r, 0),
+      new THREE.MeshStandardMaterial({ color: 0x3b4256, flatShading: true, emissive: 0x000000 }),
+    )
+    puff.position.set(cx, cy, cz)
+    cloud.add(puff)
+  }
+  const fuseRing = new THREE.Mesh(
+    new THREE.RingGeometry(1.9, 2.2, 24),
+    new THREE.MeshBasicMaterial({ color: 0x9fd0ff, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }),
+  )
+  fuseRing.rotation.x = -Math.PI / 2
+  fuseRing.position.y = -1.4
+  cloud.add(fuseRing)
+  cloud.position.y = 4.6
+  cloud.visible = false
+  group.add(cloud)
+
+  // Ink on the bonnet, as well as over the victim's own camera: being inked is
+  // public, and the kart in front should be able to see that it happened.
+  const splat = new THREE.Mesh(
+    new THREE.CircleGeometry(0.85, 12),
+    new THREE.MeshBasicMaterial({ color: 0x0a0c12, transparent: true, opacity: 0.9 }),
+  )
+  splat.rotation.x = -Math.PI / 2
+  splat.position.set(1, 1.47, 0.2)
+  splat.visible = false
+  group.add(splat)
+
   // Everything the grace-period fade touches. The bullet is a group, so its own
   // pieces go in the list rather than the group.
   const fade = [...parts, ...bullet.children]
-  group.userData = { parts, bullet, flames, sparks, fade }
+  // What the last frame saw, so a spend, a boost or a turn can be animated from
+  // state alone: the sim sends no events, and it should not have to.
+  const anim = { item: null, count: 0, boost: 0, spentAt: -9, boostAt: -9, heading: null, steer: 0 }
+  group.userData = { parts, bullet, flames, sparks, fade, wheels, halo, cloud, fuseRing, splat, anim }
   return group
 }
 
@@ -782,7 +848,8 @@ function makeKart(color) {
  * with the kart and is only shown or hidden.
  */
 function dressKart(mesh, kart, t) {
-  const { parts, bullet, flames, sparks, fade } = mesh.userData
+  const { parts, bullet, flames, sparks, fade, wheels, halo, cloud, fuseRing, splat, anim } =
+    mesh.userData
   const [body] = parts
   const flying = kart.bullet > 0
   for (const part of parts) part.visible = !flying
@@ -826,13 +893,100 @@ function dressKart(mesh, kart, t) {
     part.material.opacity = fading ? 0.55 + 0.45 * Math.sin(t * 16) : 1
   }
 
-  // A kart mid-spin rolls over onto one side and comes back level. It is what
-  // tells you from a distance that the kart ahead is spinning — and therefore
-  // that you can go straight through it.
-  const rolled = kart.spin > 0 ? Math.sin((1 - kart.spin / K.SPIN_SECONDS) * Math.PI) * 0.5 : 0
+  // A star lights the road under it rather than tinting the paint. The pulse
+  // halves over the last second: that is the only warning the item ends, and it
+  // needs no HUD text.
+  halo.visible = kart.star > 0
+  if (halo.visible) {
+    const period = kart.star < 1 ? 0.4 : 0.8
+    const beat = 0.5 + 0.5 * Math.sin((t / period) * Math.PI * 2)
+    halo.scale.setScalar(0.9 + beat * 0.35)
+    halo.material.opacity = 0.25 + beat * 0.5
+  }
+
+  // Carrying the storm: the cloud drifts over the roof, flickers on the top
+  // surfaces only, and its ring closes as the seconds go.
+  cloud.visible = kart.cloud > 0
+  if (cloud.visible) {
+    cloud.position.y = 4.6 + Math.sin(t * 1.6) * 0.3
+    cloud.rotation.y = Math.sin(t * 0.7) * 0.4
+    // A strike is a flicker, not a steady lamp — brief, and irregular enough
+    // that it does not read as a running animation.
+    const strike = Math.sin(t * 21) > 0.86 ? 1 : 0
+    for (const puff of cloud.children) {
+      if (puff.material.emissive) puff.material.emissive.setHex(strike ? 0x9fd0ff : 0x000000)
+    }
+    fuseRing.scale.setScalar(Math.max(0.15, kart.cloud / 8))
+    fuseRing.material.opacity = kart.cloud < 2 ? 0.4 + 0.5 * Math.abs(Math.sin(t * 8)) : 0.8
+  }
+
+  // Inked, and everyone can see it: the splat sits on the bonnet and thins with
+  // the timer the way the screenful over the victim's own camera does.
+  splat.visible = kart.ink > 0
+  if (splat.visible) splat.material.opacity = Math.min(0.9, kart.ink / 2)
+
+  // Wheels. The roll comes off distance covered rather than an accumulator, so
+  // it is the same on every peer and survives a dropped frame — and it divides
+  // by the kart's size, which is what makes a Mega's wheels turn slowly.
+  const scale = K.kartScale(kart)
+  const roll = -kart.prog / (0.7 * scale)
+  // Steering off the turn actually being taken. There is no steer angle on the
+  // wire and there need not be: how fast the heading is moving is the same
+  // information, and it reads on a kart you do not control too.
+  if (anim.heading !== null) {
+    const want = clampTo(wrapAngle(kart.heading - anim.heading) * 9, -0.5, 0.5)
+    anim.steer += (want - anim.steer) * 0.3
+  }
+  anim.heading = kart.heading
+  // Locked mid-spin: wheels that keep steering through a spin-out make it look
+  // driven, and the point of a spin is that it is not.
+  const locked = kart.spin > 0
+  for (const { hub, wheel, front } of wheels) {
+    wheel.rotation.y = locked ? 0 : roll
+    hub.rotation.y = front && !locked ? anim.steer : 0
+  }
+
+  // Weight transfer, which is the whole of the throw and the launch: no arm, no
+  // rig, just the springs. A spend dips the nose, a boost lifts it.
+  const spending =
+    anim.item !== null &&
+    (kart.item === null || (kart.item === anim.item && (kart.itemCount ?? 1) < anim.count))
+  if (spending) anim.spentAt = t
+  if (kart.boost > anim.boost + 0.01) anim.boostAt = t
+  anim.item = kart.item ?? null
+  anim.count = kart.itemCount ?? 0
+  anim.boost = kart.boost
+  // 300ms out on the spend, 260ms of lift on the surge, both eased out.
+  const pitch =
+    -0.07 * decay(t - anim.spentAt, 0.3) + 0.07 * decay(t - anim.boostAt, 0.26)
+
+  // A kart mid-spin rolls over onto one side and comes back level, and takes a
+  // full turn with it. It is what tells you from a distance that the kart ahead
+  // is spinning — and therefore that you can go straight through it.
+  const spun = kart.spin > 0 ? 1 - kart.spin / K.SPIN_SECONDS : 0
+  const rolled = kart.spin > 0 ? Math.sin(spun * Math.PI) * 0.5 : 0
   mesh.rotation.x = rolled
+  mesh.rotation.y -= spun * Math.PI * 2
+  mesh.rotation.z += pitch
   // Mega bobs, so 1.7 times the size reads as weight rather than as a big kart.
   if (kart.mega > 0) mesh.position.y += Math.sin(t * 4) * 0.35
+}
+
+/** 1 at the moment it happened, 0 once `over` seconds have passed. Eased out. */
+function decay(since, over) {
+  if (!(since >= 0) || since > over) return 0
+  const left = 1 - since / over
+  return left * left
+}
+
+function clampTo(v, lo, hi) {
+  return v < lo ? lo : v > hi ? hi : v
+}
+
+function wrapAngle(a) {
+  while (a > Math.PI) a -= Math.PI * 2
+  while (a < -Math.PI) a += Math.PI * 2
+  return a
 }
 
 function draw() {
@@ -896,7 +1050,36 @@ function draw() {
     mesh.position.set(hazard.x, groundY(hazard.x, hazard.y) + 0.3, hazard.y)
     // A fake box spins like the real thing: that is the whole trick of it.
     if (hazard.kind === 'fake') mesh.rotation.y += 0.03
+    // A bob-omb's fuse is the design: it gives whoever finds it a decision, so
+    // it has to be visible, and it has to get faster as the decision runs out.
+    if (hazard.kind === 'bomb' && hazard.fuse > 0) {
+      const urgency = 6 + 14 * (1 - hazard.fuse / 3)
+      mesh.scale.setScalar(1 + 0.16 * Math.max(0, Math.sin(race.time * urgency)))
+    } else mesh.scale.setScalar(1)
     dress(mesh, HAZARD_KINDS, hazard.kind === 'fake' ? 'trap' : (hazard.kind ?? 'banana'))
+  })
+
+  // The bangs. Each one is a ring the sim has already applied — a bomb, a spiny
+  // shell coming home, or a POW, which gets all three of its beats because the
+  // beat is its counterplay.
+  syncPool(blastPool, race.blasts ?? [], makeBlast, (group, blast) => {
+    group.position.set(blast.x, groundY(blast.x, blast.y) + 0.5, blast.y)
+    const pow = blast.kind === 'pow'
+    group.children.forEach((ring, i) => {
+      if (i > 0 && !pow) {
+        ring.visible = false
+        return
+      }
+      // 260ms out for a blast, 450ms for the POW's slower wave, and the POW's
+      // rings are 300ms apart so they read as three and not as one thick one.
+      const phase = (blast.age - (pow ? i * 0.3 : 0)) / (pow ? 0.45 : 0.26)
+      ring.visible = phase >= 0 && phase < 1.9
+      if (!ring.visible) return
+      const out = Math.min(1, phase)
+      ring.scale.setScalar(Math.max(0.001, blast.r * (1 - (1 - out) * (1 - out))))
+      ring.material.color.setHex(pow ? 0x7dd3fc : 0xff7a45)
+      ring.material.opacity = 0.75 * Math.max(0, 1 - Math.max(0, phase - 1) / 0.9)
+    })
   })
 
   const me = race.karts.find((k) => k.id === myId) ?? race.karts[0]
@@ -973,6 +1156,26 @@ function makeVariants(keys) {
 const makeShell = () => makeVariants(SHELL_KINDS)
 const makeHazard = () => makeVariants(HAZARD_KINDS)
 
+/** Three flat rings on the tarmac, built at radius 1 and scaled to the blast. */
+function makeBlast() {
+  const group = new THREE.Group()
+  for (let i = 0; i < 3; i++) {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.88, 1, 40),
+      new THREE.MeshBasicMaterial({
+        color: 0xff7a45,
+        transparent: true,
+        opacity: 0.75,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    )
+    ring.rotation.x = -Math.PI / 2
+    group.add(ring)
+  }
+  return group
+}
+
 /** Show the one variant this body actually is. */
 function dress(group, keys, kind) {
   const want = keys.indexOf(kind)
@@ -1013,6 +1216,21 @@ function updateHud() {
   // Ink over the screen, thinning as it clears. A person can drive out of it
   // on the throttle, which is what the sim's own fade does.
   el('ink').style.opacity = me.ink > 0 ? Math.min(0.92, me.ink / 2) : 0
+
+  // Struck by Lightning. Two white frames 50ms apart, then the world is small:
+  // the flash is what says the shrink was done to you rather than by the road.
+  if (me.shrink > lastShrink + 0.01) boltAt = performance.now()
+  lastShrink = me.shrink
+  const since = performance.now() - boltAt
+  el('flash').style.opacity =
+    since < 0 || since > 260
+      ? 0
+      : REDUCED_MOTION.matches
+        ? 0.5 * (1 - since / 260)
+        : since < 50 || (since > 100 && since < 150)
+          ? 0.85
+          : 0
+
   showEffects(me)
 
   // The last lap is worth calling, and so is crossing the line: both are
@@ -1138,6 +1356,11 @@ function showEffects(me) {
   if (me.ink > 0) chips.push(['tag-neutral', `Inked ${me.ink.toFixed(1)}s`])
   // The cloud is a countdown to being shrunk: hand it on before it runs out.
   if (me.cloud > 0) chips.push(['tag-outline', `Cloud ${me.cloud.toFixed(1)}s`])
+  // A spiny shell goes for whoever is winning, and the drama of it is the wait:
+  // the leader is told it is coming, and gets the time to do something about it.
+  if (race.shells.some((sh) => sh.kind === 'blue' && sh.target === me.id)) {
+    chips.push(['tag-danger', 'Incoming'])
+  }
   const html = chips.map(([kind, text]) => `<span class="tag ${kind}">${text}</span>`).join('')
   if (html !== shownEffects) {
     shownEffects = html

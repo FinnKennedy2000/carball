@@ -89,6 +89,43 @@
           radial-gradient(26% 30% at 66% 56%, #0a0c12 0%, #0a0c12 60%, transparent 74%),
           radial-gradient(20% 24% at 52% 28%, #0a0c12 0%, #0a0c12 58%, transparent 76%);
       }
+      /* A Lightning bolt: two white frames, and everyone else is small. The
+         flash is the whole announcement, so it is over the world and the HUD
+         alike. Under reduced motion it becomes an edge tint instead — a
+         full-screen white frame is not something to hand someone unasked. */
+      #flash {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0;
+        background: #f4f6ff;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #flash {
+          background: radial-gradient(120% 80% at 50% 50%, transparent 45%, #f4f6ff 100%);
+        }
+      }
+      /* The spiny shell's warning. It has to be the one chip in the stack that
+         is not calm — the leader is meant to react, not read. */
+      .tag-danger {
+        background: #7f1d1d;
+        color: #fee2e2;
+        animation: incoming 0.5s steps(2, end) infinite;
+      }
+      @keyframes incoming {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.45;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .tag-danger {
+          animation: none;
+        }
+      }
       #speed-lines {
         position: absolute;
         inset: 0;
@@ -598,6 +635,8 @@
       <div id="speed-lines"></div>
       <!-- A Blooper's ink, over the world and under the HUD. -->
       <div id="ink"></div>
+      <!-- A Lightning bolt going off, over everything. -->
+      <div id="flash"></div>
 
       <div id="race-info" class="panel">
         <div>

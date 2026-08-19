@@ -100,6 +100,8 @@ const HAZARD_R = 1.6
 const AI_ITEM_DELAY = 1.5
 const GOLD_SECONDS = 0.9 // one of a Golden Mushroom's several short boosts
 const BLAST_R = 9 // a bomb, or a spiny shell coming home
+const POW_R = 60 // the POW's ring is a signal, not a hit test — everyone ahead is caught
+const BLAST_SHOWN = 0.7 // how long a ring is kept around for the renderer to draw
 const BOMB_FUSE = 3 // it waits, and then it goes off whether or not it was found
 const BOMB_TRIGGER = 4.5 // how near you have to be for it to go off early
 const INK_SECONDS = 5
@@ -448,6 +450,11 @@ export function createRace(racers = [], seed = 1) {
     boxes: [],
     hazards: [], // dropped bananas
     shells: [],
+    // One-shot bangs, for the renderer only: a ring the sim has already applied.
+    // They live on state rather than in an event queue so a snapshot carries
+    // them like everything else, and a peer joining mid-bang sees the tail of it
+    // rather than a replay.
+    blasts: [],
     finishers: [], // ids in the order they crossed
   }
   for (const spot of boxSpots()) state.boxes.push({ x: spot.x, y: spot.y, cooldown: 0 })
@@ -573,6 +580,8 @@ export function step(state, inputs) {
   for (const kart of state.karts) trackProgress(state, kart)
   rank(state)
   for (const box of state.boxes) if (box.cooldown > 0) box.cooldown = Math.max(0, box.cooldown - dt)
+  for (const b of state.blasts) b.age += dt
+  if (state.blasts.length) state.blasts = state.blasts.filter((b) => b.age < BLAST_SHOWN)
   return state
 }
 
@@ -886,6 +895,7 @@ function useItem(state, kart, bits) {
       other.itemCount = 0
     }
   } else if (item === 'pow') {
+    state.blasts.push({ x: kart.x, y: kart.y, r: POW_R, age: 0, kind: 'pow' })
     // A shockwave up the road: everyone in front of you loses the lap they were
     // having, and whatever they were holding with it.
     for (const other of state.karts) {
@@ -1010,6 +1020,7 @@ function hitHazards(state, kart) {
 
 /** Everything close enough to a bang, star and mega excepted. */
 function blast(state, x, y) {
+  state.blasts.push({ x, y, r: BLAST_R, age: 0, kind: 'blast' })
   for (const kart of state.karts) {
     if (Math.hypot(kart.x - x, kart.y - y) > BLAST_R) continue
     spinOut(kart)
