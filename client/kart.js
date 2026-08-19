@@ -1597,10 +1597,13 @@ function paintItem(index, reeling, count = 1) {
   const slot = el('item-slot')
   slot.classList.toggle('full', Boolean(item))
   el('item-name').textContent = item ? item.name : 'No item'
+  const aimable = item && ['green', 'red', 'blue', 'banana', 'fake', 'bomb'].includes(item.fires ?? item.key)
   el('item-hint').textContent = reeling
     ? 'rolling…'
     : item
-      ? 'space or E to fire'
+      ? aimable
+        ? 'space or E to fire · Q aims behind'
+        : 'space or E to fire'
       : 'drive through a box'
   if (index === shownItem && count === shownCount) return
   shownItem = index

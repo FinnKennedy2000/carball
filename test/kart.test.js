@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { IN_FWD, IN_ITEM, IN_LEFT, IN_RIGHT, IN_DRIFT, IN_BOOST } from '../shared/constants.js'
+import { IN_FWD, IN_ITEM, IN_LEFT, IN_RIGHT, IN_DRIFT, IN_BOOST, IN_AIM } from '../shared/constants.js'
 import {
   createRace,
   addKart,
@@ -320,6 +320,45 @@ test('a red shell chases the kart ahead and takes it out', () => {
   assert.equal(state.shells[0].target, ahead.id)
   for (let i = 0; i < 120 && ahead.spin === 0; i++) step(state, {})
   assert.ok(ahead.spin > 0, 'the shell never arrived')
+})
+
+test('holding the aim key fires out the back and lobs a peel up the road', () => {
+  const state = started(1, 17)
+  state.phase = 'RACE'
+  const me = state.karts[0]
+  const here = pointAt(0)
+  me.x = here.x
+  me.y = here.y
+  me.heading = Math.atan2(here.ty, here.tx)
+  const fx = Math.cos(me.heading)
+  const fy = Math.sin(me.heading)
+
+  me.item = ITEMS.findIndex((i) => i.key === 'green')
+  me.itemCount = 1
+  step(state, { 1: IN_ITEM | IN_AIM })
+  assert.equal(state.shells.length, 1)
+  const shell = state.shells[0]
+  assert.ok(shell.vx * fx + shell.vy * fy < 0, 'the shell went forwards')
+  assert.ok((shell.x - me.x) * fx + (shell.y - me.y) * fy < 0, 'it left from the nose')
+
+  // Fire the same item forwards and it goes the other way, so the flip is the
+  // key and not the item.
+  me.item = ITEMS.findIndex((i) => i.key === 'green')
+  me.itemCount = 1
+  me.itemDown = false
+  step(state, { 1: IN_ITEM })
+  assert.ok(state.shells[1].vx * fx + state.shells[1].vy * fy > 0)
+
+  // A lobbed peel lands ahead, and does not catch the kart that threw it while
+  // it is still arming.
+  me.item = ITEMS.findIndex((i) => i.key === 'banana')
+  me.itemCount = 1
+  me.itemDown = false
+  step(state, { 1: IN_ITEM | IN_AIM })
+  const peel = state.hazards[0]
+  assert.ok((peel.x - me.x) * fx + (peel.y - me.y) * fy > 0, 'the peel landed behind')
+  assert.ok(peel.arm > 0)
+  assert.equal(me.spin, 0, 'the throw caught the thrower')
 })
 
 test('a bolt shrinks everyone ahead, and leaves a star and the field behind alone', () => {

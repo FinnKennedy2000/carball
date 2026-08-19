@@ -82,7 +82,10 @@ export const IN_RIGHT = 8
 export const IN_BOOST = 16
 export const IN_DRIFT = 32
 export const IN_ITEM = 64
-export const IN_ALL = 127
+// Aim behind. Its own key rather than the brake: firing backwards should not
+// also mean slowing down.
+export const IN_AIM = 128
+export const IN_ALL = 255
 
 // Rumble --------------------------------------------------------------------
 // Every knob the item mode needs. Nothing here is read unless state.mode is

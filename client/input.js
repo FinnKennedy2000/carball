@@ -15,6 +15,8 @@ const KEYS = {
   // Rumble's one action. Bound in every mode: a normal match simply ignores it,
   // which is cheaper than rebinding the keyboard when the mode changes.
   KeyE: C.IN_ITEM,
+  // Aim behind: hold it and the next shot goes out the back.
+  KeyQ: C.IN_AIM,
 }
 
 let bits = 0

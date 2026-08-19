@@ -7,7 +7,7 @@
 // It shares constants.js only for the input bits and the tick rate: a kart is a
 // different vehicle from a football car and wants its own numbers.
 
-import { DT, IN_FWD, IN_BACK, IN_LEFT, IN_RIGHT, IN_BOOST, IN_DRIFT, IN_ITEM } from './constants.js'
+import { DT, IN_FWD, IN_BACK, IN_LEFT, IN_RIGHT, IN_BOOST, IN_DRIFT, IN_ITEM, IN_AIM } from './constants.js'
 
 // Track ---------------------------------------------------------------------
 // The circuit is a closed curve through a table of nodes, sampled into a
@@ -141,6 +141,7 @@ const HAZARD_R = 1.6
 const AI_ITEM_DELAY = 1.5
 const GOLD_SECONDS = 0.9 // one of a Golden Mushroom's several short boosts
 const BLAST_R = 9 // a bomb, or a spiny shell coming home
+const HAZARD_ARM = 0.8 // how long a lobbed peel ignores the kart that threw it
 const POW_R = 60 // the POW's ring is a signal, not a hit test — everyone ahead is caught
 const BLAST_SHOWN = 0.7 // how long a ring is kept around for the renderer to draw
 const BOMB_FUSE = 3 // it waits, and then it goes off whether or not it was found
@@ -1049,8 +1050,12 @@ function useItem(state, kart, bits) {
   kart.itemCount = (kart.itemCount || 1) - 1
   if (kart.itemCount <= 0) kart.item = null
   const item = held.fires ?? held.key
-  const fx = Math.cos(kart.heading)
-  const fy = Math.sin(kart.heading)
+  // Hold Q as you fire and the throw turns round: shells go out the back, and a
+  // peel or a bomb is lobbed up the road instead of dropped behind. Its own key,
+  // not the brake — aiming behind you should not cost you speed.
+  const aim = (bits & IN_AIM) !== 0 ? -1 : 1
+  const fx = Math.cos(kart.heading) * aim
+  const fy = Math.sin(kart.heading) * aim
   // A shell leaves at its own speed plus whatever the kart was already doing.
   // Flat SHELL_SPEED is slower than a boosting kart, which then drives into the
   // shell it just fired the moment its own immunity lapses — fire while your
@@ -1073,6 +1078,10 @@ function useItem(state, kart, bits) {
       owner: kart.id,
       kind: item,
       fuse: item === 'bomb' ? BOMB_FUSE : 0,
+      // A lob lands up the road, which is road you are about to drive over: a
+      // peel needs a moment before it will catch the kart that threw it. A bomb
+      // does not get one — lob a live bomb ahead of yourself and that is on you.
+      arm: aim < 0 && item !== 'bomb' ? HAZARD_ARM : 0,
     })
   } else if (item === 'green' || item === 'red' || item === 'blue') {
     state.shells.push({
@@ -1197,6 +1206,7 @@ function stepShells(state, dt) {
 /** A bob-omb waits on its fuse, and then goes off wherever it is lying. */
 function stepBombs(state, dt) {
   for (const hazard of state.hazards) {
+    if (hazard.arm > 0) hazard.arm -= dt
     if (hazard.kind !== 'bomb' || hazard.dead) continue
     hazard.fuse -= dt
     if (hazard.fuse > 0) continue
@@ -1214,6 +1224,7 @@ function hitHazards(state, kart) {
     // has had a moment to arm. Without that it goes off in the hand that set
     // it: it is dropped a kart's length behind, which is inside its own reach.
     if (hazard.kind === 'bomb' && hazard.fuse > BOMB_FUSE - 0.6) continue
+    if (hazard.arm > 0 && hazard.owner === kart.id) continue
     const reach = hazard.kind === 'bomb' ? BOMB_TRIGGER : statsOf(kart).radius + HAZARD_R
     if (Math.hypot(hazard.x - kart.x, hazard.y - kart.y) > reach) continue
     hazard.dead = true
