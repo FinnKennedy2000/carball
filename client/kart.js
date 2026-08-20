@@ -16,6 +16,7 @@ import { CHASSIS, buildChassis, statList, STAT_LABELS } from './kart-chassis.js'
 import { cleanCode } from '../shared/protocol.js'
 import { startInput, currentBits, isTyping } from './input.js'
 import { resyncPrediction, withPrediction } from './kart-predict.js'
+import { foldCapped } from './kart-ribbon.js'
 import {
   configure,
   createRoom,
@@ -193,6 +194,10 @@ globalThis.kartTuning = {
 // Set when the map changes: the camera eases after the kart, and easing it
 // across two circuits is a second of flying over scenery nobody is racing on.
 let snapCam = false
+// How far above the ground the camera is kept, whatever else it wants to do.
+// Enough to clear the barrier it may be sitting behind rather than only the
+// tarmac itself.
+const CAM_CLEAR = 3
 const shellPool = []
 const hazardPool = []
 const blastPool = []
@@ -1036,8 +1041,10 @@ function groundY(x, z) {
 }
 
 /** Node `i` of the centre line, pushed sideways onto its own normal. */
-function offsetPoint(i, offset) {
+function offsetPoint(i, rawOffset) {
   const pts = K.TRACK.pts
+  // Held short of folding back over the road — see kart-ribbon.js.
+  const offset = foldCapped(i, rawOffset)
   const a = pts[i]
   const b = pts[(i + 1) % pts.length]
   const len = Math.hypot(b.x - a.x, b.y - a.y) || 1
@@ -1481,6 +1488,15 @@ function draw() {
     // kart is off the front of the screen for the whole item.
     camera.position.lerp(camPos, snapCam ? 1 : Math.min(0.6, 0.12 + rush * 0.3))
     snapCam = false
+    // Riding the road at the kart's height is not enough on its own. The camera
+    // sits twenty-odd metres back, where the road may be higher than it is under
+    // the kart — a crest, or a corner the nose is pointed across — and it is
+    // eased rather than pinned, so on a climb it is left behind, and behind on a
+    // climb is underneath. Whatever the easing arrives at, it does not go below
+    // the ground it is actually over: from under the tarmac you can see nothing
+    // at all, which is worse than any amount of camera stiffness.
+    const camFloor = groundY(camera.position.x, camera.position.z) + CAM_CLEAR
+    if (camera.position.y < camFloor) camera.position.y = camFloor
     const aimX = me.x + fx * 16
     const aimZ = me.y + fy * 16
     camAim.set(aimX, groundY(aimX, aimZ) + 2.5, aimZ)
