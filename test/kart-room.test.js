@@ -46,6 +46,28 @@ test('a joiner races the chassis it said it was driving', (t) => {
   assert.ok(grid.filter((k) => k.ai).every((k) => k.chassis))
 })
 
+test('the snapshot says which of a peer\'s inputs it already includes', (t) => {
+  const { host, last } = room(t)
+  host.onPeerMessage({ t: 'hello', cid: 'peer-1', name: 'joiner', chassis: 'van' })
+  host.begin()
+  advance(t, 0.2)
+
+  // Nothing sent yet, so there is nothing to have applied.
+  const id = last('roster').payload.players.find((p) => p.name === 'joiner').id
+  assert.equal(last('snap').payload.s.acks[id], -1)
+
+  host.onPeerMessage({ t: 'input', cid: 'peer-1', seq: 0, bits: IN_FWD })
+  host.onPeerMessage({ t: 'input', cid: 'peer-1', seq: 1, bits: 0 })
+  advance(t, 0.2)
+  assert.equal(last('snap').payload.s.acks[id], 1, 'the ack did not follow the input')
+
+  // A redelivery is not news: Realtime repeats on reconnect, and taking an old
+  // seq would put a keypress the peer has already moved past back on the kart.
+  host.onPeerMessage({ t: 'input', cid: 'peer-1', seq: 0, bits: IN_FWD })
+  advance(t, 0.2)
+  assert.equal(last('snap').payload.s.acks[id], 1, 'an old input was applied again')
+})
+
 test('a peer is seated once, however often it says hello', (t) => {
   const { host, sent, last } = room(t)
   host.onPeerMessage({ t: 'hello', cid: 'peer-1', name: 'joiner' })

@@ -46,7 +46,11 @@ export function startKartHost({ send, live = () => {}, hostName, hostChassis }) 
   const host = seat(HOST_CID, hostName, hostChassis)
 
   function seat(cid, name, chassis) {
-    const player = { id: nextId++, cid, name, chassis, bits: 0 }
+    // `seq` is the last input of theirs this sim has actually applied. It goes
+    // back out in the snapshot so a peer predicting its own kart knows which of
+    // its keypresses are already baked into the state it is predicting from,
+    // and replays only the ones that are not.
+    const player = { id: nextId++, cid, name, chassis, bits: 0, seq: -1 }
     players.set(cid, player)
     // Only before the lights: a race in progress is not somewhere to drop a new
     // kart, so a late arrival waits in the room and starts the next one.
@@ -86,7 +90,12 @@ export function startKartHost({ send, live = () => {}, hostName, hostChassis }) 
 
     if (msg.t === 'input') {
       const player = players.get(msg.cid)
-      if (player) player.bits = msg.bits
+      // Realtime delivers in order over one connection, so a lower seq than the
+      // one already applied is a redelivery rather than news.
+      if (player && msg.seq > player.seq) {
+        player.bits = msg.bits
+        player.seq = msg.seq
+      }
       return
     }
 
@@ -159,7 +168,13 @@ export function startKartHost({ send, live = () => {}, hostName, hostChassis }) 
    * moves, so only its cooldown travels. Everything else goes as it is.
    */
   function snapshot() {
-    return { ...state, boxes: state.boxes.map((b) => b.cooldown) }
+    // Which input each kart's state includes, by the seq the peer sent with it.
+    // Cheap enough to be free — a handful of integers on a payload measured in
+    // kilobytes — and it is what makes a peer's own-kart prediction exact
+    // rather than approximate.
+    const acks = {}
+    for (const p of players.values()) acks[p.id] = p.seq
+    return { ...state, boxes: state.boxes.map((b) => b.cooldown), acks }
   }
 
   lastTickAt = Date.now()

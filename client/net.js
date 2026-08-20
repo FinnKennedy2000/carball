@@ -21,7 +21,22 @@ import { supabase, enabled as supabaseEnabled } from './auth.js'
 // millisecond of input lag, so it sits just far enough clear of that floor to
 // absorb ordinary jitter: raise it if Realtime is stuttering, lower it and the
 // view starts running off the end of the buffer.
-const INTERP_DELAY_MS = 120
+let INTERP_DELAY_MS = 120
+
+/**
+ * How far in the past the view runs, in milliseconds. Tunable at runtime because
+ * the right number is a thing you feel in a real room rather than derive: 1/12s
+ * is 83ms, so this is the floor plus whatever jitter slack the connection needs.
+ * Also lets the host take the same delay as everyone else — it normally renders
+ * its own sim with none, which is why a room feels different depending on whose
+ * tab it is.
+ */
+export function viewDelay(ms, alsoHost) {
+  if (typeof ms === 'number') INTERP_DELAY_MS = Math.max(0, ms)
+  if (typeof alsoHost === 'boolean') delayHostToo = alsoHost
+  return { delayMs: INTERP_DELAY_MS, delayHostToo }
+}
+let delayHostToo = false
 const BUFFER_MAX = 24
 // Generous, because giving up early is worse than waiting: the host may already
 // have seated us by the time we stop listening. Measured round trips to a room
@@ -29,6 +44,8 @@ const BUFFER_MAX = 24
 const JOIN_TIMEOUT_MS = 10000
 
 const buffer = [] // [{ recvAt, s }], oldest first
+// Only used when the host has asked to be held back to a peer's view.
+const hostRing = []
 // The host's own sim, handed over every tick by the worker. Present rather than
 // interpolated, so the host plays with no buffer delay at all.
 let liveState = null
@@ -156,6 +173,10 @@ async function open(code) {
   return new Promise((resolve, reject) => {
     channel.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
+        // Input is sent only when the keys change, so after a reconnect the host
+        // may be sitting on bits from before the drop with nothing to correct
+        // them. Forgetting what we last sent makes the next look resend it.
+        lastBits = -1
         channel.track({ cid })
         resolve()
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
@@ -245,6 +266,7 @@ export async function close() {
   const leaving = channel
   channel = null
   buffer.length = 0
+  hostRing.length = 0
   liveState = null
   if (!leaving) return
 
@@ -262,8 +284,17 @@ addEventListener('pagehide', () => void close())
 
 /** Interpolated view of the world, or null until two snapshots have arrived. */
 export function sampleState() {
-  // The host is the authority and its sim is right here, a tick old at most.
-  if (liveState) return liveState
+  // The host is the authority and its sim is right here, a tick old at most —
+  // unless it has asked to be held back to what a peer sees, which is the only
+  // honest way to judge whether a peer's delay is actually playable.
+  if (liveState && !delayHostToo) return liveState
+  if (liveState) {
+    hostRing.push({ recvAt: performance.now(), s: liveState })
+    while (hostRing.length > BUFFER_MAX) hostRing.shift()
+    const at = performance.now() - INTERP_DELAY_MS
+    for (let i = hostRing.length - 1; i >= 0; i--) if (hostRing[i].recvAt <= at) return hostRing[i].s
+    return hostRing[0].s
+  }
   if (buffer.length === 0) return null
   const renderAt = performance.now() - INTERP_DELAY_MS
 
