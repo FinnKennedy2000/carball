@@ -651,6 +651,11 @@ export function createRace(racers = [], seed = 1, track = DEFAULT_TRACK) {
     // message of its own.
     track: setTrack(track),
     phase: 'WAITING',
+    // Stopped by somebody, and by name so the screen can say who. Anyone in the
+    // room may call it: this is a game played with people you know, and the
+    // alternative is five players waiting on whoever happens to be hosting.
+    paused: false,
+    pausedBy: null,
     timer: 0,
     laps: LAPS,
     karts: [],
@@ -756,6 +761,10 @@ export function begin(state) {
 /** Advance one tick. `inputs` maps kart id -> input bitmask. */
 export function step(state, inputs) {
   const dt = DT
+  // Nothing at all, not even the tick: a paused race is the same race when it
+  // starts again, and the clock is part of the race. The host keeps sending
+  // snapshots while it is stopped, which is how the room learns it is stopped.
+  if (state.paused) return state
   state.tick++
 
   if (state.phase === 'OVER' || state.phase === 'WAITING') return state

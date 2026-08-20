@@ -25,6 +25,7 @@ import {
   sampleState,
   newestSnapshot,
   viewDelay,
+  setPaused,
   handlers,
   enabled as netEnabled,
 } from './net.js'
@@ -320,6 +321,24 @@ function wireGate() {
     else if (e.key === 'Escape') hidePick()
     else return
     e.preventDefault()
+  })
+
+  // Solo has no host to ask, so it stops its own race; in a room the request goes
+  // to whoever owns the simulation and comes back to everyone in the snapshot.
+  const togglePause = () => {
+    if (!race || race.phase === 'OVER' || race.phase === 'WAITING') return
+    if (solo) {
+      race.paused = !race.paused
+      race.pausedBy = race.paused ? 'you' : null
+    } else {
+      setPaused(!race.paused, saveName())
+    }
+  }
+  el('pause').addEventListener('click', togglePause)
+  addEventListener('keydown', (e) => {
+    if (e.code !== 'KeyP' || isTyping() || el('hud').hidden) return
+    e.preventDefault()
+    togglePause()
   })
 
   el('start').addEventListener('click', () => beginMatch(pickedMap()))
@@ -711,8 +730,11 @@ function frame(now) {
   const dt = 1 / 60
   accumulator += Math.min(0.25, (now - lastFrame) / 1000)
   lastFrame = now
+  // Time spent stopped is not time the race owes anybody. Left to fill up, the
+  // frame after a pause has a backlog to work through and the karts lurch.
+  if (race?.paused) accumulator = 0
 
-  if (solo && race) {
+  if (solo && race && !race.paused) {
     let steps = 0
     while (accumulator >= dt && steps < MAX_CATCHUP) {
       K.step(race, { [myId]: currentBits() })
@@ -726,7 +748,7 @@ function frame(now) {
     race = sampleState() ?? race
     // ...except our own kart, which we can work out sooner than the host can
     // tell us. The host itself is already looking at its own live sim.
-    if (predicting && !isHost && race) {
+    if (predicting && !isHost && race && !race.paused) {
       const snap = newestSnapshot()
       // Not across a change of map: the sim reads the loaded track, so a
       // snapshot from the next one has to wait for buildWorld below.
@@ -1633,7 +1655,13 @@ function updateHud() {
   const banner = el('banner')
   const sub = el('banner-sub')
   let sublabel = ''
-  if (race.phase === 'COUNT') {
+  if (race.paused) {
+    // Ahead of anything else the banner might say: none of it is true while the
+    // race is stopped.
+    banner.textContent = 'PAUSED'
+    banner.hidden = false
+    sublabel = race.pausedBy ? `stopped by ${race.pausedBy} · P to carry on` : 'P to carry on'
+  } else if (race.phase === 'COUNT') {
     const n = Math.ceil(race.timer)
     banner.textContent = n > 0 ? String(n) : 'GO'
     banner.hidden = false
@@ -1658,6 +1686,12 @@ function updateHud() {
   } else {
     banner.hidden = true
   }
+  // Which way the button goes, and whether there is anything to stop: before the
+  // lights and after the flag there is not.
+  const stoppable = race.phase !== 'OVER' && race.phase !== 'WAITING'
+  el('pause').hidden = !stoppable
+  el('pause').textContent = race.paused ? 'Resume' : 'Pause'
+
   // The card covers the screen at the flag; nothing belongs under it.
   if (race.phase === 'OVER') {
     banner.hidden = true

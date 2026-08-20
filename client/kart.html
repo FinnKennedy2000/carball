@@ -322,7 +322,16 @@
         font-variant-numeric: tabular-nums;
       }
 
-      #controls-line {
+      /* Top right, clear of the speed panel: reachable with a mouse without
+       covering the road, and out from under the banner. */
+    #pause {
+      position: absolute;
+      top: 18px;
+      right: 18px;
+      z-index: 3;
+    }
+
+    #controls-line {
         position: absolute;
         bottom: var(--space-6);
         left: var(--space-6);
@@ -1271,7 +1280,8 @@
 
       <div id="banner" hidden>3</div>
       <div id="banner-sub" hidden></div>
-      <div id="controls-line">WASD steer · shift drift · space or E to use item · Q aims it behind</div>
+      <button id="pause" class="btn btn-ghost">Pause</button>
+      <div id="controls-line">WASD steer · shift drift · space or E to use item · Q aims it behind · P pauses</div>
     </div>
 
     <div id="room-strip" class="panel" hidden>

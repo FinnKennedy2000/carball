@@ -26,6 +26,9 @@ onmessage = ({ data }) => {
     case 'localBits':
       host?.setLocalBits(data.bits)
       break
+    case 'pause':
+      host?.setPaused(data.on, data.by)
+      break
     case 'dropPeer':
       host?.dropPeer(data.cid)
       break

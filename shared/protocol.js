@@ -42,6 +42,10 @@ export function parse(msg) {
       if (!Number.isInteger(msg.bits) || msg.bits < 0 || msg.bits > IN_ALL) return null
       return { t: 'input', cid, seq: msg.seq, bits: msg.bits }
     }
+    case 'pause':
+      // A flag, not a toggle: two peers pressing at once should agree on where
+      // it ends up rather than cancelling each other out.
+      return { t: 'pause', cid, on: msg.on === true }
     case 'bye':
       return { t: 'bye', cid }
     default:

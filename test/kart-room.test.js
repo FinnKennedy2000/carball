@@ -90,6 +90,48 @@ test('rubbish off the channel is ignored rather than seated', (t) => {
   assert.equal(sent.filter((m) => m.event === 'welcome').length, 0)
 })
 
+test('anyone in the room can stop the race, and it stops for everybody', (t) => {
+  const { host, last } = room(t)
+  host.onPeerMessage({ t: 'hello', cid: 'peer-1', name: 'joiner', chassis: 'van' })
+  host.begin()
+  advance(t, 4) // through the lights and into the race
+  // An AI kart, because it drives itself: the two people in this room are not
+  // holding anything down and would sit on the grid all day.
+  const moved = () => {
+    const karts = last('snap').payload.s.karts
+    return karts[karts.length - 1].prog
+  }
+
+  const before = moved()
+  advance(t, 0.5)
+  assert.ok(moved() > before, 'the race was not running to begin with')
+
+  // A peer asks — not the host — and the whole room stops.
+  host.onPeerMessage({ t: 'pause', cid: 'peer-1', on: true })
+  advance(t, 0.2)
+  const held = moved()
+  assert.equal(last('snap').payload.s.paused, true)
+  assert.equal(last('snap').payload.s.pausedBy, 'joiner', 'the room is not told who stopped it')
+
+  // Nothing moves, and the clock does not run on either.
+  const clock = last('snap').payload.s.time
+  advance(t, 2)
+  assert.equal(moved(), held, 'a kart moved while the race was stopped')
+  assert.equal(last('snap').payload.s.time, clock, 'the clock ran while the race was stopped')
+  // Still talking to the room, which is how a peer learns it is stopped at all.
+  assert.ok(last('snap'), 'the host went quiet while paused')
+
+  // And it starts again for everyone, without the stopped seconds arriving as
+  // one enormous frame.
+  host.onPeerMessage({ t: 'pause', cid: 'peer-1', on: false })
+  advance(t, 0.5)
+  assert.equal(last('snap').payload.s.paused, false)
+  assert.equal(last('snap').payload.s.pausedBy, null)
+  const after = moved()
+  assert.ok(after > held, 'the race did not start again')
+  assert.ok(after - held < 60, `came back with a ${(after - held).toFixed(0)}m jump`)
+})
+
 test('the field is filled with AI, and the result is the finishing order', (t) => {
   const { host, sent, last } = room(t)
   host.onPeerMessage({ t: 'hello', cid: 'peer-1', name: 'joiner' })

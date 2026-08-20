@@ -214,6 +214,16 @@ export function beginMatch(track) {
   host?.postMessage({ type: 'begin', track })
 }
 
+/**
+ * Stop the race for everyone, or start it again. The host owns the simulation so
+ * it is the one that decides, but anyone may ask: a peer puts it on the channel
+ * and the host applies it, which is the same path an input already takes.
+ */
+export function setPaused(on, name) {
+  if (host) host.postMessage({ type: 'pause', on, by: name })
+  else send('peer', { t: 'pause', cid, on })
+}
+
 /** Send the pressed keys if they have changed since the last time we looked. */
 function flushInput() {
   const bits = currentBits()

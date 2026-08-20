@@ -104,6 +104,12 @@ export function startKartHost({ send, live = () => {}, hostName, hostChassis }) 
       return
     }
 
+    if (msg.t === 'pause') {
+      const player = players.get(msg.cid)
+      if (player) pause(msg.on, player.name)
+      return
+    }
+
     if (msg.t === 'bye') drop(msg.cid)
   }
 
@@ -115,6 +121,20 @@ export function startKartHost({ send, live = () => {}, hostName, hostChassis }) 
     // in a race nobody is driving it in.
     removeKart(state, player.id)
     broadcastRoster()
+  }
+
+  /**
+   * Stop the race, or start it again. Anyone in the room may ask, so this is the
+   * one place it happens — and the name comes with it, because a race that has
+   * stopped for no visible reason reads as the room having broken.
+   */
+  function pause(on, byName) {
+    state.paused = Boolean(on)
+    state.pausedBy = state.paused ? byName : null
+    // The clock the tick loop catches up from. Left alone, coming back off a
+    // pause hands step() the whole stopped duration as one enormous frame.
+    lastTickAt = Date.now()
+    accumulator = 0
   }
 
   /** A fresh race with everyone in the room, the field filled out with AI. */
@@ -195,6 +215,8 @@ export function startKartHost({ send, live = () => {}, hostName, hostChassis }) 
      * map the host asked for, or nothing for a random one.
      */
     begin: beginRace,
+    /** Stop the race for the whole room, or start it again. */
+    setPaused: pause,
     setLocalBits: (bits) => {
       host.bits = bits
     },
