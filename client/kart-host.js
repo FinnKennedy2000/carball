@@ -28,9 +28,9 @@ function randomSeed() {
  * race in a room is on a road picked at random, and the choice rides in the
  * snapshot so the peers draw the one their host is simulating.
  */
-function freshRace() {
+function freshRace(avoid = null) {
   const seed = randomSeed()
-  return createRace([], seed, trackFor(seed))
+  return createRace([], seed, trackFor(seed, avoid))
 }
 
 export function startKartHost({ send, live = () => {}, hostName, hostChassis }) {
@@ -105,7 +105,7 @@ export function startKartHost({ send, live = () => {}, hostName, hostChassis }) 
 
   /** A fresh race with everyone in the room, the field filled out with AI. */
   function beginRace() {
-    state = freshRace()
+    state = freshRace(state.track)
     for (const p of players.values()) addKart(state, { id: p.id, name: p.name, chassis: p.chassis })
     for (let i = 0; state.karts.length < GRID && i < AI_NAMES.length; i++) {
       addKart(state, { id: AI_ID_BASE + i, name: AI_NAMES[i], ai: true })

@@ -286,9 +286,17 @@ export function activeTrack() {
   return ACTIVE
 }
 
-/** A map off a seed, so the same seed always deals the same road. */
-export function trackFor(seed) {
-  return TRACK_KEYS[(seed >>> 0) % TRACK_KEYS.length]
+/**
+ * A map off a seed, so the same seed always deals the same road. Pass the map
+ * just raced as `avoid` and it steps to the next one along instead: going again
+ * on the road you have only this second finished reads as the button not having
+ * worked, and a one-in-four chance of that is often enough to notice.
+ */
+export function trackFor(seed, avoid = null) {
+  const i = (seed >>> 0) % TRACK_KEYS.length
+  const key = TRACK_KEYS[i]
+  if (key !== avoid) return key
+  return TRACK_KEYS[(i + 1) % TRACK_KEYS.length]
 }
 
 /**

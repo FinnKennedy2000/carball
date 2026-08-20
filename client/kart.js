@@ -584,7 +584,7 @@ function startSolo() {
   const racers = [{ id: SOLO_ID, name, ai: false, chassis: myChassis }]
   AI_NAMES.forEach((n, i) => racers.push({ id: i + 2, name: n, ai: true }))
   const seed = (Math.random() * 2 ** 32) >>> 0
-  race = K.createRace(racers, seed, K.trackFor(seed))
+  race = K.createRace(racers, seed, K.trackFor(seed, race?.track ?? null))
   K.begin(race)
   clearKarts()
   accumulator = 0

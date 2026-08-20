@@ -1248,6 +1248,16 @@ test('a race is dealt a map off its seed, and an AI field gets round all of them
     // Same seed, same map: a replay has to land on the same road.
     assert.equal(trackFor(12345), trackFor(12345))
 
+    // Going again never hands you back the road you just finished on, whatever
+    // the seed deals — and it still lands on a real map.
+    for (const key of TRACK_KEYS) {
+      for (let seed = 0; seed < TRACK_KEYS.length * 4; seed++) {
+        const next = trackFor(seed, key)
+        assert.notEqual(next, key, `going again on ${key} dealt ${key} back`)
+        assert.ok(TRACK_KEYS.includes(next), `going again on ${key} dealt ${next}`)
+      }
+    }
+
     for (const key of TRACK_KEYS) {
       const state = createRace(
         field().map((r) => ({ ...r, ai: true })),
