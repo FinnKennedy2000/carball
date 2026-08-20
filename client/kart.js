@@ -1306,8 +1306,11 @@ function draw() {
     } else {
       // A bullet flies rather than drives, so it is lifted clear of the tarmac,
       // and so does anything that has just left a jump — over one of those the
-      // road is not there to be lifted off, and airRise is the whole arc.
-      const lift = kart.air > 0 ? K.airRise(kart.air) : kart.bullet > 0 ? 1.4 : 0
+      // road is not there to be lifted off, and airRise is the whole arc. A kart
+      // over the edge goes the other way: it sinks below the road it left until
+      // it either finds tarmac again or is far enough down to be fished out.
+      const lift =
+        kart.air > 0 ? K.airRise(kart.air) : kart.fell > 0 ? -K.fallDrop(kart.fell) : kart.bullet > 0 ? 1.4 : 0
       mesh.position.set(kart.x, K.heightAt(kart.s) + lift, kart.y)
       // Nose up the climb and down the drop. 'YZX' so the pitch is taken about
       // the kart's own lateral axis, after it has been turned to its heading.

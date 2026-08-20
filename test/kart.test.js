@@ -22,6 +22,8 @@ import {
   jumpAt,
   JUMP_AIRTIME,
   RESPAWN_SECONDS,
+  FALL_GRACE,
+  fallDrop,
   ITEMS,
   TRACK,
   LAPS,
@@ -237,6 +239,53 @@ test('the road stops at a jump: quick enough clears it, slow enough falls in', (
   assert.ok(short.fell, 'a crawl carried it over a 40m gap')
   // Put back on the road before the lip, not on the nothing it fell into.
   assert.equal(jumpAt(short.kart.recoverAt), null)
+})
+
+test('going over the edge is a fall you can drive out of, if you carry the speed', () => {
+  // A void that bites into a corner is only a shortcut if leaving the tarmac is
+  // survivable. It is, for FALL_GRACE metres of drop: the kart keeps the speed it
+  // went off with, and road found again inside that is road it lands on.
+  const off = (angle, speed) => {
+    const state = started(1, 3)
+    run(state, 200)
+    const kart = state.karts[0]
+    const s = TRACK.length * ((VOIDS[0][0] + VOIDS[0][1]) / 2)
+    const p = pointAt(s)
+    // Just past the tarmac, which is where the falling starts.
+    const out = halfWidthAt(s) + 1.5
+    kart.x = p.x + p.nx * out
+    kart.y = p.y + p.ny * out
+    kart.s = s
+    kart.prog = s
+    kart.heading = Math.atan2(p.ty, p.tx) + angle
+    kart.vx = Math.cos(kart.heading) * speed
+    kart.vy = Math.sin(kart.heading) * speed
+    let deepest = 0
+    for (let i = 0; i < 300; i++) {
+      step(state, { 1: IN_FWD })
+      deepest = Math.max(deepest, fallDrop(kart.fell))
+      if (kart.respawn > 0 || (kart.fell === 0 && i > 2)) break
+    }
+    return { lost: kart.respawn > 0, deepest, kart }
+  }
+
+  // Turned back towards the road, it dips over the edge and comes back.
+  const cut = off(-0.1, 34)
+  assert.ok(!cut.lost, `a cut at speed still fell: ${cut.deepest.toFixed(1)}m down`)
+  const back = project(cut.kart.x, cut.kart.y)
+  assert.ok(Math.abs(back.lateral) <= halfWidthAt(back.s), 'it landed off the road')
+
+  // Pointed away from it, and slowly, there is nothing to land on.
+  assert.ok(off(0.35, 34).lost, 'drove off into the drop and kept racing')
+  assert.ok(off(Math.PI / 2, 6).lost, 'crawled over the edge and kept racing')
+
+  // The grace is a distance, not a licence: nothing crosses a drop meant to
+  // stop it, so the fall ends within a tick of FALL_GRACE.
+  const gone = off(Math.PI / 2, 34)
+  assert.ok(
+    gone.deepest < FALL_GRACE + 1,
+    `fell ${gone.deepest.toFixed(1)}m before resetting, grace is ${FALL_GRACE}m`,
+  )
 })
 
 test('a fall cannot happen where there is a barrier', () => {
@@ -1222,6 +1271,19 @@ test('every map is a closed circuit the sim can place a race on', () => {
       for (const spot of boxSpots()) {
         const hit = project(spot.x, spot.y)
         assert.ok(Math.abs(hit.lateral) <= halfWidthAt(hit.s), `${key}: a box is off the road`)
+        // A box in a gap stands on nothing, and one in the landing zone past a
+        // lip is flown over — a kart is off the ground from the near lip until
+        // it comes down, and takes nothing while it is up there.
+        assert.ok(!jumpAt(spot.s), `${key}: a box sits in a jump at ${spot.s.toFixed(0)}`)
+        for (const [from] of JUMPS) {
+          const lip = from * TRACK.length
+          const end = lip + 56 * JUMP_AIRTIME
+          const ahead = spot.s < lip ? spot.s + TRACK.length : spot.s
+          assert.ok(
+            ahead < lip || ahead > end,
+            `${key}: a box at ${spot.s.toFixed(0)} is in the landing off ${lip.toFixed(0)}`,
+          )
+        }
       }
       assert.equal(boxSpots().length, t.boxRows * 3)
 

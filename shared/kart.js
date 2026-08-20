@@ -30,6 +30,13 @@ export const KERB = 5 // grass past the tarmac before the wall
 export const LAPS = 3
 // A fall costs you this long sitting still, plus the metres you fell at.
 export const RESPAWN_SECONDS = 2.5
+// How far a kart may drop off the edge and still climb out of it. Going over the
+// side is not instantly fatal: it keeps the speed it left with and falls, so a
+// void that bites into a corner is a line you can take if you carry enough speed
+// to reach tarmac again. Six metres is about three quarters of a second, twenty
+// odd metres at racing speed — enough for a cut worth trying, not enough to
+// cross a drop that was meant to stop you.
+export const FALL_GRACE = 6
 // How far back up the road you are put down, so you are not dropped straight
 // back over the edge you went off.
 const RECOVER_BACK = 6
@@ -398,6 +405,11 @@ export function jumpAt(s) {
   return gap ? [gap[0] * TRACK.length, gap[1] * TRACK.length] : null
 }
 
+/** How far a kart that went over the edge has dropped, given how long it has been falling. */
+export function fallDrop(fell) {
+  return 0.5 * GRAVITY * fell * fell
+}
+
 /** How high a kart in flight sits above the road, given the air it has left. */
 export function airRise(air) {
   if (air <= 0) return 0
@@ -564,6 +576,40 @@ function rand(state) {
   return state.seed / 2 ** 32
 }
 
+// How far past a near lip a kart can still be in the air. It leaves at whatever
+// it was doing and comes down JUMP_AIRTIME later, so the quickest thing on the
+// road reaches this — and BOX_CLEAR past that before a box is worth standing up.
+const BOX_CLEAR = 4
+
+/**
+ * A row of boxes moved along to somewhere it can actually be taken. Rows are
+ * spaced evenly round the lap, so on some maps one lands in a gap — standing on
+ * nothing — or in the landing zone past it, which a kart flies straight over: it
+ * is off the ground from the near lip until it comes down, and picks nothing up
+ * in the air. Either way it is a row that is not there, so it goes to the first
+ * clear metre past the landing.
+ */
+function clearOfJumps(s) {
+  const L = TRACK.length
+  // Once per jump at most: each pass moves s to the end of the zone it landed
+  // in, and a zone is left for good once it is cleared.
+  for (let i = 0; i <= JUMPS.length; i++) {
+    let moved = false
+    for (const [from] of JUMPS) {
+      const lip = from * L
+      const end = lip + BOOST_MAX * JUMP_AIRTIME + BOX_CLEAR
+      // The zone can run past the line, so compare on the near side of it.
+      const ahead = s < lip ? s + L : s
+      if (ahead >= lip && ahead <= end) {
+        s = end % L
+        moved = true
+      }
+    }
+    if (!moved) return s
+  }
+  return s
+}
+
 /**
  * Where the item boxes stand: three abreast at BOX_ROWS points around the lap.
  * Exported because the renderer builds its meshes from the same list.
@@ -571,7 +617,7 @@ function rand(state) {
 export function boxSpots() {
   const out = []
   for (let i = 0; i < BOX_ROWS; i++) {
-    const s = (i + 0.5) * (TRACK.length / BOX_ROWS)
+    const s = clearOfJumps((i + 0.5) * (TRACK.length / BOX_ROWS))
     // Three abreast, but no wider than the road is at that point: a fixed six
     // metres puts the outer pair over the edge in the narrows.
     const lane = Math.min(6, halfWidthAt(s) - 3)
@@ -651,6 +697,9 @@ export function addKart(state, racer) {
     itemCount: 0, // uses left of it, which is 3 for a triple and 1 for the rest
     itemDown: false,
     boost: 0,
+    // Seconds it has been over the edge and dropping, 0 while it has road under
+    // it. Counts time the way `air` does, and fallDrop turns it into metres.
+    fell: 0,
     // How hard this kart is being towed right now, 0..1. Derived every tick;
     // it lives on the kart so the HUD can show it without redoing the search.
     draft: 0,
@@ -745,7 +794,7 @@ export function step(state, inputs) {
   stepShells(state, dt)
   stepBombs(state, dt)
   for (const kart of state.karts) {
-    if (kart.air > 0) continue
+    if (kart.air > 0 || kart.fell > 0) continue
     collectBox(state, kart)
     hitHazards(state, kart)
     hitPads(kart)
@@ -766,7 +815,7 @@ function stepKart(state, kart, bits, dt) {
   // below — being fished out, and flying a bullet — skip the drift block
   // entirely, so a charge left standing across one came back out the far side as
   // a free boost. One line here rather than one at each escape.
-  if (kart.respawn > 0 || kart.bullet > 0 || kart.air > 0) {
+  if (kart.respawn > 0 || kart.bullet > 0 || kart.air > 0 || kart.fell > 0) {
     kart.driftTime = 0
     kart.driftDir = 0
   }
@@ -800,6 +849,21 @@ function stepKart(state, kart, bits, dt) {
       const hit = project(kart.x, kart.y)
       if (jumpAt(hit.s) || Math.abs(hit.lateral) > halfWidthAt(hit.s)) fall(kart, hit.s)
     }
+    return
+  }
+
+  // Over the edge and dropping. It keeps the speed it went off with — there is
+  // nothing under the wheels to steer against, same as a jump — and if the road
+  // comes back under it inside FALL_GRACE metres it puts its wheels down and
+  // races on. Past that it is too far below the tarmac to climb out of.
+  if (kart.fell > 0) {
+    kart.fell += dt
+    kart.x += kart.vx * dt
+    kart.y += kart.vy * dt
+    const hit = project(kart.x, kart.y)
+    // A gap is not somewhere to land: there is no tarmac in it to land on.
+    if (Math.abs(hit.lateral) <= halfWidthAt(hit.s) && !jumpAt(hit.s)) kart.fell = 0
+    else if (fallDrop(kart.fell) > FALL_GRACE) fall(kart, hit.s)
     return
   }
 
@@ -974,7 +1038,9 @@ function confine(kart) {
     return
   }
   if (overVoid(hit.s)) {
-    if (Math.abs(hit.lateral) > half) fall(kart, hit.s)
+    // No barrier here, so past the tarmac it goes over the side — but it is not
+    // gone yet. It starts falling, and has FALL_GRACE metres to find road again.
+    if (Math.abs(hit.lateral) > half) kart.fell = DT
     return
   }
   const limit = half + KERB - statsOf(kart).radius
@@ -1072,7 +1138,7 @@ function useItem(state, kart, bits) {
   // did not, so space fired in a solo race and did nothing in a room.
   const down = (bits & (IN_ITEM | IN_BOOST)) !== 0
   const fire =
-    down && !kart.itemDown && kart.item !== null && kart.finished === null && kart.respawn === 0 && kart.air === 0
+    down && !kart.itemDown && kart.item !== null && kart.finished === null && kart.respawn === 0 && kart.air === 0 && kart.fell === 0
   kart.itemDown = down
   if (!fire) return
 
@@ -1221,7 +1287,7 @@ function stepShells(state, dt) {
       // Its own shell cannot hit it in the first moments, or firing one while
       // turning is a self-inflicted spin.
       if (kart.id === shell.owner && shell.life > SHELL_LIFE - 0.4) continue
-      if (kart.respawn > 0 || kart.air > 0) continue
+      if (kart.respawn > 0 || kart.air > 0 || kart.fell > 0) continue
       if (Math.hypot(kart.x - shell.x, kart.y - shell.y) > statsOf(kart).radius + SHELL_R) continue
       shell.life = 0
       // A spiny shell arriving is an explosion, and whoever is running with the
@@ -1284,6 +1350,7 @@ function fall(kart, s) {
   if (kart.respawn > 0 || kart.finished !== null) return
   kart.respawn = RESPAWN_SECONDS
   kart.air = 0
+  kart.fell = 0
   kart.recoverAt = s - RECOVER_BACK
   // Dropped short of a jump, the metres behind you are still the gap. Back up to
   // the near lip, or it is put down on nothing and falls again on the spot.
