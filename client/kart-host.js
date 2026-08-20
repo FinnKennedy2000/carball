@@ -9,7 +9,7 @@
 // the channel, the buffer, the input path — lives in net.js, which both use.
 
 import * as C from '../shared/constants.js'
-import { createRace, addKart, removeKart, begin, step, trackFor } from '../shared/kart.js'
+import { createRace, addKart, removeKart, begin, step, trackFor, TRACKS } from '../shared/kart.js'
 import { parse } from '../shared/protocol.js'
 
 const HOST_CID = ' host'
@@ -24,13 +24,18 @@ function randomSeed() {
 }
 
 /**
- * An empty race on one of the maps, dealt off the same seed the race is: every
- * race in a room is on a road picked at random, and the choice rides in the
- * snapshot so the peers draw the one their host is simulating.
+ * An empty race on one of the maps. Dealt off the same seed the race is unless
+ * the host has pinned one, and either way the choice rides in the snapshot so
+ * the peers draw the road their host is simulating.
+ *
+ * `avoid` is only about not dealing the same random map twice running, so it has
+ * no say once someone has chosen: a host who asks for Foundry every race gets
+ * Foundry every race. Anything unrecognised is treated as no choice at all.
  */
-function freshRace(avoid = null) {
+function freshRace(avoid = null, pinned = null) {
   const seed = randomSeed()
-  return createRace([], seed, trackFor(seed, avoid))
+  const track = TRACKS[pinned] ? pinned : trackFor(seed, avoid)
+  return createRace([], seed, track)
 }
 
 export function startKartHost({ send, live = () => {}, hostName, hostChassis }) {
@@ -113,8 +118,8 @@ export function startKartHost({ send, live = () => {}, hostName, hostChassis }) 
   }
 
   /** A fresh race with everyone in the room, the field filled out with AI. */
-  function beginRace() {
-    state = freshRace(state.track)
+  function beginRace(pinned = null) {
+    state = freshRace(state.track, pinned)
     for (const p of players.values()) addKart(state, { id: p.id, name: p.name, chassis: p.chassis })
     for (let i = 0; state.karts.length < GRID && i < AI_NAMES.length; i++) {
       addKart(state, { id: AI_ID_BASE + i, name: AI_NAMES[i], ai: true })
@@ -185,7 +190,10 @@ export function startKartHost({ send, live = () => {}, hostName, hostChassis }) 
     hostTeam: 0,
     roster,
     onPeerMessage,
-    /** Start the lights, or start the next race once one is over. */
+    /**
+     * Start the lights, or start the next race once one is over. `pinned` is the
+     * map the host asked for, or nothing for a random one.
+     */
     begin: beginRace,
     setLocalBits: (bits) => {
       host.bits = bits

@@ -204,9 +204,14 @@ function waitForWelcome() {
   })
 }
 
-/** Host only: leave the waiting phase. A peer has no host worker to tell. */
-export function beginMatch() {
-  host?.postMessage({ type: 'begin' })
+/**
+ * Host only: leave the waiting phase. A peer has no host worker to tell. `track`
+ * is the map the host picked, or nothing at all for a random one — it rides the
+ * same message rather than being stored at room creation, so it applies to every
+ * race rather than only the first.
+ */
+export function beginMatch(track) {
+  host?.postMessage({ type: 'begin', track })
 }
 
 /** Send the pressed keys if they have changed since the last time we looked. */

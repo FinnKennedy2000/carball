@@ -444,6 +444,28 @@
         text-align: right;
       }
 
+      /* The host's map choice, next to the go button. Native select: it is a
+         list of six things picked once, and a custom menu would be a widget to
+         maintain for no gain. */
+      #map-pick {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      #map {
+        font: inherit;
+        font-size: 15px;
+        color: var(--color-text);
+        padding: 10px var(--space-3);
+        border: 0;
+        border-radius: var(--radius-sm);
+        background: rgba(22, 24, 38, 0.72);
+        box-shadow: inset 0 0 0 1px var(--color-neutral-800);
+      }
+      #map:focus-visible {
+        box-shadow: inset 0 0 0 1px var(--color-accent);
+      }
+
       #waiting-list {
         list-style: none;
         margin: 0;
@@ -1269,6 +1291,10 @@
         <ol id="waiting-list"></ol>
         <p id="waiting-hint" class="hint"></p>
         <div class="row">
+          <label id="map-pick" hidden>
+            <span class="label">Map</span>
+            <select id="map"></select>
+          </label>
           <button id="start" class="btn btn-primary" hidden>Start race</button>
         </div>
       </div>

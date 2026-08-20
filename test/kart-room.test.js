@@ -5,6 +5,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { startKartHost } from '../client/kart-host.js'
 import { IN_FWD } from '../shared/constants.js'
+import { TRACK_KEYS } from '../shared/kart.js'
 
 /**
  * Wind the host's tick loop on. One small step at a time, because the mock
@@ -118,6 +119,29 @@ test('the field is filled with AI, and the result is the finishing order', (t) =
 
   // One result per race, not one a tick.
   assert.equal(sent.filter((m) => m.event === 'matchover').length, 1)
+})
+
+test('the host can pin a map, and a pinned map is raced every time', (t) => {
+  const { host, last } = room(t)
+  const track = () => last('snap').payload.s.track
+
+  // Pinned beats the rule about not dealing the same road twice running: asking
+  // for one road every race is a choice, not a repeat to be dodged.
+  for (let i = 0; i < 4; i++) {
+    host.begin('foundry')
+    advance(t, 0.2)
+    assert.equal(track(), 'foundry', `race ${i + 1} was not the pinned map`)
+  }
+
+  // Nothing pinned is the default, and still a real road.
+  host.begin()
+  advance(t, 0.2)
+  assert.ok(TRACK_KEYS.includes(track()), `dealt ${track()}`)
+
+  // A key off a stale build is no choice at all rather than a broken race.
+  host.begin('not-a-map')
+  advance(t, 0.2)
+  assert.ok(TRACK_KEYS.includes(track()), `dealt ${track()}`)
 })
 
 test('a race that is over can be put back on the grid', (t) => {

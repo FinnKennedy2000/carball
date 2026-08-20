@@ -160,6 +160,10 @@ const SOLO_ID = 1
 const MAX_CATCHUP = 5
 const STORED_NAME = 'carball.name'
 const STORED_CHASSIS = 'carball.chassis'
+const STORED_MAP = 'carball.map'
+// The host's map. RANDOM_MAP rather than a key means deal one, which is the
+// default and what every race did before there was anything to pick.
+const RANDOM_MAP = 'random'
 
 let scene
 let camera
@@ -173,6 +177,7 @@ let shownTrack = null
 let pred = null // the peer's local sim, resynced from every snapshot
 let predFrom = -1 // the snapshot tick it was last resynced from
 let predicting = true // off makes a peer render the host's word for everything
+let mapChoice = RANDOM_MAP // the host's road for the next race
 
 // Two knobs for judging feel in a real room rather than by argument: how far in
 // the past the view runs (and whether the host takes the same delay), and
@@ -297,6 +302,7 @@ function wireGate() {
   el('code').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') pickThenJoin(el('code').value)
   })
+  wireMapPick()
   el('pick-race').addEventListener('click', startPicked)
   el('pick-back').addEventListener('click', hidePick)
   // The pick screen is driven from the keyboard as much as from the mouse: the
@@ -311,13 +317,13 @@ function wireGate() {
     e.preventDefault()
   })
 
-  el('start').addEventListener('click', () => beginMatch())
+  el('start').addEventListener('click', () => beginMatch(pickedMap()))
   el('restart').addEventListener('click', () => {
     if (solo) {
       el('results').hidden = true
       startSolo()
     } else if (isHost) {
-      beginMatch()
+      beginMatch(pickedMap())
     }
   })
   el('copy').addEventListener('click', async () => {
@@ -339,6 +345,7 @@ function wireGate() {
     el('room-strip').hidden = false
     el('room-code').textContent = msg.code
     el('start').hidden = !isHost
+    el('map-pick').hidden = !isHost
     location.hash = msg.code // a refresh rejoins rather than opening a room
   }
   handlers.onRoster = (players) => {
@@ -440,6 +447,30 @@ function pickThenJoin(code) {
     return
   }
   showPick(() => enterRoom(clean))
+}
+
+/**
+ * The host's map list: Random first, then the roads. Only the host ever sees it
+ * — a joiner has no say — and the choice is remembered, so a host who always
+ * wants the same road says so once rather than every race.
+ */
+function wireMapPick() {
+  const stored = localStorage.getItem(STORED_MAP)
+  mapChoice = stored === RANDOM_MAP || K.TRACKS[stored] ? stored : RANDOM_MAP
+  const map = el('map')
+  map.innerHTML =
+    `<option value="${RANDOM_MAP}">Random</option>` +
+    K.TRACK_KEYS.map((key) => `<option value="${key}">${escapeHtml(K.TRACKS[key].name)}</option>`).join('')
+  map.value = mapChoice
+  map.addEventListener('change', () => {
+    mapChoice = map.value
+    localStorage.setItem(STORED_MAP, mapChoice)
+  })
+}
+
+/** The road the next race should be on, or nothing at all for a random one. */
+function pickedMap() {
+  return mapChoice === RANDOM_MAP ? null : mapChoice
 }
 
 /** Show the pick screen; `race` is what pressing Race finally does. */
@@ -1724,6 +1755,7 @@ function showWaitingRoom() {
   const track = K.TRACKS[race.track]
   el('waiting-track').textContent = track ? ` · ${track.name}` : ''
   el('start').hidden = !isHost
+  el('map-pick').hidden = !isHost
   el('waiting-list').innerHTML = roster
     .map((p) => `<li class="${p.id === myId ? 'me' : ''}">${dot(p.id)} ${escapeHtml(p.name)}</li>`)
     .join('')
