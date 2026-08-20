@@ -1352,10 +1352,16 @@ function fall(kart, s) {
   kart.air = 0
   kart.fell = 0
   kart.recoverAt = s - RECOVER_BACK
-  // Dropped short of a jump, the metres behind you are still the gap. Back up to
-  // the near lip, or it is put down on nothing and falls again on the spot.
-  const gap = jumpAt(kart.recoverAt)
-  if (gap) kart.recoverAt = gap[0] - RECOVER_BACK
+  // Dropped into a gap, you are put down on the far side of it. The near lip is
+  // no use: that is a standing start a few metres from a gap that wants thirty
+  // metres a second, so a kart put there goes straight back in and keeps doing
+  // it — one fall every four seconds until the flag. The far side is where the
+  // jump was going to put it anyway, and missing already costs the wait and
+  // every metre per second it had. `s` as well as the recovery point, because a
+  // crawl off the lip lands only a metre or two in and would otherwise be
+  // measured from behind the gap it just fell into.
+  const gap = jumpAt(s) ?? jumpAt(kart.recoverAt)
+  if (gap) kart.recoverAt = gap[1] + RECOVER_BACK
   kart.vx = 0
   kart.vy = 0
   kart.boost = 0

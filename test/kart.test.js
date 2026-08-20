@@ -237,8 +237,34 @@ test('the road stops at a jump: quick enough clears it, slow enough falls in', (
   const short = over(8)
   assert.ok(short.flew, 'crawling off the lip did not leave the ground')
   assert.ok(short.fell, 'a crawl carried it over a 40m gap')
-  // Put back on the road before the lip, not on the nothing it fell into.
+  // Put down on the road, and specifically on the far side of the gap. The near
+  // lip would be a standing start a few metres from a gap wanting thirty metres
+  // a second: the kart goes straight back in, and keeps going back in.
   assert.equal(jumpAt(short.kart.recoverAt), null)
+  assert.ok(short.kart.recoverAt > to, `put back at ${short.kart.recoverAt.toFixed(0)}, gap ends ${to.toFixed(0)}`)
+})
+
+test('missing a jump costs you the wait, not the rest of the race', () => {
+  // Falling into a gap used to put you six metres short of the lip you had just
+  // failed to clear, which is not enough road to get back up to the speed it
+  // takes — so the kart fell in again, and again, until the flag. Landing on the
+  // far side is the only placement that ends.
+  const state = started(6, 5)
+  run(state, 300) // the lights
+  const kart = state.karts[0]
+  const [from, to] = jumpAt(((JUMPS[0][0] + JUMPS[0][1]) / 2) * TRACK.length)
+  onLine(kart, from - 10, 8) // a crawl, which cannot clear it
+  kart.prog = from - 10
+
+  let falls = 0
+  let waiting = 0
+  for (let i = 0; i < 60 * 30 && falls < 3; i++) {
+    step(state, { 1: IN_FWD })
+    if (kart.respawn > 0 && waiting === 0) falls++
+    waiting = kart.respawn
+  }
+  assert.equal(falls, 1, `fell into the same gap ${falls} times`)
+  assert.ok(project(kart.x, kart.y).s > to, 'never got past the gap it fell into')
 })
 
 test('going over the edge is a fall you can drive out of, if you carry the speed', () => {
