@@ -9,7 +9,16 @@
 // the channel, the buffer, the input path — lives in net.js, which both use.
 
 import * as C from '../shared/constants.js'
-import { createRace, addKart, removeKart, begin, step, trackFor, TRACKS } from '../shared/kart.js'
+import {
+  createRace,
+  addKart,
+  removeKart,
+  begin,
+  step,
+  trackFor,
+  TRACKS,
+  RESUME_COUNT,
+} from '../shared/kart.js'
 import { parse } from '../shared/protocol.js'
 
 const HOST_CID = ' host'
@@ -129,8 +138,12 @@ export function startKartHost({ send, live = () => {}, hostName, hostChassis }) 
    * stopped for no visible reason reads as the room having broken.
    */
   function pause(on, byName) {
+    const was = state.paused
     state.paused = Boolean(on)
     state.pausedBy = state.paused ? byName : null
+    // Only on the way back, and only into a race that was actually running: the
+    // grid has a countdown of its own and does not need a second one.
+    if (was && !state.paused && state.phase === 'RACE') state.resumeIn = RESUME_COUNT
     // The clock the tick loop catches up from. Left alone, coming back off a
     // pause hands step() the whole stopped duration as one enormous frame.
     lastTickAt = Date.now()

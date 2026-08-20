@@ -5,7 +5,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { startKartHost } from '../client/kart-host.js'
 import { IN_FWD } from '../shared/constants.js'
-import { TRACK_KEYS } from '../shared/kart.js'
+import { TRACK_KEYS, RESUME_COUNT } from '../shared/kart.js'
 
 /**
  * Wind the host's tick loop on. One small step at a time, because the mock
@@ -121,12 +121,19 @@ test('anyone in the room can stop the race, and it stops for everybody', (t) => 
   // Still talking to the room, which is how a peer learns it is stopped at all.
   assert.ok(last('snap'), 'the host went quiet while paused')
 
-  // And it starts again for everyone, without the stopped seconds arriving as
-  // one enormous frame.
+  // Coming back counts you in rather than dropping you straight into it, and
+  // nothing moves while it counts.
   host.onPeerMessage({ t: 'pause', cid: 'peer-1', on: false })
   advance(t, 0.5)
   assert.equal(last('snap').payload.s.paused, false)
   assert.equal(last('snap').payload.s.pausedBy, null)
+  assert.ok(last('snap').payload.s.resumeIn > 0, 'came back with no countdown')
+  assert.equal(moved(), held, 'a kart moved during the countdown back in')
+
+  // And then it actually goes again, without the stopped seconds arriving as one
+  // enormous frame.
+  advance(t, RESUME_COUNT + 0.5)
+  assert.equal(last('snap').payload.s.resumeIn, 0)
   const after = moved()
   assert.ok(after > held, 'the race did not start again')
   assert.ok(after - held < 60, `came back with a ${(after - held).toFixed(0)}m jump`)

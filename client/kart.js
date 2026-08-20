@@ -330,6 +330,7 @@ function wireGate() {
     if (solo) {
       race.paused = !race.paused
       race.pausedBy = race.paused ? 'you' : null
+      if (!race.paused && race.phase === 'RACE') race.resumeIn = K.RESUME_COUNT
     } else {
       setPaused(!race.paused, saveName())
     }
@@ -1661,6 +1662,11 @@ function updateHud() {
     banner.textContent = 'PAUSED'
     banner.hidden = false
     sublabel = race.pausedBy ? `stopped by ${race.pausedBy} · P to carry on` : 'P to carry on'
+  } else if (race.resumeIn > 0) {
+    // Same big number as the grid countdown, because it means the same thing.
+    banner.textContent = String(Math.ceil(race.resumeIn))
+    banner.hidden = false
+    sublabel = 'hands back on the keys'
   } else if (race.phase === 'COUNT') {
     const n = Math.ceil(race.timer)
     banner.textContent = n > 0 ? String(n) : 'GO'
@@ -1688,7 +1694,7 @@ function updateHud() {
   }
   // Which way the button goes, and whether there is anything to stop: before the
   // lights and after the flag there is not.
-  const stoppable = race.phase !== 'OVER' && race.phase !== 'WAITING'
+  const stoppable = race.phase !== 'OVER' && race.phase !== 'WAITING' && race.resumeIn === 0
   el('pause').hidden = !stoppable
   el('pause').textContent = race.paused ? 'Resume' : 'Pause'
 

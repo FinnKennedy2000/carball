@@ -127,6 +127,11 @@ const DRIFT_HOLD = 0.55 // no steering: the line it holds on its own
 const DRIFT_OPEN = 0.15 // steering out of it
 
 const COUNTDOWN = 3
+// Coming back from a pause. Shorter than the grid countdown — everyone is
+// already up to speed and pointed the right way, they just need a moment to get
+// their hands back on the keys — but not nothing, or the race restarts while
+// somebody is still reaching for them.
+export const RESUME_COUNT = 2
 const FINISH_GRACE = 45 // seconds the race runs on after the winner is home
 
 // Items ---------------------------------------------------------------------
@@ -656,6 +661,9 @@ export function createRace(racers = [], seed = 1, track = DEFAULT_TRACK) {
     // alternative is five players waiting on whoever happens to be hosting.
     paused: false,
     pausedBy: null,
+    // Counting back in after a pause. The race is as frozen as it was while it
+    // was stopped; this is the moment everyone gets to put their hands back.
+    resumeIn: 0,
     timer: 0,
     laps: LAPS,
     karts: [],
@@ -765,6 +773,12 @@ export function step(state, inputs) {
   // starts again, and the clock is part of the race. The host keeps sending
   // snapshots while it is stopped, which is how the room learns it is stopped.
   if (state.paused) return state
+  // Counted back in, and still frozen while it counts: coming out of a pause
+  // straight into a corner at full speed is not a pause anyone wanted.
+  if (state.resumeIn > 0) {
+    state.resumeIn = Math.max(0, state.resumeIn - dt)
+    return state
+  }
   state.tick++
 
   if (state.phase === 'OVER' || state.phase === 'WAITING') return state
