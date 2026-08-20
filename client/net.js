@@ -282,6 +282,15 @@ export async function close() {
 // peer that Realtime reports as gone from the channel's presence.
 addEventListener('pagehide', () => void close())
 
+/**
+ * The newest snapshot exactly as it arrived, unblended and undelayed. The view
+ * from sampleState() is deliberately in the past; a peer predicting its own kart
+ * wants the freshest truth it has instead.
+ */
+export function newestSnapshot() {
+  return buffer.length ? buffer[buffer.length - 1].s : null
+}
+
 /** Interpolated view of the world, or null until two snapshots have arrived. */
 export function sampleState() {
   // The host is the authority and its sim is right here, a tick old at most —

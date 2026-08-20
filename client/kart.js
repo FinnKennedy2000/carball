@@ -15,12 +15,15 @@ import { buildItem } from './kart-items.js'
 import { CHASSIS, buildChassis, statList, STAT_LABELS } from './kart-chassis.js'
 import { cleanCode } from '../shared/protocol.js'
 import { startInput, currentBits, isTyping } from './input.js'
+import { resyncPrediction, withPrediction } from './kart-predict.js'
 import {
   configure,
   createRoom,
   joinRoom,
   beginMatch,
   sampleState,
+  newestSnapshot,
+  viewDelay,
   handlers,
   enabled as netEnabled,
 } from './net.js'
@@ -167,6 +170,21 @@ const boxMeshes = []
 // throws the group away and builds the next one.
 let world = null
 let shownTrack = null
+let pred = null // the peer's local sim, resynced from every snapshot
+let predFrom = -1 // the snapshot tick it was last resynced from
+let predicting = true // off makes a peer render the host's word for everything
+
+// Two knobs for judging feel in a real room rather than by argument: how far in
+// the past the view runs (and whether the host takes the same delay), and
+// whether a peer predicts its own kart at all. Both are questions you answer by
+// driving, so they are reachable from the console rather than being rebuilt.
+globalThis.kartTuning = {
+  viewDelay,
+  predict(on) {
+    if (on !== undefined) predicting = Boolean(on)
+    return predicting
+  },
+}
 // Set when the map changes: the camera eases after the kart, and easing it
 // across two circuits is a second of flying over scenery nobody is racing on.
 let snapCam = false
@@ -670,6 +688,27 @@ function frame(now) {
     // In a room the input goes over the channel on its own timer, and the state
     // is whatever the host last said it was.
     race = sampleState() ?? race
+    // ...except our own kart, which we can work out sooner than the host can
+    // tell us. The host itself is already looking at its own live sim.
+    if (predicting && !isHost && race) {
+      const snap = newestSnapshot()
+      // Not across a change of map: the sim reads the loaded track, so a
+      // snapshot from the next one has to wait for buildWorld below.
+      if (snap && snap.track === shownTrack && snap.tick !== predFrom) {
+        pred = resyncPrediction(pred, snap, myId)
+        predFrom = snap.tick
+      }
+      if (pred) {
+        let steps = 0
+        while (accumulator >= dt && steps < MAX_CATCHUP) {
+          K.step(pred, { [myId]: currentBits() })
+          accumulator -= dt
+          steps++
+        }
+        if (accumulator >= dt) accumulator = 0
+        race = withPrediction(race, pred, myId)
+      }
+    }
   }
 
   if (race) {
@@ -677,6 +716,8 @@ function frame(now) {
     // itself one and a room whose host has moved on to the next track.
     if (race.track && race.track !== shownTrack) {
       shownTrack = K.setTrack(race.track)
+      pred = null
+      predFrom = -1
       buildWorld()
       clearKarts()
       snapCam = true
