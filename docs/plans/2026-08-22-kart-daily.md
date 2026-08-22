@@ -1158,6 +1158,18 @@ test('a sim change drops the times and keeps the streaks', () => {
   assert.deepEqual(streaks(after, 10), { time: 1, perfect: 1 })
 })
 
+test('a day before the epoch still round-trips', () => {
+  // dayNumber() is negative for a clock set before 2026, and that day is as
+  // real as any other. Range-checking it away wipes the streak on reload.
+  const storage = fakeStorage()
+  let rec = load(storage, -1, 1)
+  rec = record(rec, { day: -1, ms: 90_000, met: ALL, parMs: 95_000 })
+  save(storage, rec)
+  const back = load(storage, -1, 1)
+  assert.equal(back.lastTimeDay, -1)
+  assert.deepEqual(streaks(back, -1), { time: 1, perfect: 1 })
+})
+
 test('a corrupt record reads as a fresh one rather than throwing', () => {
   const map = new Map([[KEY, '{not json']])
   const storage = { getItem: (k) => map.get(k) ?? null, setItem: () => {} }
@@ -1200,7 +1212,11 @@ function empty(day, sim) {
 }
 
 const int = (n) => (Number.isInteger(n) && n >= 0 ? n : 0)
-const dayOr = (n) => (Number.isInteger(n) && n >= 0 ? n : null)
+// A day index is signed on purpose, unlike the count and the duration beside
+// it: dayNumber() returns a negative day for a clock set before the epoch and
+// dailyFor() handles one, so rejecting negatives here would silently wipe such
+// a player's streak on their next load.
+const dayOr = (n) => (Number.isInteger(n) ? n : null)
 const msOr = (n) => (Number.isFinite(n) && n > 0 ? n : null)
 
 /**
