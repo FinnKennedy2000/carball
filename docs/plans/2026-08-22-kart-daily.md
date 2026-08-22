@@ -264,7 +264,7 @@ test('every objective in the roster gets dealt', () => {
 
 // The bug this design exists to prevent: with `day % 4` against a 6-day track
 // cycle, a track only ever sees two of its objectives.
-test('a slot cycles a track&apos;s whole pool before repeating', () => {
+test('a slot cycles the whole pool for a track before repeating', () => {
   for (const track of TRACK_KEYS) {
     for (const slot of [1, 2, 3]) {
       const pool = ROSTER.filter((o) => o.slot === slot && supports(track, o.needs))
