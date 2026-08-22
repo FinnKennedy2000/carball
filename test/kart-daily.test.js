@@ -179,16 +179,6 @@ test('a drift charge is counted once per drift, not once per tick', () => {
   assert.equal(one.p.charges, 1, 'one held drift is one charge')
 })
 
-test('the longest drift is the longest unbroken one, not the total', () => {
-  // Two short drifts with a gap: the total passes three seconds, the longest
-  // single one does not.
-  const bits = (i) => (i % 120 < 100 ? IN_FWD | IN_LEFT | IN_DRIFT : IN_FWD)
-  const { p, kart } = run('circuit', 'coupe', bits, 60 * 8)
-  assert.ok(p.driftFor > 3)
-  assert.ok(p.longestDrift < 3, `longest was ${p.longestDrift.toFixed(2)}s`)
-  assert.ok(!cleared(objectiveOf('longdrift'), p, kart))
-})
-
 test('a clean run keeps the clean sheet and a spin loses it', () => {
   const clean = run('circuit', 'coupe', IN_FWD, 60 * 10)
   assert.ok(!clean.p.spun)

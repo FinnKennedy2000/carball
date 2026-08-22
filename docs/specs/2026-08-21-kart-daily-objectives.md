@@ -27,7 +27,8 @@ Settled in review; recorded so the plan does not relitigate them.
 5. **Par is the AI's time**, generated rather than hand-tuned.
 6. **Slot 3 pays nothing.** A box on a one-kart road yields an item you cannot
    use; that is the honest version of a price. `roll()` is not touched.
-7. **Twenty-one objectives, seven per slot, on a per-track cycle.** Twelve on a
+7. **Twenty objectives on a per-track cycle** — seven each in the gimme and the
+   price, six in the skill. Twelve on a
    hash was the first draft and it was wrong twice over — see *Choosing the
    three*.
 
@@ -98,7 +99,8 @@ count it needs for "on every lap" comes from `startProgress`.
 
 ## The roster
 
-Twenty-one objectives, seven per slot. Every one reads a field the kart already
+Twenty objectives: seven each in the gimme and the price, six in the skill.
+Every one reads a field the kart already
 carries — this is the whole reason no sim change is needed.
 
 ### Slot 1 — the gimme
@@ -136,12 +138,18 @@ comparing against `DRIFT_TIERS` by hand.
 | `nospin` | Clean sheet — never spin out | fail if `kart.spin > 0` on any observed tick | — | — |
 | `nofall` | Sure-footed — never leave the circuit | fail if `kart.fell > 0 \|\| kart.respawn > 0` | `voids` | — |
 | `tiertwo` | Deep blue — four tier-two drifts | count `driftTier()` rising to `2` | — | 4 |
-| `longdrift` | One long one — an unbroken three-second drift | `max(kart.driftTime)` | — | 3 |
 | `tiertwoeverylap` | Blue every lap — a tier-two drift on every lap | set of laps carrying a tier-two rise | — | 3 |
 | `nospinjump` | Stick the landing — never spin out after a jump | fail if `spin > 0` within 1.5s of a landing | `jumps` | — |
 
-`kart.driftTime` resets to 0 when the drift is released, so `longdrift` is
-simply the running maximum of it — no extra state.
+**Cut after playtesting:** *One long one*, an unbroken three-second drift. The
+longest drift sustainable **while staying on the tarmac** is 3.82s on the circuit
+and 1.95–2.48s on the other five, so on five tracks in six it could only be
+cleared by leaving the road. `DRIFT_TIERS` is `[0.9, 1.9]`, so the sim stops
+rewarding a drift at 1.9s and a three-second target asked for 58% longer than the
+mechanic's own ceiling. Retargeting had nowhere to go: above 1.95s risks being
+impossible on fracture, at or below 1.9s makes it a single tier-two drift, which
+`tiertwo` already implies. Drift is still asked about four ways — total seconds,
+four tier-twos, a tier-two every lap, and four charges.
 
 **Cut deliberately:** "six seconds of slipstream". `kart.draft` is derived from
 other karts and is permanently 0 with one kart on the road.
@@ -396,7 +404,7 @@ ticket.
 2. Over days 0–400, no objective is ever dealt whose `needs` the day's track does
    not support — in particular `jumps`, `jumpeverylap` and `nospinjump` never
    appear on bayside, and `nofall` never appears on bayside or grove.
-3. Over days 0–400, every one of the 21 keys is dealt at least once.
+3. Over days 0–400, every one of the 20 keys is dealt at least once.
 4. **No objective repeats on the same track until its pool is exhausted:** for
    each track and slot, walk that track's days in order and assert the picks form
    repeating permutations of the pool.

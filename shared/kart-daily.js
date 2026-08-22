@@ -24,7 +24,7 @@ export function dayNumber(nowMs) {
 }
 
 /**
- * Twenty-one objectives, seven to a slot. `needs` is the track feature the
+ * Twenty objectives, seven to a slot bar the skill, which has six. `needs` is the track feature the
  * objective cannot do without — a jump cannot be landed on a track with no
  * jumps, and nothing can fall off a track with no void. `target` is read by the
  * predicate that uses it and is null for the pass/fail ones.
@@ -50,7 +50,6 @@ export const ROSTER = [
   { key: 'nospin', slot: 2, name: 'Clean sheet', hint: 'never spin out', needs: null, target: null },
   { key: 'nofall', slot: 2, name: 'Sure-footed', hint: 'never leave the circuit', needs: 'voids', target: null },
   { key: 'tiertwo', slot: 2, name: 'Deep blue', hint: 'four tier-two drifts', needs: null, target: 4 },
-  { key: 'longdrift', slot: 2, name: 'One long one', hint: 'an unbroken three-second drift', needs: null, target: 3 },
   { key: 'tiertwoeverylap', slot: 2, name: 'Blue every lap', hint: 'a tier-two drift on every lap', needs: null, target: LAPS },
   { key: 'nospinjump', slot: 2, name: 'Stick the landing', hint: 'never spin out after a jump', needs: 'jumps', target: null },
 
@@ -177,7 +176,6 @@ export function startProgress(daily, laps = LAPS) {
     tierTwo: 0,
     tierTwoLaps: new Set(),
     driftFor: 0,
-    longestDrift: 0,
     boostFor: 0,
     lineSpeeds: [],
     spun: false,
@@ -215,10 +213,7 @@ export function observe(p, kart, dt) {
     p.tierTwoLaps.add(kart.lap)
   }
   p.prevTier = tier
-  // driftTime resets when the drift is released, so the longest unbroken drift
-  // is simply the running maximum of it — no extra state.
   if (kart.driftTime > 0) p.driftFor += dt
-  if (kart.driftTime > p.longestDrift) p.longestDrift = kart.driftTime
   if (kart.boost > 0) p.boostFor += dt
 
   if (kart.spin > 0) {
@@ -289,8 +284,6 @@ export function cleared(o, p, kart) {
       return !p.fellOff
     case 'tiertwo':
       return p.tierTwo >= o.target
-    case 'longdrift':
-      return p.longestDrift >= o.target
     case 'tiertwoeverylap':
       return everyLap(p, p.tierTwoLaps)
     case 'nospinjump':
@@ -344,8 +337,6 @@ export function detailOf(o, p, kart) {
       return p.fellOff ? 'went off' : 'stayed on'
     case 'tiertwo':
       return `${p.tierTwo}/${o.target}`
-    case 'longdrift':
-      return `${p.longestDrift.toFixed(1)}s / ${o.target}s`
     case 'tiertwoeverylap':
       return `${p.tierTwoLaps.size}/${p.laps} laps`
     case 'nospinjump':
