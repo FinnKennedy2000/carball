@@ -1614,6 +1614,31 @@ el('daily-copy').addEventListener('click', async () => {
 And hide the block for a normal race: in `startSolo` and `enterRoom`, beside the
 `daily-panel` line from Task 6, add `el('daily-result').hidden = true`.
 
+- [ ] **Step 5b: Send "Race again" back to the daily**
+
+`el('restart')` at `client/kart.js:355` calls `startSolo()` whenever `solo` is
+true, and the daily sets `solo = true` — so racing again after a daily drops the
+player into a random six-kart race instead of retrying the day. The retry loop is
+the daily's whole shape ("unlimited retries, best time counts"), so it has to go
+back to the same day:
+
+```js
+  el('restart').addEventListener('click', () => {
+    if (solo) {
+      el('results').hidden = true
+      // Back to the same day, not a fresh random race: retrying is the daily's
+      // whole shape, and `solo` is true for both kinds of race.
+      if (dailyRun) startDaily()
+      else startSolo()
+    } else if (isHost) {
+      beginMatch(pickedMap())
+    }
+  })
+```
+
+`startDaily()` rebuilds `dailyRun` from scratch, so the previous run's progress
+cannot leak into the next one.
+
 - [ ] **Step 6: Build and check by hand**
 
 Run: `pnpm build`
