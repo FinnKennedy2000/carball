@@ -43,13 +43,19 @@ away from it.
 | cliff | 2,380m | 9 | 26m | 26–15m | 64m | 2 | 21 | 9 | 3 |
 | fracture | 2,720m | 14 | 19m | 24–11m | 82m | 3 | 24 | 10 | 4 |
 
-**The three narrows drifted.** The road in the repo is wider at its narrowest
-than the design says on three tracks — foundry 21.2m against 18m, cliff 16.2m
-against 15m, fracture 12.4m against 11m. That happened when the geometry was
+**The four narrows drifted.** The road in the repo is wider at its narrowest
+than the design says on four tracks — foundry 21.2m against 18m, cliff 16.2m
+against 15m, fracture 12.4m against 11m, and bayside 26.5m against 26m, which
+the card rounds to 27m. That happened when the geometry was
 landed, and it is the right way round: `test/kart.test.js` will not accept a
 half-width under 6m, because a kart is 2m wide and a road you cannot pass on is
 not a road. The cards display the *derived* width, not the design's label. The
 design's 18/15/11 are wrong about the tarmac that exists.
+
+**Fracture's rise drifted as well.** Not a width this time: the spline through
+its nodes climbs 76.4m against the design's 82m, a 7% gap, where the other five
+tracks' rises match to sub-metre. Same ruling as the narrows — the card shows
+the derived 76m, because the road that exists is the one being described.
 
 **Box and pad counts are exact.** `boxRows × 3` gives 24/12/15/18/21/24 and the
 pad arrays give 12/5/6/8/9/10 — both match the design on every track.
@@ -164,7 +170,9 @@ One card per track, in the design's order, at the design's proportions
      `rgba(233,233,237,0.14)`) · `diffLabel · lapEst a lap` (11px, 0.14em,
      uppercase, neutral-500) · theme chip (11px, 0.14em, uppercase, 3px 9px,
      `radius-sm`, tint text, `inset 0 0 0 1px` in the edge colour). Then the
-     name as an `h1` (40px, heading face, weight 500, -0.03em). Then a 150×1px
+     name as an `h2` — the design draws it as an `h1`, but six cards share one
+     screen that already has its own heading, so seven `h1`s would be worse
+     than the departure — (40px, heading face, weight 500, -0.03em). Then a 150×1px
      rule, `linear-gradient(90deg, tint 0%, tint 44%, transparent 100%)`.
    - Right: eight stats in a `space-6` row — Lap, Corners, Tightest, Width,
      Rise, Jumps, Boxes, Pads. Label 10px/0.16em/uppercase/neutral-500 over a
@@ -194,8 +202,11 @@ Back to front, so nothing important is buried:
 
 ### Elevation strip drawing order
 
-1. bands — one rect per jump and per void across the full height; jumps warm,
-   voids red
+1. bands — one rect per jump and per void across the full height, each at
+   opacity 0.16; jumps warm, voids red. The design carried a per-band opacity
+   in data that was never transcribed here, so 0.16 is a judgement made
+   against the built card: it reads behind the profile line without competing
+   with it.
 2. the mean line at y=56, `rgba(233,233,237,0.14)` at 1, `stroke-dasharray="6 8"`
 3. the area under the profile, filled with a vertical gradient from the tint at
    full opacity to the tint at zero, whole path at opacity 0.34
@@ -217,11 +228,19 @@ Verbatim, in this order. Swatch first, then the text.
 - the track's `note`
 - its `notes`, one paragraph each — three for the five new tracks, two for the circuit
 
-Note the legend's boost-pad and jump swatches stay `#cbb98a` on every card,
-including Foundry, even though Foundry's pads are `#e8c98f` in the plan and in
-the world. That is the design's own inconsistency and it is not worth
-preserving: the swatch uses the theme's `pad` so the legend describes the card
-it sits on.
+Note the legend's boost-pad swatch stays `#cbb98a` on every card in the
+design, including Foundry, even though Foundry's pads are `#e8c98f` in the plan
+and in the world. That is the design's own inconsistency and it is not worth
+preserving: the pad swatch uses the theme's `pad`, so the legend describes the
+card it sits on.
+
+The jump swatch is the other way round, and stays `#cbb98a` everywhere: a pad
+is the same object on every map, so Foundry lightens it to keep reading as a
+pad against that theme, while a jump is the road ending rather than an object
+in the road, and the design draws it the one warm colour on all six. So the
+jump is deliberately not themed — in the swatch, in the plan band and in the
+elevation band alike, all three off one `--map-jump: #cbb98a` — and a seventh
+theme token whose value never varies is not worth having.
 
 ### Track notes
 

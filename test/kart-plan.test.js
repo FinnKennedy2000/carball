@@ -77,6 +77,13 @@ for (const key of TRACK_KEYS) {
     if (stats.voids > 0) {
       assertValidPath(plan.voidPath, 'voidPath')
       assertWithinMargin(plan.voidPath, 'voidPath')
+      // Two subpaths per void, one down each kerb: the barrier is missing from
+      // both edges of a void, so the mark has to be on both.
+      assert.equal(
+        (plan.voidPath.match(/M/g) ?? []).length,
+        2 * stats.voids,
+        'voidPath is not two subpaths per void',
+      )
     } else {
       assert.equal(plan.voidPath, '')
     }

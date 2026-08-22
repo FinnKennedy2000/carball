@@ -124,8 +124,11 @@ export function planFor(key) {
     const project = fitter(lap)
     const at = (p) => project(p.x, p.y)
 
-    const left = lap.map((p) => at({ x: p.x + p.nx * p.hw, y: p.y + p.ny * p.hw }))
-    const right = lap.map((p) => at({ x: p.x - p.nx * p.hw, y: p.y - p.ny * p.hw }))
+    // A lap point's kerb, `side` 1 for the left edge and -1 for the right.
+    const kerb = (p, side) => at({ x: p.x + p.nx * p.hw * side, y: p.y + p.ny * p.hw * side })
+
+    const left = lap.map((p) => kerb(p, 1))
+    const right = lap.map((p) => kerb(p, -1))
     const centre = lap.map((p) => at(p))
 
     const road = pathThrough([...left, ...right.slice().reverse()], true)
@@ -133,7 +136,17 @@ export function planFor(key) {
     const edgeR = pathThrough([...right, right[0]])
     const centreDash = pathThrough([...centre, centre[0]])
 
-    const voidPath = t.voids.map(([from, to]) => pathThrough(stretch(lap, from, to).map(at))).join(' ')
+    // Two subpaths per void, one down each kerb: `VOIDS` carries no side, and
+    // buildWorld()'s wall loop runs `for (const side of [1, -1])` filtered by
+    // the same `solid`, so a void leaves the barrier off *both* edges — the
+    // drop really is on either side. Marked down the centreline instead it
+    // would read as something in the road rather than as a missing edge.
+    const voidPath = t.voids
+      .flatMap(([from, to]) => {
+        const pts = stretch(lap, from, to)
+        return [1, -1].map((side) => pathThrough(pts.map((p) => kerb(p, side))))
+      })
+      .join(' ')
 
     const jumps = t.jumps.map(([from, to]) => pathThrough(stretch(lap, from, to).map(at)))
 

@@ -160,6 +160,25 @@
         font-size: 18px;
       }
 
+      /* The road, wearing its own theme: the name in the track's tint with the
+         theme's name chipped beside it. The colour is set on the element by
+         kart.js — there are six tints and one HUD, so it cannot live here. */
+      #track-name {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-2);
+        font-size: 15px;
+      }
+      #track-name em {
+        font-style: normal;
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        padding: 3px 8px;
+        border-radius: var(--radius-sm);
+        box-shadow: inset 0 0 0 1px currentColor;
+      }
+
       #race-info {
         top: var(--space-6);
         left: var(--space-6);
@@ -453,26 +472,13 @@
         text-align: right;
       }
 
-      /* The host's map choice, next to the go button. Native select: it is a
-         list of six things picked once, and a custom menu would be a widget to
-         maintain for no gain. */
+      /* The host's map choice, next to the go button. It names the road that is
+         picked and opens the map screen; the screen itself is the list, because
+         six themed roads do not fit in a native <select>'s one line of text. */
       #map-pick {
         display: flex;
         align-items: center;
         gap: var(--space-2);
-      }
-      #map {
-        font: inherit;
-        font-size: 15px;
-        color: var(--color-text);
-        padding: 10px var(--space-3);
-        border: 0;
-        border-radius: var(--radius-sm);
-        background: rgba(22, 24, 38, 0.72);
-        box-shadow: inset 0 0 0 1px var(--color-neutral-800);
-      }
-      #map:focus-visible {
-        box-shadow: inset 0 0 0 1px var(--color-accent);
       }
 
       #waiting-list {
@@ -1206,6 +1212,331 @@
         }
       }
 
+      /* Pick a map --------------------------------------------------------
+         Seven cards in a scrolling column: Random, then the six roads. Every
+         colour inside a card comes from a --track-* custom property that
+         kart.js sets on the card itself from kart-themes.js, which is how six
+         themes render on one page without six copies of these rules. The two
+         literals below are the ones the design uses on every card whatever the
+         theme — the red that means "nothing beside the road", and the hairline
+         that the pips, the centre dashes and the mean line all share. */
+      #map-screen[hidden] {
+        display: none;
+      }
+      #map-screen {
+        position: fixed;
+        inset: 0;
+        /* Over the grid card it is opened from, and over the room strip. */
+        z-index: 3;
+        overflow: auto;
+        background: rgba(9, 11, 17, 0.94);
+        backdrop-filter: blur(10px);
+      }
+      #map-cols {
+        max-width: 1440px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-8);
+        padding: 40px 48px;
+      }
+      #map-head {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: var(--space-8);
+      }
+      #map-head h2 {
+        margin: 0;
+        font-family: var(--font-heading);
+        font-weight: 500;
+        font-size: 34px;
+        letter-spacing: -0.02em;
+      }
+      #map-keys {
+        display: flex;
+        align-items: center;
+        gap: var(--space-6);
+        font-size: 12px;
+        color: var(--color-neutral-500);
+      }
+      #map-keys b {
+        color: var(--color-neutral-300);
+        font-weight: 500;
+      }
+      #map-list {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-8);
+      }
+
+      .map-card {
+        --map-void: #d98484;
+        --map-jump: #cbb98a;
+        --map-hairline: rgba(233, 233, 237, 0.14);
+        position: relative;
+        overflow: hidden;
+        border-radius: var(--radius-lg);
+        box-shadow: inset 0 0 0 1px var(--color-neutral-900), var(--shadow-sm);
+        color: var(--color-text);
+        cursor: pointer;
+      }
+      .map-card[aria-selected='true'] {
+        box-shadow: inset 0 0 0 1.5px var(--track-tint), var(--shadow-sm);
+      }
+      .map-card:focus-visible {
+        outline: 2px solid var(--track-tint);
+        outline-offset: 2px;
+      }
+      /* The two gradient layers, bg under atmo. The circuit's atmo is empty,
+         which paints nothing — one layer where the others have two. */
+      .map-bg,
+      .map-atmo {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      .map-bg {
+        background: var(--track-bg);
+      }
+      .map-atmo {
+        background: var(--track-atmo);
+      }
+      .map-body {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-8);
+        padding: var(--space-8);
+      }
+
+      .map-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--space-8);
+      }
+      .map-meta {
+        display: flex;
+        align-items: center;
+        gap: var(--space-4);
+      }
+      .map-kicker {
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--track-tint);
+      }
+      .map-pips {
+        display: flex;
+        gap: 3px;
+      }
+      .map-pips i {
+        display: block;
+        width: 16px;
+        height: 3px;
+        border-radius: 2px;
+        background: var(--map-hairline);
+      }
+      .map-pips i.on {
+        background: var(--track-tint);
+      }
+      .map-diff {
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--color-neutral-500);
+      }
+      .map-chip {
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        padding: 3px 9px;
+        border-radius: var(--radius-sm);
+        color: var(--track-tint);
+        box-shadow: inset 0 0 0 1px var(--track-edge);
+      }
+      /* The design has the name as an h1. It is an h2 here: seven cards on one
+         screen would be seven h1s, and the screen already has a heading. */
+      .map-name {
+        margin: var(--space-3) 0 0;
+        font-family: var(--font-heading);
+        font-weight: 500;
+        font-size: 40px;
+        line-height: 1.05;
+        letter-spacing: -0.03em;
+      }
+      .map-rule {
+        margin-top: var(--space-3);
+        width: 150px;
+        height: 1px;
+        background: linear-gradient(
+          90deg,
+          var(--track-tint) 0%,
+          var(--track-tint) 44%,
+          transparent 100%
+        );
+      }
+      .map-stats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-6);
+      }
+      .map-stat {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+      }
+      .map-stat b {
+        font-family: var(--font-heading);
+        font-weight: 500;
+        font-size: 26px;
+        line-height: 1.05;
+        font-variant-numeric: tabular-nums;
+      }
+      .map-stat b i {
+        font-style: normal;
+        font-size: 16px;
+        color: var(--color-neutral-600);
+      }
+
+      .map-mid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 246px;
+        gap: var(--space-8);
+        align-items: start;
+      }
+      .map-plan {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .map-legend {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+        padding: var(--space-4);
+        border-radius: var(--radius-md);
+        background: rgba(22, 24, 38, 0.6);
+        box-shadow: inset 0 0 0 1px var(--color-neutral-900);
+      }
+      .map-key {
+        display: grid;
+        grid-template-columns: 14px minmax(0, 1fr);
+        align-items: center;
+        gap: var(--space-3);
+        font-size: 11px;
+        color: var(--color-neutral-300);
+      }
+      .map-key i {
+        display: block;
+        width: 14px;
+        box-sizing: border-box;
+      }
+      .map-key i.box {
+        height: 14px;
+        border: 1.4px solid var(--track-tint);
+        border-radius: 2px;
+      }
+      .map-key i.pad {
+        height: 8px;
+        border-radius: 1px;
+        background: var(--track-pad);
+        opacity: 0.6;
+      }
+      /* The jump swatch follows the plan's jump, which is unthemed, so the
+         legend still describes the card it sits on. */
+      .map-key i.jump {
+        height: 6px;
+        border-radius: 3px;
+        background: var(--map-jump);
+        opacity: 0.5;
+      }
+      .map-key i.void {
+        border-top: 2px dashed var(--map-void);
+      }
+      .map-key i.kerb {
+        border-top: 2px solid var(--track-edge);
+      }
+      .map-key i.start {
+        border-top: 3px dashed var(--color-text);
+      }
+      .map-legend hr {
+        margin: var(--space-1) 0;
+        border: 0;
+        border-top: 1px solid var(--color-divider);
+      }
+      .map-legend p {
+        margin: 0;
+        font-size: 11px;
+        line-height: 1.6;
+        color: var(--color-neutral-400);
+      }
+      .map-legend p.blurb {
+        color: var(--track-tint);
+      }
+
+      .map-elev {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .map-elev-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--space-4);
+      }
+      .map-elev-note {
+        font-size: 11px;
+        color: var(--color-neutral-500);
+      }
+      .map-elev svg {
+        display: block;
+        width: 100%;
+        height: 112px;
+      }
+      .map-ticks {
+        display: flex;
+        justify-content: space-between;
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        color: var(--color-neutral-600);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* Random has no road to draw, so it is the header and one line about what
+         it does. It still takes the shared card rules, unthemed: the accent
+         stands in for a tint it does not have. */
+      .map-card.random .map-body {
+        gap: var(--space-4);
+      }
+      .map-card.random p {
+        margin: 0;
+        max-width: 62ch;
+        font-size: 13px;
+        line-height: 1.6;
+        color: var(--color-neutral-400);
+      }
+
+      /* Too narrow for the plan and its legend side by side: the legend goes
+         under the plan, and the name gives up size to the stat row. */
+      @media (max-width: 1180px) {
+        #map-cols {
+          padding: 28px 32px;
+        }
+        .map-mid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .map-head {
+          flex-direction: column;
+          gap: var(--space-6);
+        }
+        .map-name {
+          font-size: 32px;
+        }
+      }
+
       #room-strip {
         position: fixed;
         /* Above the grid and the flag: those cover the screen, and the moment
@@ -1294,17 +1625,19 @@
     <div id="waiting" hidden>
       <div id="waiting-card" class="over-card">
         <div class="over-head">
-          <span class="kicker accent">On the grid<span id="waiting-track"></span></span>
+          <span class="kicker accent" id="waiting-kicker"
+            >On the grid<span id="waiting-track"></span
+          ></span>
           <h2>Waiting to start</h2>
           <div class="over-rule"></div>
         </div>
         <ol id="waiting-list"></ol>
         <p id="waiting-hint" class="hint"></p>
         <div class="row">
-          <label id="map-pick" hidden>
+          <div id="map-pick" hidden>
             <span class="label">Map</span>
-            <select id="map"></select>
-          </label>
+            <button id="map-open" class="btn btn-secondary" type="button">Random</button>
+          </div>
           <button id="start" class="btn btn-primary" hidden>Start race</button>
         </div>
       </div>
@@ -1313,7 +1646,7 @@
     <div id="results" hidden>
       <div id="results-card" class="over-card">
         <div class="over-head">
-          <span class="kicker accent">Chequered flag</span>
+          <span class="kicker accent" id="results-kicker">Chequered flag</span>
           <h2 id="verdict">Race won</h2>
           <div class="over-rule"></div>
         </div>
@@ -1329,6 +1662,28 @@
           <button id="restart" class="btn btn-primary">Race again</button>
           <a class="btn btn-ghost" href="./">Back to home</a>
         </div>
+      </div>
+    </div>
+
+    <!-- Pick a map: Random and the six roads, a card each. The cards are built
+         by kart.js from the theme, the measured stats and the lap's own
+         geometry, so a card can never describe a road the sim does not have. -->
+    <div id="map-screen" hidden role="dialog" aria-modal="true" aria-labelledby="map-title">
+      <div id="map-cols">
+        <div id="map-head">
+          <div class="over-head">
+            <span class="kicker accent">Pick a map</span>
+            <h2 id="map-title">Six roads, or let the seed decide</h2>
+            <div class="over-rule"></div>
+          </div>
+          <div id="map-keys">
+            <span><b>&uarr; &darr;</b> move</span>
+            <span><b>Enter</b> pick</span>
+            <span><b>Esc</b> close</span>
+            <button id="map-close" class="btn btn-ghost" type="button">Close</button>
+          </div>
+        </div>
+        <div id="map-list" role="listbox" aria-labelledby="map-title"></div>
       </div>
     </div>
 
