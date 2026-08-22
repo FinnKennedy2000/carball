@@ -18,7 +18,7 @@ import { startInput, currentBits, isTyping } from './input.js'
 import { resyncPrediction, withPrediction } from './kart-predict.js'
 import { foldCapped } from './kart-ribbon.js'
 import { SIM_VERSION } from '../shared/constants.js'
-import { cleared, dailyFor, dayNumber, detailOf, observe, settle, startProgress } from '../shared/kart-daily.js'
+import { DAILY_EPOCH, cleared, dailyFor, dayNumber, detailOf, observe, settle, startProgress } from '../shared/kart-daily.js'
 import * as dailyStore from './kart-daily-store.js'
 import {
   configure,
@@ -412,12 +412,22 @@ function wireGate() {
   // Arriving on someone's link goes straight into their room, exactly as the
   // football page does it. Without a name to send there is nothing to do but
   // ask for one — the code is already in the box, so Join is one press away.
-  if (invited) join(invited)
+  // A shared daily link lands in today's race rather than on the gate. Checked
+  // ahead of the room code, and they cannot collide: cleanCode only ever accepts
+  // four letters.
+  if (isDailyHash()) startDaily()
+  else if (invited) join(invited)
 
   // A link pasted into a tab that is already on this page changes the hash
   // without reloading anything, so the load-time check above never runs — the
   // link would look broken. onJoined sets the hash itself, hence the guard.
   addEventListener('hashchange', () => {
+    // A daily link pasted into a tab that is already open, for the same reason
+    // the room code is handled here: the load-time check never runs again.
+    if (isDailyHash()) {
+      startDaily()
+      return
+    }
     const code = netEnabled ? cleanCode(location.hash.slice(1)) : null
     if (code && code !== roomCode) {
       el('code').value = code
@@ -751,8 +761,56 @@ function finishDaily() {
   el('daily-streaks').textContent =
     `time streak ${s.time} · perfect streak ${s.perfect}` +
     (daily.parMs === null ? '' : ` · par ${clock(daily.parMs / 1000)}`)
-  // One line of text, no link and no image: it pastes into anything.
-  dailyRun.share = `Daily Line #${daily.day} ${ticks} ${time} 🔥${s.time}`
+  dailyRun.share = shareBlock(daily, ms, met, s)
+}
+
+/** A shared daily link. Declared, not assigned, so wireGate above can call it. */
+function isDailyHash() {
+  return location.hash.toLowerCase() === '#daily'
+}
+
+const LAP_WORDS = ['no laps', 'one lap', 'two laps', 'three laps', 'four laps', 'five laps']
+
+/** How the day's time sits against the AI's own, in words rather than a sign. */
+function parGap(parMs, ms) {
+  if (parMs === null) return ''
+  const gap = Math.round((parMs - ms) / 1000)
+  if (gap === 0) return ' — dead on par'
+  return gap > 0 ? ` — ${gap}s under par` : ` — ${-gap}s over par`
+}
+
+/**
+ * What a player pastes into a group chat. Several lines and a link, because a
+ * time with no way to go and beat it is a boast rather than an invitation — and
+ * the link is the only part that brings anybody back.
+ */
+function shareBlock(daily, ms, met, s) {
+  // The day is a UTC day everywhere, so the date has to be read in UTC too or
+  // it names yesterday for anyone west of the line.
+  const when = new Date(DAILY_EPOCH + daily.day * 86_400_000).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
+  const squares = met.map((m) => (m ? '🟩' : '⬛')).join('')
+  const car = CHASSIS[daily.chassis]?.name ?? daily.chassis
+  const track = K.TRACKS[daily.track]?.name ?? daily.track
+  const laps = LAP_WORDS[race?.laps] ?? `${race?.laps} laps`
+  const lines = [
+    `Kart Daily #${daily.day} — ${when}`,
+    `${track} in a ${car}, ${laps}`,
+    '',
+    `${squares}  ${clock(ms / 1000)}${parGap(daily.parMs, ms)}`,
+  ]
+  // Both streaks can be running at once, and often are: the price costs time, so
+  // sweeping the three and beating par are frequently different runs.
+  const streaks = []
+  if (s.time > 0) streaks.push(`🔥 ${s.time} day streak`)
+  if (s.perfect > 0) streaks.push(`${s.perfect} perfect in a row`)
+  if (streaks.length) lines.push(streaks.join(' · '))
+  lines.push('', `${location.origin}${location.pathname}#daily`)
+  return lines.join('\n')
 }
 
 async function enterRoom(code) {
