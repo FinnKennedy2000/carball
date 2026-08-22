@@ -138,3 +138,11 @@ export const TORNADO_SPIN = 34
 
 export const TEAM_BLUE = 0
 export const TEAM_ORANGE = 1
+
+// Daily ---------------------------------------------------------------------
+
+// Stamped onto every stored time and onto the generated par table. Bump it
+// whenever a tuning change alters how the same inputs drive: a time set on
+// different physics is not the same time, and a par generated before the change
+// is not par any more.
+export const SIM_VERSION = 1
