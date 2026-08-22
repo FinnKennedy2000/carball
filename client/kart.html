@@ -187,6 +187,32 @@
         gap: 2px;
       }
 
+      /* The daily's three objectives, live under race-info. Dim until met, so
+         the eye finds what is still owed at a glance. */
+      .daily-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 2px;
+      }
+      .daily-list li {
+        display: grid;
+        grid-template-columns: 1em 1fr auto;
+        gap: 6px;
+        opacity: 0.6;
+      }
+      .daily-list li.met {
+        opacity: 1;
+      }
+      .daily-list .tick {
+        text-align: center;
+      }
+      .daily-list .how {
+        font-variant-numeric: tabular-nums;
+        opacity: 0.75;
+      }
+
       #standings-panel {
         top: var(--space-6);
         right: var(--space-6);
@@ -410,6 +436,12 @@
       }
       #results-card {
         width: 520px;
+      }
+      #daily-result {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-3);
       }
       #waiting-card {
         width: 560px;
@@ -1357,6 +1389,12 @@
             <span>Pos</span><span></span><span>Racer</span><span class="time">Time</span>
           </div>
           <div id="result-rows"></div>
+        </div>
+
+        <div id="daily-result" hidden>
+          <div class="label" id="daily-verdict"></div>
+          <div class="hint" id="daily-streaks"></div>
+          <button class="btn btn-ghost" id="daily-copy">Copy result</button>
         </div>
 
         <div class="row">

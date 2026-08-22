@@ -18,7 +18,7 @@ import { startInput, currentBits, isTyping } from './input.js'
 import { resyncPrediction, withPrediction } from './kart-predict.js'
 import { foldCapped } from './kart-ribbon.js'
 import { SIM_VERSION } from '../shared/constants.js'
-import { dailyFor, dayNumber, observe, settle, startProgress } from '../shared/kart-daily.js'
+import { cleared, dailyFor, dayNumber, detailOf, observe, settle, startProgress } from '../shared/kart-daily.js'
 import * as dailyStore from './kart-daily-store.js'
 import {
   configure,
@@ -225,6 +225,8 @@ let accumulator = 0
 let shownItem
 let shownCount
 let shownEffects = ''
+// The daily panel's rendered rows, so an unchanged frame skips the rebuild.
+let shownDaily = ''
 // The slot reels through every item before settling on the one you actually
 // picked up: which is which matters, and a mark that simply appears is missed
 // at the speed the rest of the screen is moving.
@@ -371,6 +373,17 @@ function wireGate() {
     } catch {
       // No clipboard outside a secure context — the code is the shareable part.
       el('copy').textContent = `Room code ${roomCode}`
+    }
+  })
+  el('daily-copy').addEventListener('click', async () => {
+    if (!dailyRun?.share) return
+    // A clipboard write can be refused; the button says so rather than failing
+    // silently, and the line is on screen anyway.
+    try {
+      await navigator.clipboard.writeText(dailyRun.share)
+      el('daily-copy').textContent = 'Copied'
+    } catch {
+      el('daily-copy').textContent = 'Could not copy'
     }
   })
 
@@ -662,6 +675,7 @@ function startSolo() {
   results = null
   dailyRun = null
   el('daily-panel').hidden = true
+  el('daily-result').hidden = true
   shownItem = undefined
   heldItem = undefined
   reelUntil = 0
@@ -700,6 +714,7 @@ function startDaily() {
   race = K.createRace([{ id: SOLO_ID, name, ai: false, chassis: daily.chassis }], daily.seed, daily.track)
   // After createRace, which is what loads the track the pad list comes off.
   dailyRun = { daily, progress: startProgress(daily, race.laps), done: false }
+  shownDaily = ''
   el('daily-panel').hidden = false
   el('daily-title').textContent = `Daily Line #${daily.day}`
   K.begin(race)
@@ -721,6 +736,22 @@ function finishDaily() {
   )
   dailyStore.save(localStorage, rec)
   dailyRun.record = rec
+
+  const ticks = met.map((m) => (m ? '✓' : '✗')).join('')
+  const time = clock(kart.finished)
+  const beat = daily.parMs !== null && ms <= daily.parMs
+  const s = dailyStore.streaks(rec, daily.day)
+  el('daily-result').hidden = false
+  // A retry leaves this stale from the last run otherwise: "Copied" would go on
+  // describing a line that is no longer the one on screen.
+  el('daily-copy').textContent = 'Copy result'
+  el('daily-verdict').textContent =
+    `Daily Line #${daily.day} · ${ticks} · ${time}` + (beat ? ' · inside par' : '')
+  el('daily-streaks').textContent =
+    `time streak ${s.time} · perfect streak ${s.perfect}` +
+    (daily.parMs === null ? '' : ` · par ${clock(daily.parMs / 1000)}`)
+  // One line of text, no link and no image: it pastes into anything.
+  dailyRun.share = `Daily Line #${daily.day} ${ticks} ${time} 🔥${s.time}`
 }
 
 async function enterRoom(code) {
@@ -734,6 +765,7 @@ async function enterRoom(code) {
   results = null
   dailyRun = null
   el('daily-panel').hidden = true
+  el('daily-result').hidden = true
   clearKarts()
   try {
     isHost = !clean
@@ -1713,6 +1745,7 @@ function updateHud() {
           : 0
 
   showEffects(me)
+  updateDailyPanel()
 
   // The last lap is worth calling, and so is crossing the line: both are
   // moments rather than states, so they are flashed for a couple of seconds.
@@ -1869,6 +1902,29 @@ function showEffects(me) {
   if (html !== shownEffects) {
     shownEffects = html
     el('effects').innerHTML = html
+  }
+}
+
+/**
+ * The day's three, live. A price you cannot see the cost of is not a decision,
+ * so this updates as the race runs rather than only at the flag.
+ */
+function updateDailyPanel() {
+  if (!dailyRun || !race) return
+  const kart = race.karts[0]
+  if (!kart) return
+  const { daily, progress } = dailyRun
+  const rows = daily.objectives.map((o) => {
+    const met = cleared(o, progress, kart)
+    return `<li class="${met ? 'met' : ''}"><span class="tick">${met ? '✓' : '·'}</span>
+      <span class="what">${o.name}</span>
+      <span class="how">${detailOf(o, progress, kart)}</span></li>`
+  })
+  const html = rows.join('')
+  // Rebuilt only when it changed: this runs every frame.
+  if (html !== shownDaily) {
+    el('daily-list').innerHTML = html
+    shownDaily = html
   }
 }
 
