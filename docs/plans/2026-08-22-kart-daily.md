@@ -303,9 +303,9 @@ test('the same objective rarely lands in the same slot two days running', () => 
     const now = dailyFor(d).objectives
     for (let i = 0; i < 3; i++) if (before[i].key === now[i].key) repeats++
   }
-  // 1200 slot-transitions. Independent shuffles per track put the floor near
+  // 1197 slot-transitions (399 days x 3). Independent shuffles per track put the floor near
   // 1-in-7 (~170); the bug this replaced scored 711.
-  assert.ok(repeats < 300, `${repeats} of 1200 transitions repeated`)
+  assert.ok(repeats < 300, `${repeats} of 1197 transitions repeated`)
 })
 
 function supports(track, needs) {
