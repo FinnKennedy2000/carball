@@ -54,6 +54,19 @@ design's 18/15/11 are wrong about the tarmac that exists.
 **Box and pad counts are exact.** `boxRows × 3` gives 24/12/15/18/21/24 and the
 pad arrays give 12/5/6/8/9/10 — both match the design on every track.
 
+**The length labels run a hair long.** The design's numbers above were measured off the
+drawn centreline; the spline built through the nodes at load lands up to 1.2m
+short of them on five of the six tracks — 0.05% of a lap. The cards display
+the measured value, so the circuit reads 2,278m and not 2,279m.
+
+**Pad density is not box density.** The design's claim that item boxes and
+boost pads both keep the main track's density per metre holds for boxes —
+every track is within 25% of the circuit's — and does not for pads: the
+circuit runs a pad every ~190m, and the five new tracks run one every
+252-280m, well outside that. Pads are placed by hand per track rather than by
+a length formula the way box rows are, so the five new tracks are a family of
+their own instead.
+
 ## The ladder
 
 Measured at `d374015`, the AI's three-lap time down the centreline:
