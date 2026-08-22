@@ -17,6 +17,9 @@ import { cleanCode } from '../shared/protocol.js'
 import { startInput, currentBits, isTyping } from './input.js'
 import { resyncPrediction, withPrediction } from './kart-predict.js'
 import { foldCapped } from './kart-ribbon.js'
+import { SIM_VERSION } from '../shared/constants.js'
+import { dailyFor, dayNumber, observe, settle, startProgress } from '../shared/kart-daily.js'
+import * as dailyStore from './kart-daily-store.js'
 import {
   configure,
   createRoom,
@@ -212,6 +215,9 @@ let isHost = false
 let roomCode = null
 let roster = []
 let results = null // the finishing order, once a room's race is over
+// The day's run, or null for a normal race. `done` stops the flag being
+// recorded twice: the OVER phase lasts many frames.
+let dailyRun = null
 let lastFrame = 0
 let accumulator = 0
 // What the item slot and the effect chips are currently showing, so neither is
@@ -303,6 +309,9 @@ function wireGate() {
   // Nothing starts from this screen any more: every way in goes through the
   // chassis pick, which is where the car is chosen and Race is pressed.
   el('solo').addEventListener('click', () => showPick(startSolo))
+  // Straight in, not through showPick: the chassis is the day's, not a choice,
+  // and offering the picker would imply otherwise.
+  el('daily').addEventListener('click', startDaily)
   el('create').addEventListener('click', () => showPick(() => enterRoom(null)))
   el('join').addEventListener('click', () => pickThenJoin(el('code').value))
   el('code').addEventListener('keydown', (e) => {
@@ -648,6 +657,8 @@ function startSolo() {
   solo = true
   myId = SOLO_ID
   results = null
+  dailyRun = null
+  el('daily-panel').hidden = true
   shownItem = undefined
   heldItem = undefined
   reelUntil = 0
@@ -665,6 +676,50 @@ function startSolo() {
   lastFrame = performance.now()
 }
 
+/**
+ * The daily: one kart, the day's track and chassis, and three objectives. It is
+ * startSolo with the randomness taken out — same loop, same renderer, same
+ * item boxes.
+ */
+function startDaily() {
+  const name = saveName()
+  const daily = dailyFor(dayNumber(Date.now()))
+  solo = true
+  myId = SOLO_ID
+  results = null
+  shownItem = undefined
+  heldItem = undefined
+  reelUntil = 0
+  calledLap = -1
+  flashUntil = 0
+  el('gate').hidden = true
+  el('room-strip').hidden = true
+  race = K.createRace([{ id: SOLO_ID, name, ai: false, chassis: daily.chassis }], daily.seed, daily.track)
+  // After createRace, which is what loads the track the pad list comes off.
+  dailyRun = { daily, progress: startProgress(daily, race.laps), done: false }
+  el('daily-panel').hidden = false
+  el('daily-title').textContent = `Daily Line #${daily.day}`
+  K.begin(race)
+  clearKarts()
+  accumulator = 0
+  lastFrame = performance.now()
+}
+
+function finishDaily() {
+  const { daily, progress } = dailyRun
+  const kart = race.karts[0]
+  const { met } = settle(progress, kart)
+  // A run that never got home has no time to record, and no ticks either.
+  if (kart.finished === null) return
+  const ms = Math.round(kart.finished * 1000)
+  const rec = dailyStore.record(
+    dailyStore.load(localStorage, daily.day, SIM_VERSION),
+    { day: daily.day, ms, met, parMs: daily.parMs }
+  )
+  dailyStore.save(localStorage, rec)
+  dailyRun.record = rec
+}
+
 async function enterRoom(code) {
   const name = saveName()
   const clean = cleanCode(code || '')
@@ -674,6 +729,8 @@ async function enterRoom(code) {
   }
   el('gate-note').textContent = clean ? 'Joining…' : 'Opening a room…'
   results = null
+  dailyRun = null
+  el('daily-panel').hidden = true
   clearKarts()
   try {
     isHost = !clean
@@ -739,6 +796,10 @@ function frame(now) {
     let steps = 0
     while (accumulator >= dt && steps < MAX_CATCHUP) {
       K.step(race, { [myId]: currentBits() })
+      // Watched on the same tick the sim just ran, with the sim's own dt.
+      if (dailyRun && race.phase === 'RACE') {
+        observe(dailyRun.progress, race.karts[0], dt)
+      }
       accumulator -= dt
       steps++
     }
@@ -768,6 +829,11 @@ function frame(now) {
         race = withPrediction(race, pred, myId)
       }
     }
+  }
+
+  if (dailyRun && !dailyRun.done && race && race.phase === 'OVER') {
+    dailyRun.done = true
+    finishDaily()
   }
 
   if (race) {

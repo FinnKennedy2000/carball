@@ -177,6 +177,13 @@
         right: var(--space-6);
         min-width: 172px;
       }
+
+      /* Bottom-left mirrors the speed panel's bottom-right anchor: the one
+         corner nothing else in the HUD claims. */
+      #daily-panel {
+        bottom: var(--space-6);
+        left: var(--space-6);
+      }
       #standings {
         list-style: none;
         margin: var(--space-3) 0 0;
@@ -598,6 +605,7 @@
       }
 
       #solo-row,
+      #daily-row,
       #room-side {
         display: flex;
         border-radius: var(--radius-md);
@@ -611,16 +619,27 @@
         background: rgba(22, 24, 38, 0.72);
         box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-accent) 30%, transparent);
       }
-      #solo-row .what {
+      /* The daily is a peer of solo, not the main way in, so it gets the
+         room's quieter treatment rather than the accent ring. */
+      #daily-row {
+        align-items: center;
+        gap: var(--space-4);
+        background: rgba(22, 24, 38, 0.55);
+        box-shadow: inset 0 0 0 1px var(--color-neutral-900);
+      }
+      #solo-row .what,
+      #daily-row .what {
         display: flex;
         flex-direction: column;
         gap: 2px;
         flex: 1;
       }
-      #solo-row .hint {
+      #solo-row .hint,
+      #daily-row .hint {
         font-size: 11px;
       }
-      #solo-row .what b {
+      #solo-row .what b,
+      #daily-row .what b {
         font-family: var(--font-heading);
         font-weight: 500;
         font-size: 17px;
@@ -1257,6 +1276,11 @@
         </div>
       </div>
 
+      <div class="panel" id="daily-panel" hidden>
+        <div class="label" id="daily-title">Daily</div>
+        <ol class="daily-list" id="daily-list"></ol>
+      </div>
+
       <div id="standings-panel" class="panel">
         <span class="label">Field</span>
         <ol id="standings"></ol>
@@ -1358,6 +1382,14 @@
                   <span class="hint">starts immediately, no room needed</span>
                 </span>
                 <button id="solo" class="btn btn-primary">Go</button>
+              </div>
+
+              <div id="daily-row">
+                <span class="what">
+                  <b>Today's daily</b>
+                  <span class="hint">one track, three objectives, everyone gets the same</span>
+                </span>
+                <button id="daily" class="btn btn-secondary">Go</button>
               </div>
 
               <div id="room-side">
