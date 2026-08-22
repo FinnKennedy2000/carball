@@ -522,6 +522,11 @@ function run(track, chassis, bits, ticks) {
   const state = createRace([{ id: 1, name: 'me', chassis }], 7, track)
   const kart = state.karts[0]
   begin(state)
+  // Past the lights first. The grid countdown is its own phase lasting three
+  // seconds — 180 ticks — so an input pattern indexed from tick zero would
+  // spend all of it steering a kart that has not been released yet.
+  let guard = 0
+  while (state.phase !== 'RACE' && guard++ < 600) step(state, {})
   const p = startProgress({ ...dailyFor(0), track, chassis }, state.laps)
   for (let i = 0; i < ticks; i++) {
     step(state, { 1: typeof bits === 'function' ? bits(i, kart) : bits })
@@ -553,7 +558,9 @@ test('a boost lights the jets counter and a standstill does not', () => {
 })
 
 test('a drift charge is counted once per drift, not once per tick', () => {
-  const one = run('circuit', 'coupe', (i) => (i < 120 ? IN_FWD | IN_LEFT | IN_DRIFT : IN_FWD), 60 * 4)
+  // Three seconds, not two: driftTime only accumulates above DRIFT_MIN_SPEED
+  // (12 m/s), so a shorter drift from a standing start never reaches tier one.
+  const one = run('circuit', 'coupe', (i) => (i < 180 ? IN_FWD | IN_LEFT | IN_DRIFT : IN_FWD), 60 * 6)
   assert.equal(one.p.charges, 1, 'one held drift is one charge')
 })
 
