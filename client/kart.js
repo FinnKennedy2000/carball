@@ -355,7 +355,10 @@ function wireGate() {
   el('restart').addEventListener('click', () => {
     if (solo) {
       el('results').hidden = true
-      startSolo()
+      // Back to the same day, not a fresh random race: retrying is the daily's
+      // whole shape, and `solo` is true for both kinds of race.
+      if (dailyRun) startDaily()
+      else startSolo()
     } else if (isHost) {
       beginMatch(pickedMap())
     }

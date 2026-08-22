@@ -160,9 +160,24 @@
         font-size: 18px;
       }
 
-      #race-info {
+      /* The left column's own stack: race-info and, once a daily is running,
+         the objectives panel under it. #controls-line already owns the literal
+         bottom-left corner, so this stacks downward from top-left instead of
+         claiming a corner of its own. */
+      #hud-left {
+        position: absolute;
         top: var(--space-6);
         left: var(--space-6);
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-4);
+      }
+      /* .panel is absolute by default, which is what a stack cannot use. */
+      #hud-left > .panel {
+        position: static;
+      }
+      #race-info {
         display: flex;
         gap: var(--space-8);
       }
@@ -176,13 +191,6 @@
         top: var(--space-6);
         right: var(--space-6);
         min-width: 172px;
-      }
-
-      /* Bottom-left mirrors the speed panel's bottom-right anchor: the one
-         corner nothing else in the HUD claims. */
-      #daily-panel {
-        bottom: var(--space-6);
-        left: var(--space-6);
       }
       #standings {
         list-style: none;
@@ -1257,28 +1265,30 @@
       <!-- A Lightning bolt going off, over everything. -->
       <div id="flash"></div>
 
-      <div id="race-info" class="panel">
-        <div>
-          <span class="label">Lap</span>
-          <span class="readout"><span id="lap">1</span><span class="sub" id="lap-total">/3</span></span>
+      <div id="hud-left">
+        <div id="race-info" class="panel">
+          <div>
+            <span class="label">Lap</span>
+            <span class="readout"><span id="lap">1</span><span class="sub" id="lap-total">/3</span></span>
+          </div>
+          <div>
+            <span class="label">Position</span>
+            <span class="readout"><span id="place">6</span><span class="sub" id="place-suffix">th</span></span>
+          </div>
+          <div>
+            <span class="label">Time</span>
+            <span class="readout" id="time">0:00.00</span>
+          </div>
+          <div>
+            <span class="label">Track</span>
+            <span class="sub" id="track-name">The circuit</span>
+          </div>
         </div>
-        <div>
-          <span class="label">Position</span>
-          <span class="readout"><span id="place">6</span><span class="sub" id="place-suffix">th</span></span>
-        </div>
-        <div>
-          <span class="label">Time</span>
-          <span class="readout" id="time">0:00.00</span>
-        </div>
-        <div>
-          <span class="label">Track</span>
-          <span class="sub" id="track-name">The circuit</span>
-        </div>
-      </div>
 
-      <div class="panel" id="daily-panel" hidden>
-        <div class="label" id="daily-title">Daily</div>
-        <ol class="daily-list" id="daily-list"></ol>
+        <div class="panel" id="daily-panel" hidden>
+          <div class="label" id="daily-title">Daily</div>
+          <ol class="daily-list" id="daily-list"></ol>
+        </div>
       </div>
 
       <div id="standings-panel" class="panel">
