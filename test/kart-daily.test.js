@@ -118,7 +118,7 @@ test('the same objective rarely lands in the same slot two days running', () => 
     for (let i = 0; i < 3; i++) if (before[i].key === now[i].key) repeats++
   }
   // 1200 slot-transitions. Independent shuffles per track put the floor near
-  // 1-in-7 (~170); the bug this replaced scored 719.
+  // 1-in-7 (~170); the bug this replaced scored 711.
   assert.ok(repeats < 300, `${repeats} of 1200 transitions repeated`)
 })
 

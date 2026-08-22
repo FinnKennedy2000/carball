@@ -250,10 +250,12 @@ function shuffled(pool, seed) {
 
 Every objective in a track's pool appears exactly once before any repeat, and the
 order reshuffles each cycle. Measured over 400 days, the same objective lands in
-the same slot on consecutive days 185 times out of 1200 transitions — the ~1/7
+the same slot on consecutive days 191 times out of 1200 transitions — the ~1/7
 floor for independent per-track shuffles. Without the track in the seed it was
-719, which is the defect this arithmetic exists to avoid. With a pool of seven on a track visited every sixth
-day, **an objective cannot return to that track for 42 days**. The only
+711, which is the defect this arithmetic exists to avoid.
+
+With a pool of seven on a track visited every sixth day, **an objective cannot
+return to that track for 42 days**. The only
 coincidence left is the last pick of one cycle matching the first of the next,
 which is one visit in seven and forty-two real days apart.
 
