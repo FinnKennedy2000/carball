@@ -1,10 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { TRACK_KEYS } from '../shared/kart.js'
-import { THEMES, themeFor, cssVars, hex } from '../client/kart-themes.js'
+import { THEMES, themeFor, cssVars, hex, worldColors } from '../client/kart-themes.js'
 
 const HEX_RE = /^#[0-9a-f]{6}$/i
-const COLOUR_TOKENS = ['tint', 'road', 'kerb', 'edge', 'pad']
+const COLOUR_TOKENS = ['tint', 'road', 'kerb', 'edge', 'pad', 'deck']
 const CSS_TOKENS = ['tint', 'road', 'kerb', 'edge', 'pad', 'bg', 'atmo']
 
 test('a theme exists for every track key, and only for track keys', () => {
@@ -208,5 +208,59 @@ test('THEMES does not carry diffLabel or lapEst — those live in shared/kart-tr
   for (const key of TRACK_KEYS) {
     assert.equal('diffLabel' in THEMES[key], false, `${key}: diffLabel should not be duplicated here`)
     assert.equal('lapEst' in THEMES[key], false, `${key}: lapEst should not be duplicated here`)
+  }
+})
+
+const WORLD_NUMBER_FIELDS = ['background', 'ground', 'grass', 'drop', 'deck', 'barrier', 'tarmac', 'kerbTint', 'kerbLight', 'line', 'itemBox']
+
+test('worldColors resolves a full, numeric set of world colours for every track', () => {
+  for (const key of TRACK_KEYS) {
+    const colors = worldColors(key)
+    for (const field of WORLD_NUMBER_FIELDS) {
+      const value = colors[field]
+      assert.equal(typeof value, 'number', `${key}.${field} should be a number`)
+      assert.ok(Number.isInteger(value) && !Number.isNaN(value), `${key}.${field} is NaN`)
+      assert.ok(value >= 0 && value <= 0xffffff, `${key}.${field} is out of RGB range`)
+    }
+    assert.match(colors.boostPad, HEX_RE, `${key}.boostPad is not #rrggbb`)
+  }
+})
+
+test('worldColors ties tarmac, kerb, deck and item colours straight to the theme tokens', () => {
+  for (const key of TRACK_KEYS) {
+    const colors = worldColors(key)
+    assert.equal(colors.tarmac, hex(key, 'road'))
+    assert.equal(colors.kerbTint, hex(key, 'tint'))
+    assert.equal(colors.kerbLight, hex(key, 'kerb'))
+    assert.equal(colors.deck, hex(key, 'deck'))
+    assert.equal(colors.itemBox, hex(key, 'tint'))
+    assert.equal(colors.boostPad, THEMES[key].pad)
+  }
+})
+
+test('worldColors is a pure function of the track key', () => {
+  assert.deepEqual(worldColors('circuit'), worldColors('circuit'))
+  assert.notDeepEqual(worldColors('circuit'), worldColors('fracture'))
+})
+
+// The design's scene builder carried a per-theme deck colour and depth that
+// the spec's first pass at "Theme tokens" omitted — a lagoon causeway sits
+// just above the tide flats, and the ridge road is cut into a mountainside,
+// so one constant cannot stand in for both. Pinned here the way the pad
+// colour above is pinned, so a future edit to THEMES has to touch this test.
+const DECK_DEPTHS = {
+  circuit: 3.2,
+  bayside: 1.4,
+  grove: 1.0,
+  foundry: 1.8,
+  cliff: 16,
+  fracture: 2.2,
+}
+
+test('deckDepth is a positive number of metres, pinned per track', () => {
+  for (const key of TRACK_KEYS) {
+    assert.equal(THEMES[key].deckDepth, DECK_DEPTHS[key], `${key}.deckDepth`)
+    assert.equal(worldColors(key).deckDepth, DECK_DEPTHS[key], `worldColors(${key}).deckDepth`)
+    assert.ok(THEMES[key].deckDepth > 0, `${key}.deckDepth should be positive`)
   }
 })

@@ -120,6 +120,24 @@ the player actually looks at for a minute a lap.
 The circuit's tarmac is `#49536b` today. Giving it `#22262f` makes the existing
 track visibly darker. That is intended: the circuit gets a theme like the rest.
 
+**Deck skirt.** The design's scene builder also carried a per-theme deck
+colour and depth, both consumed by `worldColors()` in
+`client/kart-themes.js` as the `deck` and `deckDepth` tokens:
+
+| Track | Deck | Deck depth (m) |
+|---|---|---|
+| circuit | `#171a22` | 3.2 |
+| bayside | `#14222a` | 1.4 |
+| grove | `#141c16` | 1.0 |
+| foundry | `#1b1512` | 1.8 |
+| cliff | `#2a2f36` | 16 |
+| fracture | `#1b1522` | 2.2 |
+
+The depths vary this much on purpose: a lagoon causeway sits just above the
+tide flats, and the ridge road is cut into a mountainside. Cliff's 16m skirt
+was checked against the 14m drop ribbon `buildWorld()` already lays under a
+void — see "What the engine will not do" below for what was found.
+
 ### Grounds and atmosphere
 
 Lifted from the map-card script. Two stacked layers per card, both absolute and
@@ -304,7 +322,8 @@ Per track, all in metres, y-up:
 - `tarmac` — the road ribbon at the road's half-width
 - `kerb` — 1.1m ribbons either side at +0.12, alternating between the tint and
   the kerb-light colour
-- `deck` — a vertical skirt hanging under the kerb's outer edge, per-theme depth
+- `deck` — a vertical skirt hanging under the kerb's outer edge, per-theme
+  colour and depth — see the `deck`/`deckDepth` table under "Theme tokens" above
 - `line` — centre dashes at +0.03, 0.5m wide
 - `boost-pad` — emissive bands in the theme's pad colour
 - `item-box` — emissive cubes in the tint
@@ -356,9 +375,19 @@ and after and reported. Materials are named (`tarmac`, `kerb`, `deck`, `line`,
   centreline, which inverts on anything tighter than about 38m — that is most of
   cliff and all of fracture. Inward scenery is placed as discrete instances, or
   routed through the existing fold-capped `ribbon()`, never as a raw offset.
-- The design's ridge `deckDepth` of 16m and its 40m inner face fight the grass
-  ribbon at +22 and the drop ribbon that `buildWorld()` already lays. Theming
-  reconciles the two rather than stacking them.
+- The design's ridge `deckDepth` of 16m was kept, not reduced to make the
+  numbers agree: the deck skirt hangs at the kerb's outer edge (half-width +
+  `KERB`) and only where the road is solid, while the drop ribbon sits much
+  further out (half-width + 22, matching the grass) and only over a void —
+  the two never share a segment or a radius, so there is no clip or z-fight
+  between them. Checked directly (bounding boxes plus a debug camera at a
+  cliff void): at the solid/void boundary the skirt's underside lands about
+  2m below the drop ribbon's floor at the neighbouring node, which reads as
+  the road being cut a little deeper into the mountain than the void beside
+  it drops — not a glitch, and invisible from the normal chase camera, which
+  never looks up under the road's edge. The design's 40m inner rock face is
+  separate scenery, not this depth, and is still Task 5's to place — the
+  fold-cap constraint above still binds it.
 - Scenery is client-side decoration. It never touches `shared/kart.js`, so it
   cannot change a lap time or a collision. Placement is still seeded off the
   track key so two players see the same trees.

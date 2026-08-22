@@ -17,7 +17,7 @@ import { cleanCode } from '../shared/protocol.js'
 import { startInput, currentBits, isTyping } from './input.js'
 import { resyncPrediction, withPrediction } from './kart-predict.js'
 import { foldCapped } from './kart-ribbon.js'
-import { themeFor, cssVars } from './kart-themes.js'
+import { themeFor, cssVars, worldColors } from './kart-themes.js'
 import { statsFor } from './kart-stats.js'
 import { planFor, elevFor } from './kart-plan.js'
 import {
@@ -159,6 +159,16 @@ const SHELL_KINDS = ['green', 'red', 'blue']
 const HAZARD_KINDS = ['banana', 'trap', 'bomb']
 const ITEM_SCALE = 2.6 // models are about 1.2 across; a kart is KART_R 2.2
 const BOX_HALF = 0.43 * ITEM_SCALE // half an item box, which is what it spins about
+
+// The deck skirt's depth is per-theme (worldColors().deckDepth) — a lagoon
+// causeway sits just above the tide flats, the ridge road is cut into a
+// mountainside, and one constant cannot be both.
+// The kerb alternates colour every this many metres of arc length, not every
+// node: the real tracks sample a node every 7-14m, so alternating per node
+// gives 14-28m stripes, far coarser than the two-sample stripe the design's
+// 1m-per-sample curve produced. 6m keeps the stripe short enough to read as a
+// kerb rather than a lane marking.
+const KERB_STRIPE = 6
 
 const AI_NAMES = ['Bolt', 'Ripsaw', 'Comet', 'Nitro', 'Sledge']
 const SOLO_ID = 1
@@ -1035,9 +1045,10 @@ function initRenderer() {
   renderer = new THREE.WebGLRenderer({ canvas: el('view'), antialias: true })
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
 
+  // Background and fog are set in buildWorld() below, not here: the track can
+  // change without initRenderer running again, and the sky has to change with
+  // it.
   scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x0b0e14)
-  scene.fog = new THREE.Fog(0x0b0e14, 120, 320)
 
   camera = new THREE.PerspectiveCamera(60, 1, 1, 900)
   camera.position.set(0, 40, 90)
@@ -1065,11 +1076,22 @@ function buildWorld() {
   world = new THREE.Group()
   scene.add(world)
 
+  // Every colour below comes from the loaded track's theme, not a literal —
+  // this is the one call buildWorld makes to pick a colour, and every mesh it
+  // builds after this reads from `colors` rather than writing its own.
+  const colors = worldColors(K.activeTrack())
+
+  // Set here rather than in initRenderer: the track can change without that
+  // running again, and the sky and the haze in the distance have to change
+  // with it.
+  scene.background = new THREE.Color(colors.background)
+  scene.fog = new THREE.Fog(colors.background, 120, 320)
+
   // Far below the lowest dip, so the hills never poke through it: at this
   // distance it is a horizon rather than ground you look at.
   const ground = new THREE.Mesh(
     new THREE.CircleGeometry(K.TRACK_R * 2.2, 64),
-    new THREE.MeshStandardMaterial({ color: 0x16301f, roughness: 1 }),
+    new THREE.MeshStandardMaterial({ color: colors.ground, roughness: 1, name: 'ground' }),
   )
   ground.rotation.x = -Math.PI / 2
   ground.position.y = -34
@@ -1085,30 +1107,45 @@ function buildWorld() {
   // those two the road simply is not there, and neither is anything under it.
   const gap = (i) => K.jumpAt(K.TRACK.cum[i]) !== null
   const road = (i) => !gap(i) && !gap((i + 1) % K.TRACK_N)
+  // Which of the kerb's two colours node i sits in, read off arc length so
+  // the stripe length holds regardless of how densely the track is sampled
+  // there — see KERB_STRIPE above.
+  const kerbTone = (i) => Math.floor(K.TRACK.cum[i] / KERB_STRIPE) % 2
 
   // Grass that climbs with the road, so the tarmac is laid on a hillside rather
   // than floating over a flat green plate. Kept in close: pushed much further
   // out, the inside of the hairpin folds over itself.
-  world.add(ribbon((i) => half(i) + 22, -0.35, 0x1c3a26, 1, solid))
+  world.add(ribbon((i) => half(i) + 22, -0.35, colors.grass, 1, solid, 'grass'))
   // Only where the ground gives out: the drop. No wider than the grass it
   // replaces, or it wedges out past the hillside as a black shard, and far
   // enough down to read as somewhere you would not want to be.
-  world.add(ribbon((i) => half(i) + 22, -14, 0x05070c, 1, (i) => !solid(i)))
-  world.add(ribbon((i) => half(i) + K.KERB, 0.01, 0x6b4a22, 1, solid)) // the kerb, then
-  world.add(ribbon(half, 0.03, 0x49536b, 1, road)) // the tarmac on top of it
+  world.add(ribbon((i) => half(i) + 22, -14, colors.drop, 1, (i) => !solid(i), 'drop'))
+  // The kerb, two-tone rather than one mesh: alternating the tint and the
+  // kerb-light colour every KERB_STRIPE metres of arc length.
+  world.add(ribbon((i) => half(i) + K.KERB, 0.01, colors.kerbTint, 1, (i) => solid(i) && kerbTone(i) === 0, 'kerb'))
+  world.add(ribbon((i) => half(i) + K.KERB, 0.01, colors.kerbLight, 1, (i) => solid(i) && kerbTone(i) === 1, 'kerb'))
+  // A vertical skirt hanging under the kerb's outer edge, so the road reads as
+  // a deck standing above the drop rather than a decal laid over it. In
+  // addition to the drop ribbon, not instead of it — the drop is what makes a
+  // void look like somewhere you can go off, and the skirt does not replace
+  // that read, it just gives the road itself some thickness.
+  for (const side of [1, -1]) {
+    world.add(wall((i) => side * (half(i) + K.KERB), -colors.deckDepth, solid, colors.deck, 'deck'))
+  }
+  world.add(ribbon(half, 0.03, colors.tarmac, 1, road, 'tarmac')) // the tarmac on top of it
   // The racing line, in dashes rather than one continuous stripe: a solid line
   // gives the eye nothing to track, and the dashes flicking past the nose are
   // most of what tells you how fast you are actually going.
-  world.add(dashes(0.4, 0.05, 0xffffff, 0.4, road))
+  world.add(dashes(0.4, 0.05, colors.line, 0.4, road, 'line'))
 
   // The barrier, as a wall either side — with the void stretches left open,
   // which is what makes them look like somewhere you can go off.
   for (const side of [1, -1]) {
-    world.add(wall((i) => side * (half(i) + K.KERB), 2.4, solid))
+    world.add(wall((i) => side * (half(i) + K.KERB), 2.4, solid, colors.barrier, 'barrier'))
   }
 
   buildFinish()
-  buildPads()
+  buildPads(colors.boostPad)
 
   // Item boxes: one model per spot, hidden while that box is on its cooldown.
   for (const box of K.boxSpots()) {
@@ -1118,6 +1155,16 @@ function buildWorld() {
     const model = buildItem('box')
     model.scale.setScalar(ITEM_SCALE)
     model.position.y = -BOX_HALF
+    // Retinted per-instance, not in kart-items.js: that file also builds the
+    // box for the item gallery page, which stays gold regardless of track.
+    // Each call to buildItem() makes its own fresh materials, so this only
+    // ever touches the copy standing in this world.
+    model.traverse((part) => {
+      if (part.isMesh && (part.material.name === 'box_gold' || part.material.name === 'gold')) {
+        part.material.color.setHex(colors.itemBox)
+        part.material.name = 'item-box'
+      }
+    })
     const mesh = new THREE.Group()
     mesh.add(model)
     mesh.position.set(box.x, K.heightAt(box.s) + BOX_HALF + 0.6, box.y)
@@ -1132,14 +1179,15 @@ function buildWorld() {
  * heading and pitched to its gradient, or a flat panel laid on a hillside cuts
  * into the tarmac at one end and floats off it at the other.
  */
-function buildPads() {
+function buildPads(padColor) {
   const canvas = document.createElement('canvas')
   canvas.width = 128
   canvas.height = 64
   const g = canvas.getContext('2d')
   g.fillStyle = '#241f3d'
   g.fillRect(0, 0, 128, 64)
-  g.strokeStyle = '#8bffe4'
+  // The chevrons themselves, in the theme's pad colour.
+  g.strokeStyle = padColor
   g.lineWidth = 11
   g.lineCap = 'butt'
   // Three chevrons pointing along +x, which the plane below lines up with the
@@ -1152,7 +1200,7 @@ function buildPads() {
     g.stroke()
   }
   const texture = new THREE.CanvasTexture(canvas)
-  const material = new THREE.MeshBasicMaterial({ map: texture })
+  const material = new THREE.MeshBasicMaterial({ map: texture, name: 'boost-pad' })
 
   for (const pad of K.padSpots()) {
     // Length along the road first, width across it second: the geometry is laid
@@ -1224,7 +1272,7 @@ function buildFinish() {
  * A flat strip following the centre line. `halfWidth` is a function of the node
  * index, and `keep` decides which segments are drawn at all.
  */
-function ribbon(halfWidth, y, color, opacity = 1, keep) {
+function ribbon(halfWidth, y, color, opacity = 1, keep, name) {
   // `y` is a height above the road now, not a height above the world.
   const geo = strip(halfWidth, (x, z, i) => [x, nodeY(i) + y, z], keep)
   return new THREE.Mesh(
@@ -1235,12 +1283,13 @@ function ribbon(halfWidth, y, color, opacity = 1, keep) {
       transparent: opacity < 1,
       opacity,
       side: THREE.DoubleSide,
+      name,
     }),
   )
 }
 
 /** Every other segment of the centre line, as a flat dash. */
-function dashes(halfWidth, y, color, opacity, keep = () => true) {
+function dashes(halfWidth, y, color, opacity, keep = () => true, name) {
   const pts = K.TRACK.pts
   const verts = []
   const idx = []
@@ -1263,12 +1312,17 @@ function dashes(halfWidth, y, color, opacity, keep = () => true) {
   geo.computeVertexNormals()
   return new THREE.Mesh(
     geo,
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide }),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide, name }),
   )
 }
 
-/** A vertical band standing on the polyline, offset sideways by `offset(i)`. */
-function wall(offset, height, keep) {
+/**
+ * A vertical band standing on the polyline, offset sideways by `offset(i)`.
+ * `height` may be negative — a band hanging below the polyline rather than
+ * standing above it, which is how the deck skirt reuses this instead of its
+ * own geometry.
+ */
+function wall(offset, height, keep, color, name) {
   const n = K.TRACK.pts.length
   const verts = []
   for (let i = 0; i < n; i++) {
@@ -1277,7 +1331,7 @@ function wall(offset, height, keep) {
   }
   return new THREE.Mesh(
     geometryFrom(verts, n, keep),
-    new THREE.MeshStandardMaterial({ color: 0x596b8c, roughness: 0.8, side: THREE.DoubleSide }),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.8, side: THREE.DoubleSide, name }),
   )
 }
 

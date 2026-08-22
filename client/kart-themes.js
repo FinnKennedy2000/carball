@@ -34,6 +34,8 @@ export const THEMES = {
     road: '#22262f',
     kerb: '#d7d7de',
     edge: '#3a4152',
+    deck: '#171a22',
+    deckDepth: 3.2,
     pad: '#cbb98a',
     bg: 'radial-gradient(110% 80% at 20% 0%, rgba(145,132,217,0.13) 0%, transparent 60%), linear-gradient(180deg, #10141f 0%, #0b0e14 70%)',
     // The spec gives the circuit one background layer, not two. `atmo` is an
@@ -62,6 +64,8 @@ export const THEMES = {
     road: '#1c2b33',
     kerb: '#dce6e6',
     edge: '#2f4d57',
+    deck: '#14222a',
+    deckDepth: 1.4,
     pad: '#cbb98a',
     bg: 'radial-gradient(120% 90% at 18% 0%, rgba(111,195,201,0.16) 0%, transparent 62%), linear-gradient(180deg, #0c1c25 0%, #07131a 72%)',
     atmo: 'repeating-linear-gradient(0deg, rgba(111,195,201,0.045) 0 1px, transparent 1px 16px), radial-gradient(70% 40% at 82% 96%, rgba(111,195,201,0.10) 0%, transparent 70%)',
@@ -80,6 +84,8 @@ export const THEMES = {
     road: '#232a25',
     kerb: '#dfe6dc',
     edge: '#374b3b',
+    deck: '#141c16',
+    deckDepth: 1.0,
     pad: '#cbb98a',
     bg: 'radial-gradient(120% 90% at 22% 0%, rgba(143,196,140,0.14) 0%, transparent 60%), linear-gradient(180deg, #101c14 0%, #08110c 74%)',
     atmo: 'radial-gradient(22% 30% at 14% 22%, rgba(143,196,140,0.09) 0%, transparent 70%), radial-gradient(18% 26% at 62% 12%, rgba(143,196,140,0.07) 0%, transparent 70%), radial-gradient(26% 34% at 88% 62%, rgba(143,196,140,0.06) 0%, transparent 72%)',
@@ -98,6 +104,8 @@ export const THEMES = {
     road: '#2a221e',
     kerb: '#e6ddd2',
     edge: '#57392a',
+    deck: '#1b1512',
+    deckDepth: 1.8,
     pad: '#e8c98f',
     bg: 'radial-gradient(110% 80% at 20% 0%, rgba(224,150,92,0.13) 0%, transparent 58%), linear-gradient(180deg, #1a1210 0%, #0d0908 76%)',
     atmo: 'radial-gradient(80% 46% at 50% 104%, rgba(224,150,92,0.20) 0%, transparent 68%), radial-gradient(28% 20% at 12% 88%, rgba(224,110,60,0.12) 0%, transparent 70%)',
@@ -116,6 +124,8 @@ export const THEMES = {
     road: '#232a33',
     kerb: '#e4ecf4',
     edge: '#3d4c5c',
+    deck: '#2a2f36',
+    deckDepth: 16,
     pad: '#cbb98a',
     bg: 'radial-gradient(120% 90% at 24% 0%, rgba(143,182,217,0.15) 0%, transparent 62%), linear-gradient(180deg, #121a24 0%, #080c12 76%)',
     atmo: 'repeating-linear-gradient(112deg, rgba(200,222,240,0.035) 0 2px, transparent 2px 30px), radial-gradient(60% 34% at 50% 100%, rgba(143,182,217,0.10) 0%, transparent 70%)',
@@ -138,6 +148,8 @@ export const THEMES = {
     road: '#272130',
     kerb: '#e4dcea',
     edge: '#4b3459',
+    deck: '#1b1522',
+    deckDepth: 2.2,
     pad: '#cbb98a',
     bg: 'radial-gradient(120% 90% at 20% 0%, rgba(193,132,217,0.15) 0%, transparent 60%), linear-gradient(180deg, #170f1d 0%, #0a070d 76%)',
     atmo: 'repeating-linear-gradient(64deg, rgba(193,132,217,0.05) 0 1px, transparent 1px 46px), radial-gradient(50% 40% at 76% 88%, rgba(193,132,217,0.12) 0%, transparent 70%)',
@@ -187,4 +199,50 @@ export function hex(key, token) {
     hexCache.set(cacheKey, value)
   }
   return value
+}
+
+/** `color`'s channels scaled by `factor` (0-1) — a darker shade of the same hue. */
+function shade(color, factor) {
+  const r = Math.round(((color >> 16) & 0xff) * factor)
+  const g = Math.round(((color >> 8) & 0xff) * factor)
+  const b = Math.round((color & 0xff) * factor)
+  return (r << 16) | (g << 8) | b
+}
+
+/**
+ * The numeric colours client/kart.js needs to build and light one track's
+ * world. buildWorld() and initRenderer() call this and pick no literal colour
+ * of their own — every world colour comes from here, so a theme change is a
+ * change to this module alone.
+ *
+ * `tarmac`, `kerbTint`, `kerbLight`, `line`, `itemBox` and `deck` are theme
+ * tokens read straight off THEMES. `deckDepth` is the matching per-theme
+ * metres for the deck skirt — a lagoon causeway sits just above the tide
+ * flats, the ridge road is cut into a mountainside, and one constant cannot
+ * be both. `background`, `ground`, `grass` and `drop` are shades of `edge`,
+ * the one token that is already a muted, mid-dark version of the theme's
+ * hue: scaling its channels down keeps the ground, the void and the sky
+ * looking like they belong to the same track without inventing new hex
+ * literals this file does not already carry (see the header comment above
+ * on why every string here is transcribed from the spec). `boostPad` is the
+ * one colour field that stays a `#rrggbb` string rather than a number: it
+ * feeds a 2D canvas context, not a THREE.Color.
+ */
+export function worldColors(key) {
+  const edge = hex(key, 'edge')
+  return {
+    background: shade(edge, 0.35),
+    ground: shade(edge, 0.42),
+    grass: shade(edge, 0.58),
+    drop: shade(edge, 0.09),
+    deck: hex(key, 'deck'),
+    deckDepth: themeFor(key).deckDepth,
+    barrier: edge,
+    tarmac: hex(key, 'road'),
+    kerbTint: hex(key, 'tint'),
+    kerbLight: hex(key, 'kerb'),
+    line: hex(key, 'kerb'),
+    itemBox: hex(key, 'tint'),
+    boostPad: themeFor(key).pad,
+  }
 }
