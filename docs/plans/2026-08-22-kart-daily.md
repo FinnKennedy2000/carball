@@ -282,6 +282,32 @@ test('a slot cycles the whole pool for a track before repeating', () => {
   }
 })
 
+// The bug this caught in review: `visit` is constant across a six-day block, so
+// every day in the block takes the same position in its track's cycle. Slot 3's
+// pool is composed the same on all six tracks, so with the track absent from the
+// shuffle seed all six days dealt the identical objective.
+test('a block of six days does not deal one slot the same objective throughout', () => {
+  for (let block = 0; block < 20; block++) {
+    for (const slot of [1, 2, 3]) {
+      const keys = []
+      for (let i = 0; i < 6; i++) keys.push(dailyFor(block * 6 + i).objectives[slot - 1].key)
+      assert.ok(new Set(keys).size > 1, `block ${block} slot ${slot} was all ${keys[0]}`)
+    }
+  }
+})
+
+test('the same objective rarely lands in the same slot two days running', () => {
+  let repeats = 0
+  for (let d = 1; d < 400; d++) {
+    const before = dailyFor(d - 1).objectives
+    const now = dailyFor(d).objectives
+    for (let i = 0; i < 3; i++) if (before[i].key === now[i].key) repeats++
+  }
+  // 1200 slot-transitions. Independent shuffles per track put the floor near
+  // 1-in-7 (~170); the bug this replaced scored 719.
+  assert.ok(repeats < 300, `${repeats} of 1200 transitions repeated`)
+})
+
 function supports(track, needs) {
   const t = TRACKS[track]
   if (needs === 'jumps') return t.jumps.length > 0
@@ -419,7 +445,16 @@ function pickFor(slot, track, day) {
   const pool = eligible.length ? eligible : ROSTER.filter((o) => o.slot === slot && o.needs === null)
   const visit = Math.floor(day / TRACK_KEYS.length)
   const era = Math.floor(visit / pool.length)
-  const seed = (Math.imul(era + 1, 2654435761) ^ Math.imul(slot + 1, 40503)) >>> 0
+  // The track is in the seed, and it has to be. `visit` is constant across the
+  // six days of a block, so the position within the cycle is the same for all
+  // six — and slot 3's pool is composed identically on every track, so without
+  // the track here an identical shuffle hands out the same objective six days
+  // running. That is the repetition this whole scheme exists to prevent.
+  const seed =
+    (Math.imul(era + 1, 2654435761) ^
+      Math.imul(slot + 1, 40503) ^
+      Math.imul(TRACK_KEYS.indexOf(track) + 1, 2246822519)) >>>
+    0
   return shuffled(pool, seed)[mod(visit, pool.length)]
 }
 
