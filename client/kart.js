@@ -809,7 +809,11 @@ function shareBlock(daily, ms, met, s) {
   if (s.time > 0) streaks.push(`🔥 ${s.time} day streak`)
   if (s.perfect > 0) streaks.push(`${s.perfect} perfect in a row`)
   if (streaks.length) lines.push(streaks.join(' · '))
-  lines.push('', `${location.origin}${location.pathname}#daily`)
+  // vercel.json sets cleanUrls, so /kart and /kart.html are the same page.
+  // Share the tidy one — a link with .html in it is the sort of thing people
+  // don't paste.
+  const path = location.pathname.replace(/\.html$/, '')
+  lines.push('', `${location.origin}${path}#daily`)
   return lines.join('\n')
 }
 
