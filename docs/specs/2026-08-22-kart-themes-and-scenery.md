@@ -215,7 +215,7 @@ Verbatim, in this order. Swatch first, then the text.
 - a `color-divider` hairline
 - the theme blurb, in the tint
 - the track's `note`
-- its three `notes`, one paragraph each
+- its `notes`, one paragraph each — three for the five new tracks, two for the circuit
 
 Note the legend's boost-pad and jump swatches stay `#cbb98a` on every card,
 including Foundry, even though Foundry's pads are `#e8c98f` in the plan and in
@@ -224,6 +224,16 @@ preserving: the swatch uses the theme's `pad` so the legend describes the card
 it sits on.
 
 ### Track notes
+
+**circuit** — *None of it is the same corner twice: two hairpins you have to
+brake for, three long radii you can carry, and a hook with a blind exit.*
+- The tarmac breathes from 32m across the line to 14m in the narrows. Four of those narrows have no barrier.
+- All six chassis solve to 63.4–68.5s a lap here, so it sits between Foundry Loop and Cliff Spiral on this ladder.
+
+The design's third paragraph put this at 69.57–69.64s a lap; corrected here
+against the measured ladder (190.2–205.4s for three laps), which puts it at
+63.4–68.5s. The point it makes — the circuit sits between Foundry Loop and
+Cliff Spiral — still holds.
 
 **bayside** — *Six bends, none tighter than 85m, joined by two long sweeps.
 Nothing punishes a bad line, so the lap is decided by the item you are holding.*
