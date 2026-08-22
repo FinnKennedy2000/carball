@@ -20,6 +20,9 @@ import { foldCapped } from './kart-ribbon.js'
 import { themeFor, cssVars, worldColors } from './kart-themes.js'
 import { statsFor } from './kart-stats.js'
 import { planFor, elevFor } from './kart-plan.js'
+import { SIM_VERSION } from '../shared/constants.js'
+import { cleared, dailyFor, dayNumber, detailOf, observe, settle, startProgress } from '../shared/kart-daily.js'
+import * as dailyStore from './kart-daily-store.js'
 import {
   configure,
   createRoom,
@@ -225,6 +228,9 @@ let isHost = false
 let roomCode = null
 let roster = []
 let results = null // the finishing order, once a room's race is over
+// The day's run, or null for a normal race. `done` stops the flag being
+// recorded twice: the OVER phase lasts many frames.
+let dailyRun = null
 let lastFrame = 0
 let accumulator = 0
 // What the item slot and the effect chips are currently showing, so neither is
@@ -232,6 +238,8 @@ let accumulator = 0
 let shownItem
 let shownCount
 let shownEffects = ''
+// The daily panel's rendered rows, so an unchanged frame skips the rebuild.
+let shownDaily = ''
 // The slot reels through every item before settling on the one you actually
 // picked up: which is which matters, and a mark that simply appears is missed
 // at the speed the rest of the screen is moving.
@@ -316,6 +324,9 @@ function wireGate() {
   // Nothing starts from this screen any more: every way in goes through the
   // chassis pick, which is where the car is chosen and Race is pressed.
   el('solo').addEventListener('click', () => showPick(startSolo))
+  // Straight in, not through showPick: the chassis is the day's, not a choice,
+  // and offering the picker would imply otherwise.
+  el('daily').addEventListener('click', startDaily)
   el('create').addEventListener('click', () => showPick(() => enterRoom(null)))
   el('join').addEventListener('click', () => pickThenJoin(el('code').value))
   el('code').addEventListener('keydown', (e) => {
@@ -371,7 +382,10 @@ function wireGate() {
   el('restart').addEventListener('click', () => {
     if (solo) {
       el('results').hidden = true
-      startSolo()
+      // Back to the same day, not a fresh random race: retrying is the daily's
+      // whole shape, and `solo` is true for both kinds of race.
+      if (dailyRun) startDaily()
+      else startSolo()
     } else if (isHost) {
       beginMatch(pickedMap())
     }
@@ -384,6 +398,17 @@ function wireGate() {
     } catch {
       // No clipboard outside a secure context — the code is the shareable part.
       el('copy').textContent = `Room code ${roomCode}`
+    }
+  })
+  el('daily-copy').addEventListener('click', async () => {
+    if (!dailyRun?.share) return
+    // A clipboard write can be refused; the button says so rather than failing
+    // silently, and the line is on screen anyway.
+    try {
+      await navigator.clipboard.writeText(dailyRun.share)
+      el('daily-copy').textContent = 'Copied'
+    } catch {
+      el('daily-copy').textContent = 'Could not copy'
     }
   })
 
@@ -897,6 +922,9 @@ function startSolo() {
   solo = true
   myId = SOLO_ID
   results = null
+  dailyRun = null
+  el('daily-panel').hidden = true
+  el('daily-result').hidden = true
   shownItem = undefined
   heldItem = undefined
   reelUntil = 0
@@ -914,6 +942,68 @@ function startSolo() {
   lastFrame = performance.now()
 }
 
+/**
+ * The daily: one kart, the day's track and chassis, and three objectives. It is
+ * startSolo with the randomness taken out — same loop, same renderer, same
+ * item boxes.
+ */
+function startDaily() {
+  const name = saveName()
+  const daily = dailyFor(dayNumber(Date.now()))
+  solo = true
+  myId = SOLO_ID
+  results = null
+  shownItem = undefined
+  heldItem = undefined
+  reelUntil = 0
+  calledLap = -1
+  flashUntil = 0
+  el('gate').hidden = true
+  el('room-strip').hidden = true
+  el('daily-result').hidden = true
+  race = K.createRace([{ id: SOLO_ID, name, ai: false, chassis: daily.chassis }], daily.seed, daily.track)
+  // After createRace, which is what loads the track the pad list comes off.
+  dailyRun = { daily, progress: startProgress(daily, race.laps), done: false }
+  shownDaily = ''
+  el('daily-panel').hidden = false
+  el('daily-title').textContent = `Daily Line #${daily.day}`
+  K.begin(race)
+  clearKarts()
+  accumulator = 0
+  lastFrame = performance.now()
+}
+
+function finishDaily() {
+  const { daily, progress } = dailyRun
+  const kart = race.karts[0]
+  const { met } = settle(progress, kart)
+  // A run that never got home has no time to record, and no ticks either.
+  if (kart.finished === null) return
+  const ms = Math.round(kart.finished * 1000)
+  const rec = dailyStore.record(
+    dailyStore.load(localStorage, daily.day, SIM_VERSION),
+    { day: daily.day, ms, met, parMs: daily.parMs }
+  )
+  dailyStore.save(localStorage, rec)
+  dailyRun.record = rec
+
+  const ticks = met.map((m) => (m ? '✓' : '✗')).join('')
+  const time = clock(kart.finished)
+  const beat = daily.parMs !== null && ms <= daily.parMs
+  const s = dailyStore.streaks(rec, daily.day)
+  el('daily-result').hidden = false
+  // A retry leaves this stale from the last run otherwise: "Copied" would go on
+  // describing a line that is no longer the one on screen.
+  el('daily-copy').textContent = 'Copy result'
+  el('daily-verdict').textContent =
+    `Daily Line #${daily.day} · ${ticks} · ${time}` + (beat ? ' · inside par' : '')
+  el('daily-streaks').textContent =
+    `time streak ${s.time} · perfect streak ${s.perfect}` +
+    (daily.parMs === null ? '' : ` · par ${clock(daily.parMs / 1000)}`)
+  // One line of text, no link and no image: it pastes into anything.
+  dailyRun.share = `Daily Line #${daily.day} ${ticks} ${time} 🔥${s.time}`
+}
+
 async function enterRoom(code) {
   const name = saveName()
   const clean = cleanCode(code || '')
@@ -923,6 +1013,9 @@ async function enterRoom(code) {
   }
   el('gate-note').textContent = clean ? 'Joining…' : 'Opening a room…'
   results = null
+  dailyRun = null
+  el('daily-panel').hidden = true
+  el('daily-result').hidden = true
   clearKarts()
   try {
     isHost = !clean
@@ -987,7 +1080,13 @@ function frame(now) {
   if (solo && race && !race.paused) {
     let steps = 0
     while (accumulator >= dt && steps < MAX_CATCHUP) {
+      // Sampled before the step: on a one-kart daily the last line crossing and
+      // the switch to OVER land on the same tick, so gating on the phase
+      // afterwards throws away the finishing lap. `step` is a no-op once OVER,
+      // so this cannot double-count.
+      const wasRacing = race.phase === 'RACE'
       K.step(race, { [myId]: currentBits() })
+      if (dailyRun && wasRacing) observe(dailyRun.progress, race.karts[0], dt)
       accumulator -= dt
       steps++
     }
@@ -1017,6 +1116,11 @@ function frame(now) {
         race = withPrediction(race, pred, myId)
       }
     }
+  }
+
+  if (dailyRun && !dailyRun.done && race && race.phase === 'OVER') {
+    dailyRun.done = true
+    finishDaily()
   }
 
   if (race) {
@@ -1939,6 +2043,7 @@ function updateHud() {
           : 0
 
   showEffects(me)
+  updateDailyPanel()
 
   // The last lap is worth calling, and so is crossing the line: both are
   // moments rather than states, so they are flashed for a couple of seconds.
@@ -2116,6 +2221,29 @@ function showTrackName(key) {
   const theme = themeFor(key)
   box.style.color = theme.tint
   box.innerHTML = `${escapeHtml(track.name)}<em>${escapeHtml(theme.label)}</em>`
+}
+
+/**
+ * The day's three, live. A price you cannot see the cost of is not a decision,
+ * so this updates as the race runs rather than only at the flag.
+ */
+function updateDailyPanel() {
+  if (!dailyRun || !race) return
+  const kart = race.karts[0]
+  if (!kart) return
+  const { daily, progress } = dailyRun
+  const rows = daily.objectives.map((o) => {
+    const met = cleared(o, progress, kart)
+    return `<li class="${met ? 'met' : ''}"><span class="tick">${met ? '✓' : '·'}</span>
+      <span class="what">${o.name}</span>
+      <span class="how">${detailOf(o, progress, kart)}</span></li>`
+  })
+  const html = rows.join('')
+  // Rebuilt only when it changed: this runs every frame.
+  if (html !== shownDaily) {
+    el('daily-list').innerHTML = html
+    shownDaily = html
+  }
 }
 
 /** Before the lights, in a room: who is in, and the host's start button. */

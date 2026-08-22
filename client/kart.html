@@ -179,9 +179,24 @@
         box-shadow: inset 0 0 0 1px currentColor;
       }
 
-      #race-info {
+      /* The left column's own stack: race-info and, once a daily is running,
+         the objectives panel under it. #controls-line already owns the literal
+         bottom-left corner, so this stacks downward from top-left instead of
+         claiming a corner of its own. */
+      #hud-left {
+        position: absolute;
         top: var(--space-6);
         left: var(--space-6);
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-4);
+      }
+      /* .panel is absolute by default, which is what a stack cannot use. */
+      #hud-left > .panel {
+        position: static;
+      }
+      #race-info {
         display: flex;
         gap: var(--space-8);
       }
@@ -189,6 +204,32 @@
         display: flex;
         flex-direction: column;
         gap: 2px;
+      }
+
+      /* The daily's three objectives, live under race-info. Dim until met, so
+         the eye finds what is still owed at a glance. */
+      .daily-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 2px;
+      }
+      .daily-list li {
+        display: grid;
+        grid-template-columns: 1em 1fr auto;
+        gap: 6px;
+        opacity: 0.6;
+      }
+      .daily-list li.met {
+        opacity: 1;
+      }
+      .daily-list .tick {
+        text-align: center;
+      }
+      .daily-list .how {
+        font-variant-numeric: tabular-nums;
+        opacity: 0.75;
       }
 
       #standings-panel {
@@ -415,6 +456,12 @@
       #results-card {
         width: 520px;
       }
+      #daily-result {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-3);
+      }
       #waiting-card {
         width: 560px;
       }
@@ -604,6 +651,7 @@
       }
 
       #solo-row,
+      #daily-row,
       #room-side {
         display: flex;
         border-radius: var(--radius-md);
@@ -617,16 +665,27 @@
         background: rgba(22, 24, 38, 0.72);
         box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-accent) 30%, transparent);
       }
-      #solo-row .what {
+      /* The daily is a peer of solo, not the main way in, so it gets the
+         room's quieter treatment rather than the accent ring. */
+      #daily-row {
+        align-items: center;
+        gap: var(--space-4);
+        background: rgba(22, 24, 38, 0.55);
+        box-shadow: inset 0 0 0 1px var(--color-neutral-900);
+      }
+      #solo-row .what,
+      #daily-row .what {
         display: flex;
         flex-direction: column;
         gap: 2px;
         flex: 1;
       }
-      #solo-row .hint {
+      #solo-row .hint,
+      #daily-row .hint {
         font-size: 11px;
       }
-      #solo-row .what b {
+      #solo-row .what b,
+      #daily-row .what b {
         font-family: var(--font-heading);
         font-weight: 500;
         font-size: 17px;
@@ -1569,22 +1628,29 @@
       <!-- A Lightning bolt going off, over everything. -->
       <div id="flash"></div>
 
-      <div id="race-info" class="panel">
-        <div>
-          <span class="label">Lap</span>
-          <span class="readout"><span id="lap">1</span><span class="sub" id="lap-total">/3</span></span>
+      <div id="hud-left">
+        <div id="race-info" class="panel">
+          <div>
+            <span class="label">Lap</span>
+            <span class="readout"><span id="lap">1</span><span class="sub" id="lap-total">/3</span></span>
+          </div>
+          <div>
+            <span class="label">Position</span>
+            <span class="readout"><span id="place">6</span><span class="sub" id="place-suffix">th</span></span>
+          </div>
+          <div>
+            <span class="label">Time</span>
+            <span class="readout" id="time">0:00.00</span>
+          </div>
+          <div>
+            <span class="label">Track</span>
+            <span class="sub" id="track-name">The circuit</span>
+          </div>
         </div>
-        <div>
-          <span class="label">Position</span>
-          <span class="readout"><span id="place">6</span><span class="sub" id="place-suffix">th</span></span>
-        </div>
-        <div>
-          <span class="label">Time</span>
-          <span class="readout" id="time">0:00.00</span>
-        </div>
-        <div>
-          <span class="label">Track</span>
-          <span class="sub" id="track-name">The circuit</span>
+
+        <div class="panel" id="daily-panel" hidden>
+          <div class="label" id="daily-title">Daily</div>
+          <ol class="daily-list" id="daily-list"></ol>
         </div>
       </div>
 
@@ -1658,6 +1724,12 @@
           <div id="result-rows"></div>
         </div>
 
+        <div id="daily-result" hidden>
+          <div class="label" id="daily-verdict"></div>
+          <div class="hint" id="daily-streaks"></div>
+          <button class="btn btn-ghost" id="daily-copy">Copy result</button>
+        </div>
+
         <div class="row">
           <button id="restart" class="btn btn-primary">Race again</button>
           <a class="btn btn-ghost" href="./">Back to home</a>
@@ -1713,6 +1785,14 @@
                   <span class="hint">starts immediately, no room needed</span>
                 </span>
                 <button id="solo" class="btn btn-primary">Go</button>
+              </div>
+
+              <div id="daily-row">
+                <span class="what">
+                  <b>Today's daily</b>
+                  <span class="hint">one track, three objectives, everyone gets the same</span>
+                </span>
+                <button id="daily" class="btn btn-secondary">Go</button>
               </div>
 
               <div id="room-side">
