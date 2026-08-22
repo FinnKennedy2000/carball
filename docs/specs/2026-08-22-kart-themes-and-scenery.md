@@ -352,9 +352,10 @@ per node gives 14–28m stripes. The kerb alternates on arc length, not index.
   crossing under the road; gantries (two legs and a beam) spanning the road;
   stacks with emissive caps in a row behind; horizontal pipe runs; a ladle.
 - **cliff / Frost ridge** — a translucent cloud deck well below; a rock cut
-  slope and inner face on the inside; a snow drift ribbon along the inner kerb;
-  marker posts along the outside; rock cones with snow caps standing out of the
-  cloud.
+  slope and inner face on the inside; a snow drift ribbon along both kerbs,
+  since "inner" flips at every corner of a closed loop and the drift is one
+  mesh; marker posts along the outside; rock cones with snow caps standing out
+  of the cloud.
 - **fracture / Rift** — plateau and rift-wall slabs either side; an emissive
   rift-light plane far below; a truss under the road (ties and struts) with
   abutments; loose slab dodecahedra hanging in the light.

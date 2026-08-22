@@ -18,6 +18,7 @@ import { startInput, currentBits, isTyping } from './input.js'
 import { resyncPrediction, withPrediction } from './kart-predict.js'
 import { foldCapped } from './kart-ribbon.js'
 import { themeFor, cssVars, worldColors } from './kart-themes.js'
+import { buildScenery } from './kart-scenery.js'
 import { statsFor } from './kart-stats.js'
 import { planFor, elevFor } from './kart-plan.js'
 import { SIM_VERSION } from '../shared/constants.js'
@@ -1174,7 +1175,12 @@ function buildWorld() {
   // worth of them on the GPU is a leak you would feel.
   if (world) {
     scene.remove(world)
-    world.traverse((o) => o.geometry?.dispose())
+    // InstancedMesh keeps an instance-matrix buffer of its own that the
+    // geometry does not own, and the scenery is nearly all instanced.
+    world.traverse((o) => {
+      o.geometry?.dispose()
+      if (o.isInstancedMesh) o.dispose()
+    })
     boxMeshes.length = 0
   }
   world = new THREE.Group()
@@ -1250,6 +1256,11 @@ function buildWorld() {
 
   buildFinish()
   buildPads(colors.boostPad)
+
+  // What stands around the road: the harbour, the orchard, the rift. All of it
+  // decoration — see client/kart-scenery.js — and all of it built from the live
+  // track state this function has already been pointed at.
+  world.add(buildScenery(K.activeTrack(), themeFor(K.activeTrack())))
 
   // Item boxes: one model per spot, hidden while that box is on its cooldown.
   for (const box of K.boxSpots()) {
