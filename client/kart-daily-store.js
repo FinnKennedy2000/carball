@@ -21,7 +21,11 @@ function empty(day, sim) {
 }
 
 const int = (n) => (Number.isInteger(n) && n >= 0 ? n : 0)
-const dayOr = (n) => (Number.isInteger(n) && n >= 0 ? n : null)
+// A day index is signed on purpose, unlike the count and the duration beside
+// it: dayNumber() returns a negative day for a clock set before the epoch and
+// dailyFor() handles one, so rejecting negatives here would silently wipe such
+// a player's streak on their next load.
+const dayOr = (n) => (Number.isInteger(n) ? n : null)
 const msOr = (n) => (Number.isFinite(n) && n > 0 ? n : null)
 
 /**

@@ -137,3 +137,15 @@ test('recording a run leaves the record it was given alone', () => {
   assert.equal(JSON.stringify(rec), snapshot, 'input was mutated')
   assert.notEqual(rec.met, next.met, 'the met array is shared between records')
 })
+
+test('a day before the epoch still round-trips', () => {
+  // dayNumber() is negative for a clock set before 2026, and that day is as
+  // real as any other. Range-checking it away wipes the streak on reload.
+  const storage = fakeStorage()
+  let rec = load(storage, -1, 1)
+  rec = record(rec, { day: -1, ms: 90_000, met: ALL, parMs: 95_000 })
+  save(storage, rec)
+  const back = load(storage, -1, 1)
+  assert.equal(back.lastTimeDay, -1)
+  assert.deepEqual(streaks(back, -1), { time: 1, perfect: 1 })
+})
