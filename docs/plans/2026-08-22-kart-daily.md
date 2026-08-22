@@ -1094,6 +1094,35 @@ test('the day keeps the best time and the best single run of ticks', () => {
   assert.deepEqual(rec.met, ALL, 'three in one run beats two in a faster one')
 })
 
+test('two runs do not combine into a day that was never run', () => {
+  let rec = load(fakeStorage(), 10, 1)
+  // Neither run is a sweep, and their union would be. A union implementation
+  // would report all three; the day's ticks are one run's or they are nothing.
+  rec = record(rec, { day: 10, ms: 92_000, met: [true, true, false], parMs: 95_000 })
+  rec = record(rec, { day: 10, ms: 93_000, met: [false, false, true], parMs: 95_000 })
+  assert.deepEqual(rec.met, [true, true, false])
+  assert.equal(rec.badgeMs, null, 'no run swept, so there is no badge time')
+})
+
+test('recording a run leaves the record it was given alone', () => {
+  const rec = load(fakeStorage(), 10, 1)
+  const snapshot = JSON.stringify(rec)
+  const next = record(rec, { day: 10, ms: 90_000, met: ALL, parMs: 95_000 })
+  assert.equal(JSON.stringify(rec), snapshot, 'input was mutated')
+  assert.notEqual(rec.met, next.met, 'the met array is shared between records')
+})
+
+test('a second run on a day does not re-claim or reset the streak', () => {
+  let rec = load(fakeStorage(), 10, 1)
+  rec = record(rec, { day: 10, ms: 90_000, met: ALL, parMs: 95_000 })
+  rec = record(rec, { day: 11, ms: 90_000, met: ALL, parMs: 95_000 })
+  assert.deepEqual(streaks(rec, 11), { time: 2, perfect: 2 })
+  // Racing again the same day must neither bump the streak nor reset it. With
+  // the once-a-day guard gone this collapses to 1.
+  rec = record(rec, { day: 11, ms: 89_000, met: ALL, parMs: 95_000 })
+  assert.deepEqual(streaks(rec, 11), { time: 2, perfect: 2 })
+})
+
 test('a streak is claimed once a day, however many runs', () => {
   let rec = load(fakeStorage(), 10, 1)
   rec = record(rec, { day: 10, ms: 90_000, met: ALL, parMs: 95_000 })
@@ -1171,7 +1200,7 @@ function empty(day, sim) {
 }
 
 const int = (n) => (Number.isInteger(n) && n >= 0 ? n : 0)
-const dayOr = (n) => (Number.isInteger(n) ? n : null)
+const dayOr = (n) => (Number.isInteger(n) && n >= 0 ? n : null)
 const msOr = (n) => (Number.isFinite(n) && n > 0 ? n : null)
 
 /**
