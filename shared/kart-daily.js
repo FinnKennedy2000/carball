@@ -5,7 +5,7 @@
 // field the kart already carries, which is why shared/kart.js is unchanged by
 // any of this — and there is a test that proves it.
 
-import { CHASSIS_KEYS, driftTier, LAPS, padSpots, TRACKS, TRACK_KEYS } from './kart.js'
+import { CHASSIS_KEYS, driftTier, halfWidthAt, LAPS, PAD_LENGTH, padSpots, project, TRACK, TRACKS, TRACK_KEYS } from './kart.js'
 import { PAR } from './kart-par.js'
 
 // Everyone is on the same day at the same instant, which is what makes a board
@@ -230,6 +230,38 @@ export function observe(p, kart, dt) {
   // The speed carried over the line, once per crossing.
   if (kart.lap > p.prevLap) p.lineSpeeds.push(speed)
   p.prevLap = kart.lap
+
+  // The price ---------------------------------------------------------------
+  if (kart.item !== null) {
+    if (!p.hadItem) p.boxLaps.add(kart.lap)
+    p.tookItem = true
+  }
+  p.hadItem = kart.item !== null
+
+  const hit = project(kart.x, kart.y)
+
+  // The sim's own off-road test, and it forgives the air: a jump over a gap has
+  // no road under it by definition, and failing someone for flying is the
+  // opposite of the intent.
+  const airborne = kart.air > 0 || kart.fell > 0 || kart.respawn > 0
+  if (!airborne && Math.abs(hit.lateral) > halfWidthAt(hit.s)) p.offRoad = true
+
+  // hitPads, including everything it skips, so a pad counted here is a pad that
+  // actually gave you the boost.
+  if (kart.respawn === 0 && kart.finished === null && kart.spin === 0) {
+    for (let i = 0; i < p.padList.length; i++) {
+      const pad = p.padList[i]
+      let along = hit.s - pad.s
+      // Wrap, so a pad near the line is not missed by a kart just short of it.
+      if (along > TRACK.length / 2) along -= TRACK.length
+      if (along < -TRACK.length / 2) along += TRACK.length
+      if (Math.abs(along) > PAD_LENGTH / 2) continue
+      if (Math.abs(hit.lateral - pad.lane) > pad.halfWidth) continue
+      p.pads.add(i)
+      if (!p.padsByLap.has(kart.lap)) p.padsByLap.set(kart.lap, new Set())
+      p.padsByLap.get(kart.lap).add(i)
+    }
+  }
 }
 
 /** Did this objective land? Throws on a key it does not know, deliberately. */
@@ -263,6 +295,20 @@ export function cleared(o, p, kart) {
       return everyLap(p, p.tierTwoLaps)
     case 'nospinjump':
       return !p.spunAfterJump
+    case 'allpads':
+      return p.padList.length > 0 && p.pads.size >= p.padList.length
+    case 'nopads':
+      return p.pads.size === 0
+    case 'padsonelap':
+      return p.padList.length > 0 && [...p.padsByLap.values()].some((s) => s.size >= p.padList.length)
+    case 'boxeachlap':
+      return everyLap(p, p.boxLaps)
+    case 'noitem':
+      return !p.tookItem
+    case 'ontarmac':
+      return !p.offRoad
+    case 'speedfloor':
+      return p.minSpeed >= o.target
     default:
       throw new Error(`unknown objective: ${o.key}`)
   }
@@ -304,6 +350,22 @@ export function detailOf(o, p, kart) {
       return `${p.tierTwoLaps.size}/${p.laps} laps`
     case 'nospinjump':
       return p.spunAfterJump ? 'lost it on a landing' : 'stuck them'
+    case 'allpads':
+      return `${p.pads.size}/${p.padList.length} pads`
+    case 'nopads':
+      return p.pads.size === 0 ? 'none touched' : `touched ${p.pads.size}`
+    case 'padsonelap': {
+      const best = [...p.padsByLap.values()].reduce((m, s) => Math.max(m, s.size), 0)
+      return `${best}/${p.padList.length} on a lap`
+    }
+    case 'boxeachlap':
+      return `${p.boxLaps.size}/${p.laps} laps`
+    case 'noitem':
+      return p.tookItem ? 'took one' : 'empty handed'
+    case 'ontarmac':
+      return p.offRoad ? 'off the road' : 'all tarmac'
+    case 'speedfloor':
+      return p.minSpeed === Infinity ? `above ${o.target} km/h` : `low of ${Math.round(p.minSpeed)} km/h`
     default:
       throw new Error(`unknown objective: ${o.key}`)
   }

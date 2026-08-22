@@ -1,8 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { IN_BACK, IN_DRIFT, IN_FWD, IN_LEFT } from '../shared/constants.js'
-import { addKart, begin, createRace, step, TRACKS, TRACK_KEYS, CHASSIS_KEYS } from '../shared/kart.js'
-import { ROSTER, dailyFor, dayNumber, DAILY_EPOCH, cleared, observe, settle, startProgress } from '../shared/kart-daily.js'
+import { addKart, begin, createRace, step, TRACKS, TRACK_KEYS, CHASSIS_KEYS, hashRace } from '../shared/kart.js'
+import { ROSTER, dailyFor, dayNumber, DAILY_EPOCH, cleared, observe, settle, startProgress, detailOf } from '../shared/kart-daily.js'
 
 const DAYS = 400
 
@@ -220,4 +220,83 @@ test('settle returns one verdict and one line of detail per objective', () => {
   assert.equal(out.detail.length, 3)
   for (const m of out.met) assert.equal(typeof m, 'boolean')
   for (const d of out.detail) assert.equal(typeof d, 'string')
+})
+
+test('a lap down the middle misses pads, which is what makes them a price', () => {
+  // The AI drives the centreline; the pads sit against the edges of the wide
+  // sections. If a centreline lap swept them all, slot 3 would cost nothing.
+  const state = createRace([], 7, 'circuit')
+  const kart = addKart(state, { id: 1, name: 'par', chassis: 'coupe' })
+  kart.ai = true
+  begin(state)
+  const p = startProgress(dailyFor(0), state.laps)
+  for (let i = 0; i < 60 * 400 && kart.finished === null; i++) {
+    step(state, {})
+    if (state.phase === 'RACE') observe(p, kart, 1 / 60)
+  }
+  assert.ok(p.padList.length > 0, 'the circuit has pads')
+  assert.ok(p.pads.size < p.padList.length, `a centreline lap took all ${p.padList.length} pads`)
+  assert.ok(!cleared(objectiveOf('allpads'), p, kart))
+})
+
+test('never touching a pad is its own objective', () => {
+  const parked = run('circuit', 'coupe', 0, 60 * 3)
+  assert.equal(parked.p.pads.size, 0)
+  assert.ok(cleared(objectiveOf('nopads'), parked.p, parked.kart))
+})
+
+test('the grass fails tarmac only, and the racing line does not', () => {
+  const online = run('circuit', 'coupe', IN_FWD, 60 * 6)
+  assert.ok(!online.p.offRoad, 'a straight launch off the grid is on the road')
+  assert.ok(cleared(objectiveOf('ontarmac'), online.p, online.kart))
+
+  // Put it well outside the road and watch one tick.
+  const { p, kart } = run('circuit', 'coupe', IN_FWD, 1)
+  kart.x += 400
+  kart.y += 400
+  observe(p, kart, 1 / 60)
+  assert.ok(p.offRoad)
+  assert.ok(!cleared(objectiveOf('ontarmac'), p, kart))
+})
+
+test('taking a box is recorded against the lap it was taken on', () => {
+  const { p, kart } = run('circuit', 'coupe', IN_FWD, 1)
+  kart.item = 0
+  observe(p, kart, 1 / 60)
+  assert.ok(p.tookItem)
+  assert.ok(p.boxLaps.has(kart.lap))
+  assert.ok(!cleared(objectiveOf('noitem'), p, kart))
+  // Held across ticks, it is still one box, not one per tick.
+  observe(p, kart, 1 / 60)
+  assert.equal(p.boxLaps.size, 1)
+})
+
+test('standing still after the grace period fails no coasting', () => {
+  const parked = run('circuit', 'coupe', 0, 60 * 6)
+  assert.ok(parked.p.minSpeed < 60)
+  assert.ok(!cleared(objectiveOf('speedfloor'), parked.p, parked.kart))
+})
+
+// The guarantee the whole design rests on: watching a race must not change it.
+test('watching a race changes nothing about it', () => {
+  const watched = createRace([{ id: 1, name: 'me', chassis: 'coupe' }], 99, 'circuit')
+  begin(watched)
+  const p = startProgress(dailyFor(0), watched.laps)
+  for (let i = 0; i < 1200; i++) {
+    step(watched, { 1: IN_FWD | IN_LEFT })
+    if (watched.phase === 'RACE') observe(p, watched.karts[0], 1 / 60)
+  }
+
+  const alone = createRace([{ id: 1, name: 'me', chassis: 'coupe' }], 99, 'circuit')
+  begin(alone)
+  for (let i = 0; i < 1200; i++) step(alone, { 1: IN_FWD | IN_LEFT })
+
+  assert.equal(hashRace(watched), hashRace(alone))
+})
+
+test('an unrecognised objective is a loud error, not a silent false', () => {
+  const { p, kart } = run('circuit', 'coupe', IN_FWD, 60 * 2)
+  const bogus = { key: 'nonesuch', slot: 3, name: 'Nonesuch', hint: '', needs: null, target: null }
+  assert.throws(() => cleared(bogus, p, kart), /nonesuch/)
+  assert.throws(() => detailOf(bogus, p, kart), /nonesuch/)
 })
