@@ -111,11 +111,24 @@ function shuffled(pool, seed) {
  * time round.
  */
 function pickFor(slot, track, day) {
-  const eligible = ROSTER.filter((o) => o.slot === slot && supports(track, o.needs))
-  const pool = eligible.length ? eligible : ROSTER.filter((o) => o.slot === slot && o.needs === null)
+  const pool = ROSTER.filter((o) => o.slot === slot && supports(track, o.needs))
+  // Cannot happen with the six tracks that exist: every slot has at least five
+  // members needing nothing. Loud rather than silently dealing from elsewhere,
+  // because a slot with no eligible objective means a new track is missing a
+  // feature the roster assumes.
+  if (!pool.length) throw new Error(`no slot ${slot} objective fits ${track}`)
   const visit = Math.floor(day / TRACK_KEYS.length)
   const era = Math.floor(visit / pool.length)
-  const seed = (Math.imul(era + 1, 2654435761) ^ Math.imul(slot + 1, 40503)) >>> 0
+  // The track is in the seed, and it has to be. `visit` is constant across the
+  // six days of a block, so the position within the cycle is the same for all
+  // six — and slot 3's pool is composed identically on every track, so without
+  // the track here an identical shuffle hands out the same objective six days
+  // running. That is the repetition this whole scheme exists to prevent.
+  const seed =
+    (Math.imul(era + 1, 2654435761) ^
+      Math.imul(slot + 1, 40503) ^
+      Math.imul(TRACK_KEYS.indexOf(track) + 1, 2246822519)) >>>
+    0
   return shuffled(pool, seed)[mod(visit, pool.length)]
 }
 
