@@ -711,6 +711,7 @@ function startDaily() {
   flashUntil = 0
   el('gate').hidden = true
   el('room-strip').hidden = true
+  el('daily-result').hidden = true
   race = K.createRace([{ id: SOLO_ID, name, ai: false, chassis: daily.chassis }], daily.seed, daily.track)
   // After createRace, which is what loads the track the pad list comes off.
   dailyRun = { daily, progress: startProgress(daily, race.laps), done: false }
@@ -830,11 +831,13 @@ function frame(now) {
   if (solo && race && !race.paused) {
     let steps = 0
     while (accumulator >= dt && steps < MAX_CATCHUP) {
+      // Sampled before the step: on a one-kart daily the last line crossing and
+      // the switch to OVER land on the same tick, so gating on the phase
+      // afterwards throws away the finishing lap. `step` is a no-op once OVER,
+      // so this cannot double-count.
+      const wasRacing = race.phase === 'RACE'
       K.step(race, { [myId]: currentBits() })
-      // Watched on the same tick the sim just ran, with the sim's own dt.
-      if (dailyRun && race.phase === 'RACE') {
-        observe(dailyRun.progress, race.karts[0], dt)
-      }
+      if (dailyRun && wasRacing) observe(dailyRun.progress, race.karts[0], dt)
       accumulator -= dt
       steps++
     }

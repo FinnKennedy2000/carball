@@ -294,6 +294,72 @@ test('watching a race changes nothing about it', () => {
   assert.equal(hashRace(watched), hashRace(alone))
 })
 
+// The 1200-tick test above never picks up a box, so it cannot catch an observer
+// that consumes the seeded PRNG (the item roll is the only in-race consumer of
+// it). An AI-driven full race does drive through boxes, so run the same
+// watched-vs-unwatched comparison there, and check a box was actually taken.
+test('watching a full, item-eating race still changes nothing about it', () => {
+  const watched = createRace([], 7, 'bayside')
+  const wKart = addKart(watched, { id: 1, name: 'par', chassis: 'wedge' })
+  wKart.ai = true
+  begin(watched)
+  const p = startProgress(dailyFor(0), watched.laps)
+  for (let i = 0; i < 60 * 400 && watched.phase !== 'OVER'; i++) {
+    const wasRacing = watched.phase === 'RACE'
+    step(watched, {})
+    if (wasRacing) observe(p, wKart, 1 / 60)
+  }
+
+  const alone = createRace([], 7, 'bayside')
+  const aKart = addKart(alone, { id: 1, name: 'par', chassis: 'wedge' })
+  aKart.ai = true
+  begin(alone)
+  for (let i = 0; i < 60 * 400 && alone.phase !== 'OVER'; i++) step(alone, {})
+
+  assert.equal(hashRace(watched), hashRace(alone))
+  assert.ok(p.tookItem, 'the watched race never picked up an item')
+})
+
+test('the finishing lap is watched, so a flying finish can be cleared', () => {
+  const state = createRace([], 7, 'bayside')
+  const kart = addKart(state, { id: 1, name: 'par', chassis: 'wedge' })
+  // Seated as a person then handed to the AI, so it drives the named chassis
+  // down the centreline — addKart deals an AI its own chassis otherwise.
+  kart.ai = true
+  begin(state)
+  const p = startProgress(dailyFor(0), state.laps)
+  // The client's own gating: sample the phase before the step, or the tick that
+  // carries the last crossing is thrown away.
+  for (let i = 0; i < 60 * 400 && state.phase !== 'OVER'; i++) {
+    const wasRacing = state.phase === 'RACE'
+    step(state, {})
+    if (wasRacing) observe(p, kart, 1 / 60)
+  }
+  assert.equal(state.phase, 'OVER')
+  assert.notEqual(kart.finished, null)
+  assert.equal(p.lineSpeeds.length, state.laps, 'every lap crossing should be recorded')
+  assert.ok(cleared(objectiveOf('flatoutline'), p, kart))
+})
+
+test('settle reports on every objective of a finished day', () => {
+  const state = createRace([], 7, 'circuit')
+  const kart = addKart(state, { id: 1, name: 'par', chassis: 'coupe' })
+  kart.ai = true
+  begin(state)
+  const daily = dailyFor(0)
+  const p = startProgress(daily, state.laps)
+  for (let i = 0; i < 60 * 400 && state.phase !== 'OVER'; i++) {
+    const wasRacing = state.phase === 'RACE'
+    step(state, {})
+    if (wasRacing) observe(p, kart, 1 / 60)
+  }
+  const out = settle(p, kart)
+  assert.equal(out.met.length, 3)
+  assert.equal(out.detail.length, 3)
+  for (const m of out.met) assert.equal(typeof m, 'boolean')
+  for (const d of out.detail) assert.ok(d.length > 0)
+})
+
 test('an unrecognised objective is a loud error, not a silent false', () => {
   const { p, kart } = run('circuit', 'coupe', IN_FWD, 60 * 2)
   const bogus = { key: 'nonesuch', slot: 3, name: 'Nonesuch', hint: '', needs: null, target: null }

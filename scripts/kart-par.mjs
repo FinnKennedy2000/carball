@@ -20,7 +20,15 @@ function parFor(track, chassis) {
   const kart = addKart(state, { id: 1, name: 'par', chassis })
   kart.ai = true
   begin(state)
-  for (let i = 0; i < CEILING && kart.finished === null; i++) step(state, {})
+  for (let i = 0; i < CEILING && kart.finished === null; i++) {
+    step(state, {})
+    // Empty-handed on purpose. On a one-kart race the roll returns the leader
+    // row — bananas, shells, fake boxes — which the AI lays down and then drives
+    // into, spinning eight to sixteen times a run and leaving par 14-17% slow.
+    // Par is meant to be a clean lap, not a blooper reel.
+    kart.item = null
+    kart.itemCount = 0
+  }
   if (kart.finished === null) throw new Error(`${track}/${chassis}: the AI never finished`)
   return Math.round(kart.finished * 1000)
 }

@@ -6,12 +6,12 @@
 export const PAR_SIM_VERSION = 1
 
 export const PAR = {
-  circuit: { coupe: 199183, wedge: 190233, van: 205433, roadster: 201517, openwheel: 202100, bike: 190917 },
-  bayside: { coupe: 122317, wedge: 116050, van: 127183, roadster: 126433, openwheel: 129550, bike: 117250 },
-  grove: { coupe: 151567, wedge: 141700, van: 157567, roadster: 154317, openwheel: 159917, bike: 143117 },
-  foundry: { coupe: 179367, wedge: 165433, van: 186483, roadster: 181083, openwheel: 185650, bike: 167500 },
-  cliff: { coupe: 209817, wedge: 195500, van: 220133, roadster: 213950, openwheel: 219283, bike: 196167 },
-  fracture: { coupe: 243933, wedge: 224483, van: 250067, roadster: 244717, openwheel: 250967, bike: 226767 },
+  circuit: { coupe: 175483, wedge: 163950, van: 179583, roadster: 172867, openwheel: 177333, bike: 163017 },
+  bayside: { coupe: 109333, wedge: 100300, van: 113867, roadster: 112150, openwheel: 115267, bike: 102550 },
+  grove: { coupe: 132917, wedge: 121917, van: 138433, roadster: 136367, openwheel: 140150, bike: 124667 },
+  foundry: { coupe: 159200, wedge: 145983, van: 165817, roadster: 163367, openwheel: 167900, bike: 149333 },
+  cliff: { coupe: 187950, wedge: 172300, van: 195700, roadster: 192867, openwheel: 198217, bike: 176283 },
+  fracture: { coupe: 213750, wedge: 196017, van: 222617, roadster: 219317, openwheel: 225367, bike: 200517 },
 }
 
 export default PAR
