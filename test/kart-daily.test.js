@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { TRACKS, TRACK_KEYS, CHASSIS_KEYS } from '../shared/kart.js'
-import { ROSTER, dailyFor, dayNumber, DAILY_EPOCH } from '../shared/kart-daily.js'
+import { IN_BACK, IN_DRIFT, IN_FWD, IN_LEFT } from '../shared/constants.js'
+import { addKart, begin, createRace, step, TRACKS, TRACK_KEYS, CHASSIS_KEYS } from '../shared/kart.js'
+import { ROSTER, dailyFor, dayNumber, DAILY_EPOCH, cleared, observe, settle, startProgress } from '../shared/kart-daily.js'
 
 const DAYS = 400
 
@@ -130,3 +131,86 @@ function supports(track, needs) {
   if (needs === 'voids') return t.voids.length > 0
   return true
 }
+
+/** A one-kart daily-shaped race, stepped with fixed input, watched throughout. */
+function run(track, chassis, bits, ticks) {
+  const state = createRace([{ id: 1, name: 'me', chassis }], 7, track)
+  const kart = state.karts[0]
+  begin(state)
+  const p = startProgress({ ...dailyFor(0), track, chassis }, state.laps)
+  for (let i = 0; i < ticks; i++) {
+    step(state, { 1: typeof bits === 'function' ? bits(i, kart) : bits })
+    if (state.phase === 'RACE') observe(p, kart, 1 / 60)
+  }
+  return { state, kart, p }
+}
+
+const objectiveOf = (key) => ROSTER.find((o) => o.key === key)
+
+test('drifting for long enough clears drift school, and not drifting does not', () => {
+  const held = run('circuit', 'coupe', IN_FWD | IN_LEFT | IN_DRIFT, 60 * 12)
+  assert.ok(held.p.driftFor >= 8, `only drifted ${held.p.driftFor.toFixed(1)}s`)
+  assert.ok(cleared(objectiveOf('drifttime'), held.p, held.kart))
+
+  const straight = run('circuit', 'coupe', IN_FWD, 60 * 12)
+  assert.equal(straight.p.driftFor, 0)
+  assert.ok(!cleared(objectiveOf('drifttime'), straight.p, straight.kart))
+})
+
+test('a boost lights the jets counter and a standstill does not', () => {
+  // Drifting then releasing is the only way to a boost with no items in play.
+  const drifted = run('circuit', 'coupe', (i) => (i < 180 ? IN_FWD | IN_LEFT | IN_DRIFT : IN_FWD), 60 * 20)
+  assert.ok(drifted.p.boostFor > 0, 'a released drift should light a boost')
+
+  const parked = run('circuit', 'coupe', 0, 60 * 5)
+  assert.equal(parked.p.boostFor, 0)
+  assert.ok(!cleared(objectiveOf('boostlit'), parked.p, parked.kart))
+})
+
+test('a drift charge is counted once per drift, not once per tick', () => {
+  const one = run('circuit', 'coupe', (i) => (i < 120 ? IN_FWD | IN_LEFT | IN_DRIFT : IN_FWD), 60 * 4)
+  assert.equal(one.p.charges, 1, 'one held drift is one charge')
+})
+
+test('the longest drift is the longest unbroken one, not the total', () => {
+  // Two short drifts with a gap: the total passes three seconds, the longest
+  // single one does not.
+  const bits = (i) => (i % 120 < 100 ? IN_FWD | IN_LEFT | IN_DRIFT : IN_FWD)
+  const { p, kart } = run('circuit', 'coupe', bits, 60 * 8)
+  assert.ok(p.driftFor > 3)
+  assert.ok(p.longestDrift < 3, `longest was ${p.longestDrift.toFixed(2)}s`)
+  assert.ok(!cleared(objectiveOf('longdrift'), p, kart))
+})
+
+test('a clean run keeps the clean sheet and a spin loses it', () => {
+  const clean = run('circuit', 'coupe', IN_FWD, 60 * 10)
+  assert.ok(!clean.p.spun)
+  assert.ok(cleared(objectiveOf('nospin'), clean.p, clean.kart))
+
+  const { p, kart } = run('circuit', 'coupe', IN_FWD, 1)
+  kart.spin = 1
+  observe(p, kart, 1 / 60)
+  assert.ok(p.spun)
+  assert.ok(!cleared(objectiveOf('nospin'), p, kart))
+})
+
+test('top speed is the highest reached, in km/h', () => {
+  const { p, kart } = run('circuit', 'wedge', IN_FWD, 60 * 15)
+  assert.ok(p.topSpeed > 100, `only reached ${p.topSpeed.toFixed(0)} km/h`)
+  assert.equal(Math.round(p.topSpeed), Math.round(p.topSpeed), 'a number, not NaN')
+  // Reversing never gets near it.
+  const back = run('circuit', 'wedge', IN_BACK, 60 * 15)
+  assert.ok(back.p.topSpeed < p.topSpeed)
+})
+
+test('settle returns one verdict and one line of detail per objective', () => {
+  const { p, kart } = run('circuit', 'coupe', IN_FWD, 60 * 10)
+  // Three keys this task implements, rather than a real day: a day's slot 3 is
+  // Task 4's work and settle would rightly throw on it.
+  const daily = { objectives: ['finish', 'topspeed', 'nospin'].map(objectiveOf) }
+  const out = settle({ ...p, daily }, kart)
+  assert.equal(out.met.length, 3)
+  assert.equal(out.detail.length, 3)
+  for (const m of out.met) assert.equal(typeof m, 'boolean')
+  for (const d of out.detail) assert.equal(typeof d, 'string')
+})

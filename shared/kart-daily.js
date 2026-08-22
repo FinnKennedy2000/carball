@@ -5,7 +5,7 @@
 // field the kart already carries, which is why shared/kart.js is unchanged by
 // any of this — and there is a test that proves it.
 
-import { CHASSIS_KEYS, LAPS, TRACKS, TRACK_KEYS } from './kart.js'
+import { CHASSIS_KEYS, driftTier, LAPS, padSpots, TRACKS, TRACK_KEYS } from './kart.js'
 import { PAR } from './kart-par.js'
 
 // Everyone is on the same day at the same instant, which is what makes a board
@@ -142,5 +142,176 @@ export function dailyFor(day) {
     chassis,
     parMs: PAR[track]?.[chassis] ?? null,
     objectives: [pickFor(1, track, day), pickFor(2, track, day), pickFor(3, track, day)],
+  }
+}
+
+const KMH = 3.6
+// A bad landing and the spin it causes are the same event a beat apart, so a
+// window is what connects them.
+const SPIN_AFTER_JUMP = 1.5
+// No coasting ignores the first moments after the lights: a grid start is not
+// coasting, it is a grid start.
+const FLOOR_GRACE = 2
+
+/**
+ * Everything the day's three objectives need to watch, gathered as the race
+ * runs. Built after createRace, because the pad list comes off the loaded track.
+ */
+export function startProgress(daily, laps = LAPS) {
+  return {
+    daily,
+    // The race's own lap count rather than the constant, so "on every lap"
+    // means what the race means by a lap.
+    laps,
+    t: 0,
+    padList: padSpots(),
+    prevAir: 0,
+    prevTier: 0,
+    prevLap: 0,
+    landedAt: -Infinity,
+    jumps: 0,
+    jumpLaps: new Set(),
+    topSpeed: 0,
+    minSpeed: Infinity,
+    charges: 0,
+    tierTwo: 0,
+    tierTwoLaps: new Set(),
+    driftFor: 0,
+    longestDrift: 0,
+    boostFor: 0,
+    lineSpeeds: [],
+    spun: false,
+    fellOff: false,
+    spunAfterJump: false,
+    pads: new Set(),
+    padsByLap: new Map(),
+    boxLaps: new Set(),
+    hadItem: false,
+    tookItem: false,
+    offRoad: false,
+  }
+}
+
+/** One tick's worth of watching. Reads the kart; writes only to `p`. */
+export function observe(p, kart, dt) {
+  p.t += dt
+  const speed = Math.hypot(kart.vx, kart.vy) * KMH
+  if (speed > p.topSpeed) p.topSpeed = speed
+  if (p.t > FLOOR_GRACE && kart.finished === null && speed < p.minSpeed) p.minSpeed = speed
+
+  // A landing is air falling back to zero, and it is the only moment a jump can
+  // be counted: nothing reaches a kart while it is up there.
+  if (p.prevAir > 0 && kart.air === 0) {
+    p.jumps++
+    p.jumpLaps.add(kart.lap)
+    p.landedAt = p.t
+  }
+  p.prevAir = kart.air
+
+  const tier = driftTier(kart)
+  if (tier >= 1 && p.prevTier < 1) p.charges++
+  if (tier >= 2 && p.prevTier < 2) {
+    p.tierTwo++
+    p.tierTwoLaps.add(kart.lap)
+  }
+  p.prevTier = tier
+  // driftTime resets when the drift is released, so the longest unbroken drift
+  // is simply the running maximum of it — no extra state.
+  if (kart.driftTime > 0) p.driftFor += dt
+  if (kart.driftTime > p.longestDrift) p.longestDrift = kart.driftTime
+  if (kart.boost > 0) p.boostFor += dt
+
+  if (kart.spin > 0) {
+    p.spun = true
+    if (p.t - p.landedAt < SPIN_AFTER_JUMP) p.spunAfterJump = true
+  }
+  if (kart.fell > 0 || kart.respawn > 0) p.fellOff = true
+
+  // The speed carried over the line, once per crossing.
+  if (kart.lap > p.prevLap) p.lineSpeeds.push(speed)
+  p.prevLap = kart.lap
+}
+
+/** Did this objective land? Throws on a key it does not know, deliberately. */
+export function cleared(o, p, kart) {
+  switch (o.key) {
+    case 'finish':
+      return kart.finished !== null
+    case 'jumps':
+      return p.jumps >= o.target
+    case 'topspeed':
+      return p.topSpeed >= o.target
+    case 'charges':
+      return p.charges >= o.target
+    case 'boostlit':
+      return p.boostFor >= o.target
+    case 'jumpeverylap':
+      return everyLap(p, p.jumpLaps)
+    case 'flatoutline':
+      return p.lineSpeeds.length >= p.laps && p.lineSpeeds.every((s) => s >= o.target)
+    case 'drifttime':
+      return p.driftFor >= o.target
+    case 'nospin':
+      return !p.spun
+    case 'nofall':
+      return !p.fellOff
+    case 'tiertwo':
+      return p.tierTwo >= o.target
+    case 'longdrift':
+      return p.longestDrift >= o.target
+    case 'tiertwoeverylap':
+      return everyLap(p, p.tierTwoLaps)
+    case 'nospinjump':
+      return !p.spunAfterJump
+    default:
+      throw new Error(`unknown objective: ${o.key}`)
+  }
+}
+
+function everyLap(p, set) {
+  for (let l = 0; l < p.laps; l++) if (!set.has(l)) return false
+  return true
+}
+
+/** A short line for the panel: where you are, against what it wants. */
+export function detailOf(o, p, kart) {
+  switch (o.key) {
+    case 'finish':
+      return kart.finished !== null ? 'home' : 'still out there'
+    case 'jumps':
+      return `${p.jumps}/${o.target}`
+    case 'topspeed':
+      return `${Math.round(p.topSpeed)} / ${o.target} km/h`
+    case 'charges':
+      return `${p.charges}/${o.target}`
+    case 'boostlit':
+      return `${p.boostFor.toFixed(1)}s / ${o.target}s`
+    case 'jumpeverylap':
+      return `${p.jumpLaps.size}/${p.laps} laps`
+    case 'flatoutline':
+      return `${p.lineSpeeds.filter((s) => s >= o.target).length}/${p.laps} laps`
+    case 'drifttime':
+      return `${p.driftFor.toFixed(1)}s / ${o.target}s`
+    case 'nospin':
+      return p.spun ? 'spun out' : 'clean'
+    case 'nofall':
+      return p.fellOff ? 'went off' : 'stayed on'
+    case 'tiertwo':
+      return `${p.tierTwo}/${o.target}`
+    case 'longdrift':
+      return `${p.longestDrift.toFixed(1)}s / ${o.target}s`
+    case 'tiertwoeverylap':
+      return `${p.tierTwoLaps.size}/${p.laps} laps`
+    case 'nospinjump':
+      return p.spunAfterJump ? 'lost it on a landing' : 'stuck them'
+    default:
+      throw new Error(`unknown objective: ${o.key}`)
+  }
+}
+
+export function settle(p, kart) {
+  return {
+    met: p.daily.objectives.map((o) => cleared(o, p, kart)),
+    detail: p.daily.objectives.map((o) => detailOf(o, p, kart)),
   }
 }
