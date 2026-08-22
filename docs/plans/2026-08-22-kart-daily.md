@@ -1475,6 +1475,67 @@ Beside the existing solo listener at `client/kart.js:305`, which reads
 el('daily').addEventListener('click', startDaily)
 ```
 
+- [ ] **Step 8b: Send "Race again" back to the daily**
+
+`el('restart')` at `client/kart.js:355` calls `startSolo()` whenever `solo` is
+true, and the daily sets `solo = true` — so racing again after a daily drops the
+player into a random six-kart race instead of retrying the day. The retry loop is
+the daily's whole shape ("unlimited retries, best time counts"), so it has to go
+back to the same day:
+
+```js
+  el('restart').addEventListener('click', () => {
+    if (solo) {
+      el('results').hidden = true
+      // Back to the same day, not a fresh random race: retrying is the daily's
+      // whole shape, and `solo` is true for both kinds of race.
+      if (dailyRun) startDaily()
+      else startSolo()
+    } else if (isHost) {
+      beginMatch(pickedMap())
+    }
+  })
+```
+
+`startDaily()` rebuilds `dailyRun` from scratch, so the previous run's progress
+cannot leak into the next one.
+
+- [ ] **Step 8c: Put the panel somewhere free**
+
+Every corner of the HUD is already claimed — `#race-info` top-left,
+`#standings-panel` top-right, `#controls-line` bottom-left, `#speed-panel`
+bottom-right, `#item-stack` bottom-centre. The spec asks for the day's three
+"under the existing readouts", which is `#race-info`, so give the left column a
+real container rather than guessing an offset. In `client/kart.html`, wrap the
+two panels:
+
+```html
+<div id="hud-left">
+  <div id="race-info" class="panel">…unchanged…</div>
+  <div class="panel" id="daily-panel" hidden>…unchanged…</div>
+</div>
+```
+
+Move the positioning onto the wrapper and let the panels stack:
+
+```css
+#hud-left {
+  position: absolute;
+  top: var(--space-6);
+  left: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+/* .panel is absolute by default, which is what a stack cannot use. */
+#hud-left > .panel { position: static; }
+```
+
+Then drop `top`/`left` from `#race-info` and drop the `#daily-panel` rule's
+`bottom`/`left` entirely. Nothing in `client/*.js` references `#race-info`, so
+the wrapper is safe.
+
 - [ ] **Step 9: Build, then check it by hand**
 
 Run: `pnpm build`
@@ -1613,31 +1674,6 @@ el('daily-copy').addEventListener('click', async () => {
 
 And hide the block for a normal race: in `startSolo` and `enterRoom`, beside the
 `daily-panel` line from Task 6, add `el('daily-result').hidden = true`.
-
-- [ ] **Step 5b: Send "Race again" back to the daily**
-
-`el('restart')` at `client/kart.js:355` calls `startSolo()` whenever `solo` is
-true, and the daily sets `solo = true` — so racing again after a daily drops the
-player into a random six-kart race instead of retrying the day. The retry loop is
-the daily's whole shape ("unlimited retries, best time counts"), so it has to go
-back to the same day:
-
-```js
-  el('restart').addEventListener('click', () => {
-    if (solo) {
-      el('results').hidden = true
-      // Back to the same day, not a fresh random race: retrying is the daily's
-      // whole shape, and `solo` is true for both kinds of race.
-      if (dailyRun) startDaily()
-      else startSolo()
-    } else if (isHost) {
-      beginMatch(pickedMap())
-    }
-  })
-```
-
-`startDaily()` rebuilds `dailyRun` from scratch, so the previous run's progress
-cannot leak into the next one.
 
 - [ ] **Step 6: Build and check by hand**
 
