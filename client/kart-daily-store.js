@@ -21,7 +21,7 @@ function empty(day, sim) {
 }
 
 const int = (n) => (Number.isInteger(n) && n >= 0 ? n : 0)
-const dayOr = (n) => (Number.isInteger(n) ? n : null)
+const dayOr = (n) => (Number.isInteger(n) && n >= 0 ? n : null)
 const msOr = (n) => (Number.isFinite(n) && n > 0 ? n : null)
 
 /**
