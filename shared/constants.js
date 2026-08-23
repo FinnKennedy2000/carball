@@ -85,7 +85,14 @@ export const IN_ITEM = 64
 // Aim behind. Its own key rather than the brake: firing backwards should not
 // also mean slowing down.
 export const IN_AIM = 128
-export const IN_ALL = 255
+// A softer wheel. Set alongside IN_LEFT or IN_RIGHT it asks for part lock
+// instead of all of it, which is what makes a thumb dragged a short way on a
+// touchscreen steer a little rather than everything the kart has. Nothing on a
+// keyboard sets it and neither does the AI, so par times and replays are
+// unaffected by its existence.
+export const IN_SOFT = 256
+export const SOFT_STEER = 0.45 // share of full lock the soft wheel asks for
+export const IN_ALL = 511
 
 // Rumble --------------------------------------------------------------------
 // Every knob the item mode needs. Nothing here is read unless state.mode is

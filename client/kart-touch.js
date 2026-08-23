@@ -10,14 +10,20 @@ export function isTouch() {
   return navigator.maxTouchPoints > 0 && matchMedia('(pointer: coarse)').matches
 }
 
-// How far a thumb has to travel from where it landed before the kart turns.
-// Small enough that a flick registers, wide enough that resting a thumb still
-// counts as straight.
-const STEER_DEADZONE = 12
-// Travel at which the nub is at the end of its arc. The sim steers on a bit, not
-// an angle, so this is only how far the thumb moves before the graphic pins —
-// ponytail: binary steering, wire an analog steer bit if the sim ever takes one.
-const STEER_THROW = 62
+// The wheel has three bands, because two is what made it unholdable: any drag
+// at all meant full lock, so the kart was either dead straight or scything, and
+// a thumb resting a few pixels off centre was steering the whole time.
+//
+// Straight until the thumb has moved this far. A held thumb wanders more than a
+// dozen pixels on its own, which is what a 12px neutral band could not tell from
+// a deliberate turn.
+const STEER_DEADZONE = 22
+// Past this, all of it. Between the two, the soft wheel — part lock, which is
+// the band a corner is actually held in.
+const STEER_FULL = 58
+// Where the nub stops travelling. A little past STEER_FULL so that hard over
+// looks like the end of the arc rather than the middle of it.
+const STEER_THROW = 72
 
 const HELD = {
   'tc-drift': C.IN_DRIFT,
@@ -104,7 +110,7 @@ export function releaseTouch() {
   for (const el of document.querySelectorAll('.tc.down, .tc.on')) el.classList.remove('down', 'on')
   const nub = document.getElementById('tc-nub')
   if (nub) nub.style.transform = 'translate(-50%, -50%)'
-  document.getElementById('tc-steer')?.classList.remove('down')
+  document.getElementById('tc-steer')?.classList.remove('down', 'soft', 'hard')
   push()
 }
 
@@ -186,10 +192,17 @@ function bindSteer(zone, nub) {
     const dx = e.clientX - originX
     const clamped = Math.max(-STEER_THROW, Math.min(STEER_THROW, dx))
     nub.style.transform = `translate(calc(-50% + ${clamped}px), -50%)`
-    const next = dx > STEER_DEADZONE ? C.IN_RIGHT : dx < -STEER_DEADZONE ? C.IN_LEFT : 0
-    const now = (bits & ~(C.IN_LEFT | C.IN_RIGHT)) | next
+    const throw_ = Math.abs(dx)
+    const dir = dx > 0 ? C.IN_RIGHT : C.IN_LEFT
+    const next =
+      throw_ <= STEER_DEADZONE ? 0 : throw_ < STEER_FULL ? dir | C.IN_SOFT : dir
+    const now = (bits & ~(C.IN_LEFT | C.IN_RIGHT | C.IN_SOFT)) | next
     if (now === bits) return
     bits = now
+    // The wheel says which band it is in, so the hand can feel the step rather
+    // than discovering it in the corner.
+    zone.classList.toggle('soft', (next & C.IN_SOFT) !== 0)
+    zone.classList.toggle('hard', next !== 0 && (next & C.IN_SOFT) === 0)
     push()
   })
 
@@ -197,9 +210,9 @@ function bindSteer(zone, nub) {
     if (e.pointerId !== steerId) return
     e.preventDefault()
     steerId = null
-    zone.classList.remove('down')
+    zone.classList.remove('down', 'soft', 'hard')
     nub.style.transform = 'translate(-50%, -50%)'
-    bits &= ~(C.IN_LEFT | C.IN_RIGHT)
+    bits &= ~(C.IN_LEFT | C.IN_RIGHT | C.IN_SOFT)
     push()
   }
   zone.addEventListener('pointerup', end)

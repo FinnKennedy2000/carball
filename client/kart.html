@@ -7,6 +7,18 @@
       content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
     <title>Kart</title>
+    <!-- Installed, the browser's own chrome goes: on the phone this was tested on
+         the address bar and the status bar together were a third of the height,
+         on a screen where height is the thing in short supply. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0b0e14" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Kart" />
+    <!-- iOS has no fullscreen display mode, so the page runs under the status
+         bar and the safe-area insets the HUD already uses do the rest. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="apple-touch-icon" href="/icons/kart-192.png" />
     <!-- A pasted link is the daily's only way of reaching anyone, and a bare URL
          previews as nothing. Text-only on purpose: no image to keep in sync. -->
     <meta
@@ -410,6 +422,7 @@
         top: 32%;
         left: 50%;
         transform: translate(-50%, 44px);
+        white-space: nowrap;
         font-size: 13px;
         letter-spacing: 0.18em;
         text-transform: uppercase;
@@ -426,6 +439,10 @@
         font-weight: 700;
         letter-spacing: 0.04em;
         text-shadow: 0 8px 30px rgba(0, 0, 0, 0.7);
+        /* Absolute at left:50% means the available width is half the screen, so
+           anything longer than one word wrapped — and two lines of 84px reach up
+           over the readouts. It is a banner: it is always one line. */
+        white-space: nowrap;
       }
 
       /* Cards over the race: the flag, the grid, and the way in ------------- */
@@ -438,6 +455,7 @@
       #gate[hidden],
       #waiting[hidden],
       #pause[hidden],
+      #install[hidden],
       #room-strip[hidden] {
         display: none;
       }
@@ -1421,6 +1439,26 @@
         transform: translate(-50%, -50%);
         background: rgba(233, 233, 237, 0.9);
         box-shadow: 0 2px 14px rgba(0, 0, 0, 0.55);
+        transition: background-color 0.1s linear;
+      }
+      /* The wheel has a neutral band, a soft band and hard over. The hand cannot
+         see the numbers, so the nub reports which one it is in — the step is
+         something to aim for rather than something to discover in a corner. */
+      html.touch #tc-steer.soft #tc-nub {
+        background: var(--color-accent-300);
+      }
+      html.touch #tc-steer.hard #tc-nub {
+        background: var(--color-accent);
+        box-shadow:
+          0 2px 14px rgba(0, 0, 0, 0.55),
+          0 0 0 3px color-mix(in srgb, var(--color-accent) 45%, transparent);
+      }
+      /* And the ring fills to the band, so the eye has an edge to find too. */
+      html.touch #tc-steer.soft #tc-wheel {
+        box-shadow: inset 0 0 0 2px rgba(233, 233, 237, 0.28);
+      }
+      html.touch #tc-steer.hard #tc-wheel {
+        box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--color-accent) 65%, transparent);
       }
 
       /* A pad. Round, because a thumb is round and a corner of a rounded
@@ -1706,11 +1744,28 @@
         background: rgba(22, 24, 38, 0.55);
       }
 
+      /* Lower and smaller than on a desktop: at 32% of a 390px-tall screen an
+         84px word sits on the rail, and the readouts are the one thing on the
+         HUD that must never be covered. */
       html.touch #banner {
-        font-size: calc(var(--tc-u) * 1.3);
+        top: 46%;
+        font-size: calc(var(--tc-u) * 0.92);
+        /* The body's line height turns a 54px word into an 83px box, which is a
+           fifth of the screen for something that is only ever a word. */
+        line-height: 1;
+        letter-spacing: 0.02em;
       }
       html.touch #banner-sub {
+        top: 46%;
+        transform: translate(-50%, calc(var(--tc-u) * 0.62));
         font-size: 11px;
+        /* The one line that is a sentence rather than a word, so it is allowed to
+           wrap — but centred on its own width, not the half-screen the absolute
+           box would otherwise give it. */
+        white-space: normal;
+        width: max-content;
+        max-width: 62vw;
+        text-align: center;
       }
       html.touch #daily-panel {
         position: fixed;
@@ -1781,7 +1836,8 @@
       }
       html.touch #gate-forms .field,
       html.touch #room-side,
-      html.touch #gate-note {
+      html.touch #gate-note,
+      html.touch #install {
         grid-column: 1 / -1;
       }
       html.touch #solo-row,
@@ -2019,6 +2075,13 @@
               </div>
 
               <p id="gate-note"></p>
+
+              <!-- Only ever shown if the browser says it can install: the
+                   installed game gets the whole screen back, which on a phone is
+                   worth more than anything else on this page. -->
+              <button id="install" class="btn btn-ghost" type="button" hidden>
+                Add to home screen
+              </button>
             </div>
           </div>
 

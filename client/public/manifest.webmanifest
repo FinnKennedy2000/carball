@@ -1,0 +1,27 @@
+{
+  "name": "Carball Kart",
+  "short_name": "Kart",
+  "description": "Three laps, items, first across the line wins. One daily track for everyone.",
+  "id": "/kart",
+  "start_url": "/kart",
+  "scope": "/",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#0b0e14",
+  "theme_color": "#0b0e14",
+  "categories": ["games"],
+  "icons": [
+    { "src": "/icons/kart-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/kart-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/kart-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Today's daily",
+      "short_name": "Daily",
+      "url": "/kart#daily",
+      "icons": [{ "src": "/icons/kart-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

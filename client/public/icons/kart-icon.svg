@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- A kart on a road, seen from above the way the game shows it. Everything
+       lives inside the middle 60% so the same file works as a maskable icon,
+       where the launcher is free to crop to a circle. Detail finer than this is
+       mush on a home screen. -->
+  <rect width="512" height="512" fill="#0b0e14"/>
+  <rect x="146" y="0" width="220" height="512" fill="#2b3245"/>
+  <g fill="#e8ecf4" opacity="0.85">
+    <rect x="248" y="96" width="16" height="52" rx="8"/>
+    <rect x="248" y="188" width="16" height="52" rx="8"/>
+    <rect x="248" y="364" width="16" height="52" rx="8"/>
+  </g>
+  <!-- The kart itself: boxy, because the karts in the game are. -->
+  <g>
+    <rect x="164" y="212" width="30" height="42" rx="10" fill="#0b0e14"/>
+    <rect x="318" y="212" width="30" height="42" rx="10" fill="#0b0e14"/>
+    <rect x="164" y="300" width="30" height="42" rx="10" fill="#0b0e14"/>
+    <rect x="318" y="300" width="30" height="42" rx="10" fill="#0b0e14"/>
+    <rect x="180" y="196" width="152" height="164" rx="26" fill="#3d8bff"/>
+    <rect x="204" y="228" width="104" height="74" rx="16" fill="#9184d9"/>
+  </g>
+</svg>

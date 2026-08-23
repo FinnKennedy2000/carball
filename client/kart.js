@@ -309,8 +309,54 @@ if (TOUCH) {
   }
 }
 wireGate()
+wireInstall()
 showItemSet()
 requestAnimationFrame(frame)
+
+/**
+ * Installing is the single biggest thing that can be done for a phone: the
+ * address bar and the status bar together were a third of the height on the
+ * device this was tested on, and installed they both go.
+ *
+ * The button only appears if the browser has said it can install — offering it
+ * where it does nothing is worse than not offering it, and there is no way to ask
+ * the question except by waiting to be told.
+ */
+function wireInstall() {
+  // Dev builds are excluded on purpose: a worker caching Vite's own module graph
+  // fights hot reload and outlives the change that caused it.
+  if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+    addEventListener('load', () => {
+      navigator.serviceWorker
+        .register('/sw.js')
+        .catch((err) => console.info('kart: no service worker', err?.name ?? err))
+    })
+  }
+
+  let prompt = null
+  const button = el('install')
+  addEventListener('beforeinstallprompt', (e) => {
+    // Keeping the event is the whole trick: it can only be prompted with later,
+    // from inside a tap, and only if the default was prevented here.
+    e.preventDefault()
+    prompt = e
+    button.hidden = false
+  })
+  button.addEventListener('click', async () => {
+    if (!prompt) return
+    button.hidden = true
+    const held = prompt
+    prompt = null
+    await held.prompt()
+  })
+  // Already installed, or just installed: there is nothing left to offer.
+  addEventListener('appinstalled', () => {
+    button.hidden = true
+  })
+  if (matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches) {
+    button.hidden = true
+  }
+}
 
 // Getting in ----------------------------------------------------------------
 

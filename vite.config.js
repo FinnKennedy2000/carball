@@ -2,6 +2,19 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 
 export default defineConfig({
+  plugins: [
+    {
+      // Vite stamps crossorigin on every script and stylesheet tag it emits.
+      // Every one of these files is served from the same origin as the page, so
+      // the attribute buys nothing — and it costs: a crossorigin stylesheet
+      // answered out of a service worker cache is treated as tainted, so the
+      // sheet loads, its rules are unreadable, every custom property resolves to
+      // nothing, and the installed game comes up unstyled with no error to find.
+      name: 'carball:no-crossorigin',
+      enforce: 'post',
+      transformIndexHtml: (html) => html.replace(/\s+crossorigin(?:="[^"]*")?/g, ''),
+    },
+  ],
   root: 'client',
   // .env lives at the repo root, which the server reads too. Without this Vite
   // would look inside client/ and silently bundle no configuration at all.

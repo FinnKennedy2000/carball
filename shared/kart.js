@@ -7,7 +7,19 @@
 // It shares constants.js only for the input bits and the tick rate: a kart is a
 // different vehicle from a football car and wants its own numbers.
 
-import { DT, IN_FWD, IN_BACK, IN_LEFT, IN_RIGHT, IN_BOOST, IN_DRIFT, IN_ITEM, IN_AIM } from './constants.js'
+import {
+  DT,
+  IN_FWD,
+  IN_BACK,
+  IN_LEFT,
+  IN_RIGHT,
+  IN_BOOST,
+  IN_DRIFT,
+  IN_ITEM,
+  IN_AIM,
+  IN_SOFT,
+  SOFT_STEER,
+} from './constants.js'
 import { TRACKS, TRACK_KEYS, DEFAULT_TRACK } from './kart-tracks.js'
 
 export { TRACKS, TRACK_KEYS, DEFAULT_TRACK }
@@ -924,14 +936,19 @@ function stepKart(state, kart, bits, dt) {
   }
 
   const speed = Math.hypot(kart.vx, kart.vy)
-  let steer = 0
-  if (bits & IN_LEFT) steer -= 1
-  if (bits & IN_RIGHT) steer += 1
+  // Which way, and how much of it. A keyboard only ever asks for all of it; a
+  // thumb dragged a short way asks for part, which is the difference between a
+  // wheel you can hold a line with and one that is either straight or hard over.
+  let turning = 0
+  if (bits & IN_LEFT) turning -= 1
+  if (bits & IN_RIGHT) turning += 1
+  let steer = turning * ((bits & IN_SOFT) !== 0 ? SOFT_STEER : 1)
   // The button starts a drift, the wheel decides which way, and after that the
   // direction is locked until the button comes up or the kart drops to walking
-  // pace. Holding it through a corner is the whole point.
+  // pace. Holding it through a corner is the whole point. The direction is the
+  // sign of the wheel, never its size: a drift is a state, not an amount.
   const held = (bits & IN_DRIFT) !== 0 && !spinning
-  if (held && kart.driftDir === 0 && steer !== 0 && speed > DRIFT_MIN_SPEED) kart.driftDir = steer
+  if (held && kart.driftDir === 0 && turning !== 0 && speed > DRIFT_MIN_SPEED) kart.driftDir = turning
   if (!held || speed <= DRIFT_MIN_SPEED) kart.driftDir = 0
   const drifting = kart.driftDir !== 0
   if (drifting) {
@@ -952,7 +969,7 @@ function stepKart(state, kart, bits, dt) {
     // bleeds away. Everything else this tick still applies.
     kart.heading = wrap(kart.heading + 9 * dt)
   } else if (drifting) {
-    const trim = steer === kart.driftDir ? DRIFT_TIGHT : steer === 0 ? DRIFT_HOLD : DRIFT_OPEN
+    const trim = turning === kart.driftDir ? DRIFT_TIGHT : turning === 0 ? DRIFT_HOLD : DRIFT_OPEN
     kart.heading = wrap(kart.heading + kart.driftDir * st.turn * turnScale * trim * dt)
   } else {
     // Reversing swaps left and right, the way a real car does: the wheels turn
