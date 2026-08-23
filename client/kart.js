@@ -304,6 +304,11 @@ function bandWeights(band) {
   return K.ITEMS.map((_, i) => rows.reduce((sum, row) => sum + row[i], 0))
 }
 
+// Up here rather than beside rampRise(): the road is built at module load,
+// which is before a const declared further down the file exists.
+const RAMP_LENGTH = 12
+const RAMP_RISE = 1.8
+
 const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)')
 
 configure({
@@ -1598,8 +1603,6 @@ function strip(halfWidth, place, keep) {
  * a kart lands — only that the take-off looks like one. The landing side stays
  * flat, which is where the flight arc puts a kart anyway.
  */
-const RAMP_LENGTH = 12
-const RAMP_RISE = 1.8
 
 /** How far the ramp lifts the road at arc length `s`, in metres. 0 off a ramp. */
 function rampRise(s) {
