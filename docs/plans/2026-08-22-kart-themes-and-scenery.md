@@ -69,7 +69,7 @@ tests the brief asks for.
 - Consumes: `TRACKS`, `TRACK_KEYS`, `setTrack`, `activeTrack`, `TRACK`,
   `halfWidthAt`, `heightAt`, `boxSpots`, `padSpots` from `shared/kart.js`
 - Produces: `statsFor(key)` → `{ length, corners, tight, wmax, wmin, rise,
-  jumps, boxes, pads, voids, voidMetres }`, and `CORNERS` — the one table of
+  jumps, boxes, pads, voids }`, and `CORNERS` — the one table of
   editorial numbers (corner count and tightest radius per track) that cannot be
   measured off the road.
 
@@ -99,7 +99,6 @@ tests the brief asks for.
     sampled at every node
   - `rise` — max minus min of `heightAt` over the lap
   - `jumps` / `voids` — array lengths off `TRACKS[key]`
-  - `voidMetres` — the void fractions times `TRACK.length`, summed
   - `boxes` — `boxSpots().length`
   - `pads` — `padSpots().length`
 
