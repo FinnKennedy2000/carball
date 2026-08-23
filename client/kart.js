@@ -1412,7 +1412,7 @@ function buildWorld() {
     })
     const mesh = new THREE.Group()
     mesh.add(model)
-    mesh.position.set(box.x, K.heightAt(box.s) + BOX_HALF + 0.6, box.y)
+    mesh.position.set(box.x, K.heightAt(box.s) + rampRise(box.s) + BOX_HALF + 0.6, box.y)
     world.add(mesh)
     boxMeshes.push(mesh)
   }
@@ -1454,7 +1454,7 @@ function buildPads(padColor) {
     const geo = new THREE.PlaneGeometry(K.PAD_LENGTH, pad.halfWidth * 2)
     geo.rotateX(-Math.PI / 2)
     const mesh = new THREE.Mesh(geo, material)
-    mesh.position.set(pad.x, K.heightAt(pad.s) + 0.06, pad.y)
+    mesh.position.set(pad.x, K.heightAt(pad.s) + rampRise(pad.s) + 0.06, pad.y)
     mesh.rotation.set(0, -pad.heading, Math.atan(K.slopeAt(pad.s)), 'YZX')
     world.add(mesh)
   }
@@ -1591,9 +1591,30 @@ function strip(halfWidth, place, keep) {
   return geometryFrom(verts, n, keep)
 }
 
-/** How high the road stands at polyline node `i`. */
+/**
+ * The last stretch of road before a jump, kicked up into a ramp so the gap is
+ * something you see coming rather than something you fall into. Cosmetic only:
+ * the sim's heightAt() knows nothing about it, so nothing here can change where
+ * a kart lands — only that the take-off looks like one. The landing side stays
+ * flat, which is where the flight arc puts a kart anyway.
+ */
+const RAMP_LENGTH = 12
+const RAMP_RISE = 1.8
+
+/** How far the ramp lifts the road at arc length `s`, in metres. 0 off a ramp. */
+function rampRise(s) {
+  const L = K.TRACK.length
+  for (const [from] of K.JUMPS) {
+    let ahead = (from * L - s) % L
+    if (ahead < 0) ahead += L
+    if (ahead <= RAMP_LENGTH) return RAMP_RISE * (1 - ahead / RAMP_LENGTH)
+  }
+  return 0
+}
+
+/** How high the road stands at polyline node `i` — ramps included. */
 function nodeY(i) {
-  return K.heightAt(K.TRACK.cum[i])
+  return K.heightAt(K.TRACK.cum[i]) + rampRise(K.TRACK.cum[i])
 }
 
 /** The road's height under any point on the map, for the things that move. */
@@ -1949,8 +1970,17 @@ function draw() {
       // road is not there to be lifted off, and airRise is the whole arc. A kart
       // over the edge goes the other way: it sinks below the road it left until
       // it either finds tarmac again or is far enough down to be fished out.
+      // In the air the ramp's height is carried across the gap and bled off over
+      // the flight, so a kart leaves the lip it was standing on instead of
+      // dropping a ramp's worth in one frame, and still lands flush.
       const lift =
-        kart.air > 0 ? K.airRise(kart.air) : kart.fell > 0 ? -K.fallDrop(kart.fell) : kart.bullet > 0 ? 1.4 : 0
+        kart.air > 0
+          ? K.airRise(kart.air) + RAMP_RISE * (kart.air / K.JUMP_AIRTIME)
+          : kart.fell > 0
+            ? -K.fallDrop(kart.fell)
+            : kart.bullet > 0
+              ? 1.4
+              : rampRise(kart.s)
       mesh.position.set(kart.x, K.heightAt(kart.s) + lift, kart.y)
       // Nose up the climb and down the drop. 'YZX' so the pitch is taken about
       // the kart's own lateral axis, after it has been turned to its heading.
