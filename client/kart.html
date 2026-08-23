@@ -2,9 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <!-- maximum-scale/user-scalable because a double-tap on the steering zone
+         was zooming the page in and stranding the player there mid-race: the
+         game has no scrollable content to zoom out of, so pinch-to-zoom is only
+         a way to break it. The real fix for the double tap is
+         `touch-action: manipulation` below (iOS ignores user-scalable=no); this
+         also stops the accidental pinch. -->
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
     />
     <title>Kart</title>
     <!-- Installed, the browser's own chrome goes: on the phone this was tested on
@@ -1687,6 +1693,21 @@
       }
 
       /* --- The two hands ------------------------------------------------- */
+
+      html.touch,
+      html.touch body {
+        /* No text on a control surface is there to be read twice, let alone
+           selected: iOS was highlighting "drag to steer" the moment a thumb
+           rested on the zone, and offering the callout menu on a long press.
+           `manipulation` keeps pan and pinch working for the browser but drops
+           the double-tap-to-zoom gesture, which is what got a player stuck
+           zoomed in with no way back. */
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+      }
 
       /* One unit for every pad, off the short axis: in landscape the height is
          what runs out, and a pad sized off the width shrinks on a narrow phone
