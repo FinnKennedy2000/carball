@@ -19,6 +19,8 @@ const KEYS = {
   KeyQ: C.IN_AIM,
 }
 
+let keyBits = 0
+let extraBits = 0
 let bits = 0
 let notify = () => {}
 
@@ -31,10 +33,27 @@ export function onInputChange(fn) {
   notify = fn ?? (() => {})
 }
 
-function setBits(next) {
+function recompute() {
+  const next = keyBits | extraBits
   if (next === bits) return
   bits = next
   notify()
+}
+
+function setBits(next) {
+  keyBits = next
+  recompute()
+}
+
+/**
+ * Held input from somewhere that is not the keyboard — the touch controls. Kept
+ * as its own mask and OR'd in rather than folded into the key bits, so a phone
+ * with a keyboard attached can use both and neither clears the other. A blur or
+ * a focused field zeroes the keys; the thumbs are not affected by either.
+ */
+export function setExtraBits(next) {
+  extraBits = next & C.IN_ALL
+  recompute()
 }
 
 /**
@@ -53,13 +72,13 @@ export function startInput() {
     const bit = KEYS[e.code]
     if (bit === undefined || isTyping(e.target)) return
     e.preventDefault()
-    setBits(bits | bit)
+    setBits(keyBits | bit)
   })
   addEventListener('keyup', (e) => {
     const bit = KEYS[e.code]
     if (bit === undefined || isTyping(e.target)) return
     e.preventDefault()
-    setBits(bits & ~bit)
+    setBits(keyBits & ~bit)
   })
   // A field taking focus mid-drive must not leave a held key stuck down: the
   // keyup lands on the field and is ignored above.

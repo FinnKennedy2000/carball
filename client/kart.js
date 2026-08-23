@@ -15,6 +15,15 @@ import { buildItem } from './kart-items.js'
 import { CHASSIS, buildChassis, statList, STAT_LABELS } from './kart-chassis.js'
 import { cleanCode } from '../shared/protocol.js'
 import { startInput, currentBits, isTyping } from './input.js'
+import {
+  startTouch,
+  autoThrottleWanted,
+  setAutoThrottle,
+  goFullscreen,
+  releaseTouch,
+  clearAimBehind,
+  isTouch,
+} from './kart-touch.js'
 import { resyncPrediction, withPrediction } from './kart-predict.js'
 import { foldCapped } from './kart-ribbon.js'
 import { SIM_VERSION } from '../shared/constants.js'
@@ -290,6 +299,15 @@ configure({
 
 initRenderer()
 startInput()
+const TOUCH = startTouch()
+// A phone's browser chrome is a third of the height in landscape. Asking for the
+// screen has to happen inside a tap, so it rides along with every button that
+// puts someone on a track.
+if (TOUCH) {
+  for (const id of ['solo', 'daily', 'pick-race', 'start', 'restart']) {
+    el(id).addEventListener('click', goFullscreen)
+  }
+}
 wireGate()
 showItemSet()
 requestAnimationFrame(frame)
@@ -959,8 +977,12 @@ function frame(now) {
 // Scene ---------------------------------------------------------------------
 
 function initRenderer() {
-  renderer = new THREE.WebGLRenderer({ canvas: el('view'), antialias: true })
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
+  // A phone draws roughly a laptop's pixel count through a tenth of the GPU.
+  // Multisampling is the first thing to give up and the ratio is the second: at
+  // 1.5 the road still reads clean and the frame budget comes back.
+  const phone = isTouch()
+  renderer = new THREE.WebGLRenderer({ canvas: el('view'), antialias: !phone })
+  renderer.setPixelRatio(Math.min(devicePixelRatio, phone ? 1.5 : 2))
 
   scene = new THREE.Scene()
   scene.background = new THREE.Color(0x0b0e14)
@@ -1664,11 +1686,18 @@ function draw() {
     // the whole point of the kart turning into a rocket is being able to see it.
     // It also swings out to one side — dead astern you see nothing but the
     // exhaust, and the bullet's whole shape is its profile.
-    const back = me.bullet > 0 ? 17 : 20 + rush * 6
+    // The camera comes in on a phone. The field of view is vertical and a
+    // landscape phone has a third of a laptop's height, so the same framing put
+    // your own kart on screen at a third of the size — small enough that a first
+    // race is spent working out which one you are. Closer but not lower, though:
+    // dropping the height along with the distance put the camera on the deck,
+    // which pushed the kart onto the bottom edge with no road left ahead of it.
+    const near = TOUCH ? 0.78 : 1
+    const back = (me.bullet > 0 ? 17 : 20 + rush * 6) * near
     const side = me.bullet > 0 ? 9 : 0
     camPos.set(
       me.x - fx * back - fy * side,
-      here + 10.5 - rush * 2 + (me.bullet > 0 ? 1.5 : 0),
+      here + (10.5 - rush * 2) * (TOUCH ? 1.04 : 1) + (me.bullet > 0 ? 1.5 : 0),
       me.y - fy * back + fx * side,
     )
     // Eased rather than pinned, so a spin-out does not whip the camera round —
@@ -1686,12 +1715,16 @@ function draw() {
     // at all, which is worse than any amount of camera stiffness.
     const camFloor = groundY(camera.position.x, camera.position.z) + CAM_CLEAR
     if (camera.position.y < camFloor) camera.position.y = camFloor
-    const aimX = me.x + fx * 16
-    const aimZ = me.y + fy * 16
+    // Aiming nearer pitches the camera down, which is what lifts the kart off
+    // the bottom edge: at a 52-degree view the old 16-metre aim point put it
+    // four fifths of the way down the frame with a screen of empty sky above it.
+    const ahead = TOUCH ? 9 : 16
+    const aimX = me.x + fx * ahead
+    const aimZ = me.y + fy * ahead
     camAim.set(aimX, groundY(aimX, aimZ) + 2.5, aimZ)
     camera.lookAt(camAim)
 
-    const wantFov = 60 + rush * 14 + (me.boost > 0 ? 6 : 0)
+    const wantFov = (TOUCH ? 52 : 60) + rush * 14 + (me.boost > 0 ? 6 : 0)
     camera.fov += (wantFov - camera.fov) * 0.08
     camera.updateProjectionMatrix()
 
@@ -1766,6 +1799,13 @@ function dress(group, keys, kind) {
 function updateHud() {
   const me = race.karts.find((k) => k.id === myId)
   const waiting = race.phase === 'WAITING'
+  // The throttle is held for a phone driver, but only while there is a race to
+  // drive: on the grid, paused, or once home, a held W is either wrong or rude.
+  // Ahead of the early returns below — waiting on the grid and being seated out
+  // of a race are two of the states it has to come off in.
+  if (TOUCH) {
+    setAutoThrottle(autoThrottleWanted(race, me))
+  }
   el('hud').hidden = waiting
   // The grid card comes down the moment the lights do, whoever started it.
   el('waiting').hidden = !waiting
@@ -1791,6 +1831,10 @@ function updateHud() {
   el('track-name').textContent = K.TRACKS[race.track]?.name ?? ''
 
   showItem(me.item === undefined ? null : me.item, me.itemCount ?? 1)
+  // An empty slot takes the BEHIND button off the screen with it, so the latch
+  // goes too: left set it would be an invisible state that turned the next
+  // pickup round without being asked.
+  if (TOUCH && (me.item === undefined || me.item === null)) clearAimBehind()
   // Ink over the screen, thinning as it clears. A person can drive out of it
   // on the throttle, which is what the sim's own fade does.
   el('ink').style.opacity = me.ink > 0 ? Math.min(0.92, me.ink / 2) : 0
@@ -1828,16 +1872,20 @@ function updateHud() {
     // race is stopped.
     banner.textContent = 'PAUSED'
     banner.hidden = false
-    sublabel = race.pausedBy ? `stopped by ${race.pausedBy} · P to carry on` : 'P to carry on'
+    const carryOn = TOUCH ? 'tap resume' : 'P to carry on'
+    sublabel = race.pausedBy ? `stopped by ${race.pausedBy} · ${carryOn}` : carryOn
   } else if (race.resumeIn > 0) {
     // Same big number as the grid countdown, because it means the same thing.
     banner.textContent = String(Math.ceil(race.resumeIn))
     banner.hidden = false
-    sublabel = 'hands back on the keys'
+    sublabel = TOUCH ? 'thumbs back on' : 'hands back on the keys'
   } else if (race.phase === 'COUNT') {
     const n = Math.ceil(race.timer)
     banner.textContent = n > 0 ? String(n) : 'GO'
     banner.hidden = false
+    // There is no throttle pad to find, which is worth saying once rather than
+    // leaving someone hunting for one off the line.
+    if (TOUCH) sublabel = 'drag left to steer · throttle is held for you'
   } else if (me.finished !== null) {
     // Home, with the rest of the field still out there. The card comes up when
     // the flag falls; until then this is the only thing saying you are done.
@@ -1856,6 +1904,13 @@ function updateHud() {
   } else if (race.time < 1.5) {
     banner.textContent = 'GO'
     banner.hidden = false
+    if (TOUCH) sublabel = 'drag left to steer · throttle is held for you'
+  } else if (TOUCH && race.time < 4.5) {
+    banner.hidden = true
+    // The countdown is when the eye is on the number, not on the words under it,
+    // so the hint stays up for a few seconds of actual driving — which is when a
+    // thumb is hunting for the throttle that is not there.
+    sublabel = 'drag left to steer · throttle is held for you'
   } else {
     banner.hidden = true
   }
@@ -1873,15 +1928,22 @@ function updateHud() {
   sub.hidden = sublabel === ''
   if (sublabel) sub.textContent = sublabel
 
-  el('standings').innerHTML = [...race.karts]
-    .sort((a, b) => a.place - b.place)
-    .map(
-      (k) => `<li class="${k.id === myId ? 'me' : ''}"><span>${k.place}</span>${dot(k.id)}<span>${escapeHtml(k.name)}</span></li>`,
-    )
-    .join('')
+  if (TOUCH) updateRail()
+  else
+    el('standings').innerHTML = [...race.karts]
+      .sort((a, b) => a.place - b.place)
+      .map(
+        (k) => `<li class="${k.id === myId ? 'me' : ''}"><span>${k.place}</span>${dot(k.id)}<span>${escapeHtml(k.name)}</span></li>`,
+      )
+      .join('')
 
   if (race.phase === 'OVER') {
-    if (el('results').hidden) showResults()
+    // Whatever was under a thumb when the flag fell comes up with it: the pads
+    // are about to be covered by the card and will never see a pointerup.
+    if (el('results').hidden) {
+      if (TOUCH) releaseTouch()
+      showResults()
+    }
   } else if (!el('results').hidden) {
     // The host started the next one: everyone's card comes down with it.
     el('results').hidden = true
@@ -1891,6 +1953,30 @@ function updateHud() {
 
 function dot(id) {
   return `<span class="dot" style="background:${kartColor(id)}"></span>`
+}
+
+/**
+ * The field as a rail rather than a list: one dot per kart at its share of the
+ * whole race, mine ringed. Six names cost a phone a quarter of its screen and
+ * still did not say who was close.
+ *
+ * The dots are made once and moved after that — rebuilding six nodes sixty times
+ * a second is the kind of thing that shows up as a dropped frame on a phone.
+ */
+function updateRail() {
+  const rail = el('rail')
+  rail.hidden = false
+  const dots = el('rail-dots')
+  if (dots.childElementCount !== race.karts.length) {
+    dots.innerHTML = race.karts
+      .map((k) => `<i class="${k.id === myId ? 'me' : ''}" style="background:${kartColor(k.id)}"></i>`)
+      .join('')
+  }
+  const full = race.laps * K.TRACK.length
+  race.karts.forEach((k, i) => {
+    const at = full > 0 ? Math.max(0, Math.min(1, k.prog / full)) : 0
+    dots.children[i].style.left = `${at * 100}%`
+  })
 }
 
 /**
