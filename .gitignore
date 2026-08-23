@@ -7,3 +7,4 @@ dist/
 # reinstall with `npx skills add`.
 .agents/
 .claude/skills/
+.claude/worktrees/

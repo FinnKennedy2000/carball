@@ -158,10 +158,10 @@ test('shared/kart.js and shared/kart-tracks.js are untouched by this feature', (
   const base = fileURLToPath(new URL('../shared/', import.meta.url))
   assert.equal(
     sha256(base + 'kart.js'),
-    // Updated by the merge that brought the phone controls in: the soft-wheel
-    // input bit is a sim change, made deliberately and on purpose. The tripwire
-    // fired exactly as intended.
-    'ad980c4017eb84ddb3ae17030ab85ffc6d7894bb555f6c04a8f90f1932f4c48e',
+    // Updated again for the AI: it drives a precomputed racing line, drifts on
+    // it for mini-turbos, and moves off it for the traffic. Deliberate sim
+    // changes; the tripwire fired exactly as intended.
+    'a55c02d204017d3f2535a96cd5804eb7b1165d5ba591cd9a7ead42a4572d547c',
     'shared/kart.js changed — this feature was presentation-only and deliberately did not touch the sim. ' +
       'If you meant to change the sim, update this hash in the same commit.',
   )

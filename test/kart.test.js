@@ -136,6 +136,40 @@ test('the same seed and inputs give the same race', () => {
   assert.notEqual(hashRace(a), hashRace(c))
 })
 
+test('a poisoned line intent recovers instead of driving the kart off the map', () => {
+  // clamp() passes NaN through both of its comparisons, and the intent
+  // accumulates, so one bad value off a snapshot used to leave a kart with no
+  // steering bit set for the rest of the race — finite coordinates all the way
+  // into the scenery.
+  const state = started(2, 9)
+  run(state, 300)
+  const kart = state.karts[1]
+  kart.intent = NaN
+  run(state, 120)
+  assert.ok(Number.isFinite(kart.intent), 'the intent stayed poisoned')
+  assert.ok(Math.abs(project(kart.x, kart.y).lateral) < HALF_WIDTH + KERB, 'it drove off the circuit')
+})
+
+test('an AI kart goes round a slower one rather than through it', () => {
+  // The line an AI takes is a decision about the traffic, not a constant it was
+  // dealt at the start. Two identical races: in one the road ahead is clear, in
+  // the other there is a slower kart on it, and the lateral has to differ by
+  // more than the width of a kart or the pass is just a shove.
+  const run = (blocked) => {
+    const state = createRace(field(2).map((r) => ({ ...r, ai: true, chassis: 'coupe' })), 3)
+    begin(state)
+    for (let i = 0; i < 200; i++) step(state, {})
+    const [a, b] = state.karts
+    onLine(a, 200, 30)
+    // Out of the way up the road, or right in front of it and slower.
+    onLine(b, blocked ? 215 : 700, blocked ? 18 : 30)
+    for (let i = 0; i < 150; i++) step(state, {})
+    return project(a.x, a.y).lateral
+  }
+  const moved = Math.abs(run(true) - run(false))
+  assert.ok(moved > KART_R, `it held the same line to within ${moved.toFixed(2)}m`)
+})
+
 test('an AI field completes three laps and is placed in finishing order', () => {
   const state = createRace(field().map((r) => ({ ...r, ai: true })), 7)
   begin(state)
@@ -260,7 +294,10 @@ test('missing a jump costs you the wait, not the rest of the race', () => {
   let waiting = 0
   for (let i = 0; i < 60 * 30 && falls < 3; i++) {
     step(state, { 1: IN_FWD })
-    if (kart.respawn > 0 && waiting === 0) falls++
+    // Only this gap. A kart held on the throttle with nobody steering it will
+    // find plenty of other ways off the road over half a minute, and none of
+    // them are what this is about.
+    if (kart.respawn > 0 && waiting === 0 && jumpAt(project(kart.x, kart.y).s)) falls++
     waiting = kart.respawn
   }
   assert.equal(falls, 1, `fell into the same gap ${falls} times`)

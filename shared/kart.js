@@ -184,6 +184,31 @@ const SHELL_R = 1.2
 const SHELL_TURN = 3.2 // rad/s a red shell can steer
 const HAZARD_R = 1.6
 const AI_ITEM_DELAY = 1.5
+// The turn the road ahead has to be asking for before the AI lights a drift:
+// speed times the bend of the racing line over the next 36m. The shape of the
+// rule comes from DRIFT_OPEN being the slowest a drift will turn — under it the
+// drift spirals in — but the number is tuned rather than derived, and sits well
+// below what that argument alone gives.
+const AI_DRIFT_TURN = 7.2
+// How far inside its own racing line the AI will let a drift carry it, in
+// metres, before letting go of it — and the road it wants before that is worth
+// doing. On a narrow circuit there is nowhere better to be: dropping a drift
+// three metres inside the line halfway round one of fracture's hairpins parks
+// the kart mid-corner on a road nine metres to a side with gaps in it, and the
+// offs got longer rather than fewer.
+const AI_DRIFT_CUT = 3
+const AI_DRIFT_ROOM = 10
+// Racecraft. How far up the road the AI looks for something to pass, how close
+// behind it notices somebody to make room for, how far off its line either is worth — as a share
+// of the road it has, because three metres across is a move on a wide circuit
+// and the scenery on a narrow one — and how fast it moves across, in m/s.
+const AI_SEE = 25
+const AI_TAIL = 10
+const AI_INTENT = 0.6
+const AI_INTENT_RATE = 1.5
+// And how much better the better side has to look before it is worth going
+// there at all, in metres of room.
+const AI_WORTH = KART_R * 1.5
 const GOLD_SECONDS = 0.9 // one of a Golden Mushroom's several short boosts
 const BLAST_R = 9 // a bomb, or a spiny shell coming home
 const HAZARD_ARM = 0.8 // how long a lobbed peel ignores the kart that threw it
@@ -285,6 +310,10 @@ let ACTIVE = DEFAULT_TRACK
  */
 export function setTrack(key) {
   const track = TRACKS[key] ? key : DEFAULT_TRACK
+  // Already on it. The map screen asks six roads three questions each and every
+  // question swaps the road out and back again, so without this the cheapest
+  // screen in the game rebuilds the geometry thirty-six times.
+  if (track === ACTIVE) return track
   const t = TRACKS[track]
   NODES = t.nodes
   WIDTHS = t.widths
@@ -527,6 +556,88 @@ export let TRACK = buildTrack()
  */
 export let TRACK_R = TRACK.pts.reduce((r, p) => Math.max(r, Math.hypot(p.x, p.y)), 0)
 
+// The racing line ------------------------------------------------------------
+// The shortest way round: a taut string pulled through the corridor of the
+// road. Each node slides sideways toward whatever straightens the line through
+// its two neighbours, so what comes out hugs the inside of a corner all the way
+// through it rather than swinging wide on entry — this is a minimum-length
+// line, not a minimum-lap-time one, and the difference shows up as an entry
+// that is already on the inside kerb. It only has to be right once per map, so
+// a few hundred passes of the cheapest possible move beat anything cleverer:
+// 600 is where every circuit has stopped moving, and one costs five to sixteen
+// milliseconds.
+const LINE_PASSES = 600
+// How far in from the edge of the tarmac the line — and the AI aiming at it —
+// may go. Wider than a kart, because the apex is where a kart is least pointed
+// the way it is going: at exactly a kart's width the field clipped the inside
+// of every corner it drifted through.
+const LINE_EDGE = KART_R * 1.75
+function lineLimit(s) {
+  return Math.max(0, halfWidthAt(s) - LINE_EDGE)
+}
+
+/** Lateral offsets off the centre line, one per polyline node. */
+function raceLine() {
+  const lim = TRACK.pts.map((_, i) => lineLimit(TRACK.cum[i]))
+  const off = new Array(TRACK_N).fill(0)
+  const nx = []
+  const ny = []
+  for (let i = 0; i < TRACK_N; i++) {
+    const a = TRACK.pts[i]
+    const b = TRACK.pts[(i + 1) % TRACK_N]
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1
+    nx.push(-(b.y - a.y) / len)
+    ny.push((b.x - a.x) / len)
+  }
+  for (let pass = 0; pass < LINE_PASSES; pass++) {
+    for (let i = 0; i < TRACK_N; i++) {
+      const p = (i - 1 + TRACK_N) % TRACK_N
+      const q = (i + 1) % TRACK_N
+      // The midpoint of the neighbours, measured back along this node's normal:
+      // move there and the three of them are in a straight line.
+      const mx = (TRACK.pts[p].x + off[p] * nx[p] + TRACK.pts[q].x + off[q] * nx[q]) / 2
+      const my = (TRACK.pts[p].y + off[p] * ny[p] + TRACK.pts[q].y + off[q] * ny[q]) / 2
+      const want = (mx - TRACK.pts[i].x) * nx[i] + (my - TRACK.pts[i].y) * ny[i]
+      // In place, so a pass carries its own progress round the lap with it: a
+      // long sweeper takes several times as many passes to settle if each one
+      // only ever sees where the line was before it started.
+      off[i] = clamp(want, -lim[i], lim[i])
+    }
+  }
+  return off
+}
+
+// Per map, and not until something asks: the line is a property of the road,
+// and the map screen loads all six roads in one synchronous frame without
+// driving any of them.
+const LINES = {}
+function line() {
+  return (LINES[ACTIVE] ??= raceLine())
+}
+
+/**
+ * How far off the centre line the racing line sits at `s`, positive to the left
+ * of travel — the same sign project() reports a kart's lateral in.
+ */
+function lineAt(s) {
+  const L = TRACK.length
+  let d = s % L
+  if (d < 0) d += L
+  let i = 0
+  while (i < TRACK_N - 1 && TRACK.cum[i + 1] <= d) i++
+  const seg = TRACK.cum[i + 1] - TRACK.cum[i]
+  const t = seg > 0 ? (d - TRACK.cum[i]) / seg : 0
+  const off = line()
+  return off[i] + (off[(i + 1) % TRACK_N] - off[i]) * t
+}
+
+/** A point on the racing line, in world coordinates. */
+function linePoint(s) {
+  const p = pointAt(s)
+  const off = lineAt(s)
+  return { x: p.x + p.nx * off, y: p.y + p.ny * off }
+}
+
 /** Centre line, tangent and normal at a distance `s` around the lap. */
 export function pointAt(s) {
   const L = TRACK.length
@@ -753,15 +864,27 @@ export function addKart(state, racer) {
     recoverAt: 0,
     // Over a jump: seconds of flight left. Nothing reaches a kart in the air.
     air: 0,
-    // AI only: how long it has held its item, and its line's offset.
+    // Where it is across the road, off the last projection so nothing has to
+    // repeat that search: signed, positive to the left of travel. Seeded from
+    // the grid slot rather than left at zero, which is a legal reading meaning
+    // dead centre and is not where anybody starts.
+    lat: side * 4.5,
+    // How long it has held its item, how much of the racing line it takes, and
+    // how far off that line it wants to be right now because of somebody else.
+    // Only the AI reads the last two, but a kart that has finished is driven by
+    // the AI for the rest of the race — on the whole line, not on a share of
+    // zero, which is the centre spline and looks like it has given up.
     aiHold: 0,
-    offset: 0,
+    offset: 1,
+    intent: 0,
   }
   if (kart.ai) kart.chassis = CHASSIS_KEYS[Math.floor(rand(state) * CHASSIS_KEYS.length)]
   // Drawn from the race's own PRNG, so a field is not six karts on one rail.
-  // Kept inside the narrows rather than inside the start line: a line four
-  // metres off centre still fits where the tarmac is only seven metres to a side.
-  if (kart.ai) kart.offset = (rand(state) - 0.5) * 8
+  // How much of the racing line this one takes rather than how far off it it
+  // sits: an early apex and a late one are what tells two drivers apart, and a
+  // share stays on the line's own side of the road — the greediest of them sits
+  // 2% past it, where a metre off it put a kart over the kerb on the inside.
+  if (kart.ai) kart.offset = 0.72 + rand(state) * 0.3
   state.karts.push(kart)
   return kart
 }
@@ -774,6 +897,11 @@ export function removeKart(state, id) {
 /** Leave WAITING and run the lights. The host's call in a room. */
 export function begin(state) {
   if (state.phase !== 'WAITING') return
+  // Build this map's racing line now rather than leaving the first kart to ask
+  // for it: it is a few milliseconds, and inside the first tick of the race
+  // that is most of a frame gone at the green light. Here and not in setTrack,
+  // because the map screen loads all six roads without driving any of them.
+  line()
   state.phase = 'COUNT'
   state.timer = COUNTDOWN
 }
@@ -853,6 +981,11 @@ function stepKart(state, kart, bits, dt) {
   if (kart.respawn > 0 || kart.bullet > 0 || kart.air > 0 || kart.fell > 0) {
     kart.driftTime = 0
     kart.driftDir = 0
+    // And whatever it had decided to do about the traffic. aiBits runs whether
+    // or not the kart can act on it, so one held off the road kept moving
+    // across for the whole wait and came back down carrying a decision it made
+    // somewhere else.
+    kart.intent = 0
   }
   // Recomputed below for a kart that is actually driving. Cleared here so one
   // left standing across a respawn or a jump does not read as a tow that ended
@@ -1105,6 +1238,7 @@ function trackProgress(state, kart) {
   const hit = project(kart.x, kart.y)
   const prev = kart.s
   kart.s = hit.s
+  kart.lat = hit.lateral
   let delta = hit.s - prev
   // A jump of more than half the lap is the line, not a teleport.
   if (delta > L / 2) delta -= L
@@ -1547,38 +1681,135 @@ export function kartScale(kart) {
 // AI ------------------------------------------------------------------------
 
 /**
- * Follow the racing line: aim at a point up the road, offset onto this kart's
- * own line, and hold the throttle down. It fires whatever it picks up after a
- * moment, which is enough to make the field dangerous without making it smart.
+ * Drive the racing line: aim at a point up the road on it, nudged onto this
+ * kart's own line, and hold the throttle down. It drifts where the corner is
+ * tight enough to pay a mini-turbo, and fires whatever it picks up after a
+ * moment — enough to make the field dangerous without making it smart.
  */
 function aiBits(state, kart, dt) {
   let bits = IN_FWD
-  const lookahead = 10 + Math.hypot(kart.vx, kart.vy) * 0.35
-  const p = pointAt(kart.s + lookahead)
-  const tx = p.x + p.nx * kart.offset
-  const ty = p.y + p.ny * kart.offset
+  const speed = Math.hypot(kart.vx, kart.vy)
+  // How far the line bends over the next stretch of road, as the angle between
+  // two chords along it. A corner is something the AI can see coming rather
+  // than something it discovers as steering error, which is what lets it have
+  // the drift already lit on the way in and hold it long enough to be paid.
+  const b0 = linePoint(kart.s + 4)
+  const b1 = linePoint(kart.s + 22)
+  const b2 = linePoint(kart.s + 40)
+  const bend = wrap(Math.atan2(b2.y - b1.y, b2.x - b1.x) - Math.atan2(b1.y - b0.y, b1.x - b0.x))
+  const aim = kart.s + 10 + speed * 0.35
+  const p = pointAt(aim)
+  const room = lineLimit(aim)
+  // Racecraft. The nearest kart up the road worth going round, and the nearest
+  // one close enough behind to be worth making room for. Between them they are
+  // what makes this a race rather than six laps driven in parallel.
+  let ahead = null
+  let chaser = false
+  for (const other of state.karts) {
+    // Whatever bump treats as solid, which a kart that has finished still is:
+    // it is driven round the circuit until the flag and can be run into.
+    if (other === kart || other.respawn > 0 || other.air > 0) continue
+    let ds = other.s - kart.s
+    if (ds > TRACK.length / 2) ds -= TRACK.length
+    else if (ds < -TRACK.length / 2) ds += TRACK.length
+    // Something to go round has to be something it is actually catching: a kart
+    // pulling away up the road is not a move, and coming off the line for one
+    // anyway is how the whole field ends up chasing nothing. A chaser counts
+    // whether or not it is catching — ten metres back is close enough to be
+    // worth not sitting on the kerb in front of.
+    const closing = Math.hypot(other.vx, other.vy) < speed
+    if (closing && ds > 0 && ds < AI_SEE && (ahead === null || ds < ahead.ds)) ahead = { kart: other, ds }
+    if (ds < 0 && ds > -AI_TAIL) chaser = true
+  }
+  // Which side, and whether either is worth it. A candidate is this kart's own
+  // line moved a share of the corridor across, scored on the room it leaves —
+  // clearance past the kart being passed, or plain road when there is only
+  // somebody behind — plus what the detour is worth round the bend ahead, the
+  // inside being the short way. Scored off the clamped lane, so a move the road
+  // would truncate scores as no move at all, and under AI_WORTH neither side is
+  // worth leaving the line for. With only a chaser the kart yields rather than
+  // defends: `room - |lane|` peaks in the middle of the road, so it comes off
+  // the kerb instead of onto the inside. Turning that into a block was tried
+  // three ways and every one cost more in lap time and off-road than the places
+  // it saved.
+  const across = AI_INTENT * room
+  const base = lineAt(aim) * kart.offset
+  const score = (dir) => {
+    const lane = base + dir * across
+    if (Math.abs(lane) > room) return -Infinity
+    return (ahead ? Math.abs(lane - ahead.kart.lat) : room - Math.abs(lane)) + dir * across * bend
+  }
+  const dir = ahead || chaser ? (score(1) >= score(-1) ? 1 : -1) : 0
+  const off = dir !== 0 && score(dir) >= AI_WORTH ? dir * across : 0
+  // Nobody worth moving for, and it goes back to its own line over about a
+  // second rather than snapping onto it.
+  if (off === 0) kart.intent *= damp(1, dt)
+  else kart.intent += clamp(off - kart.intent, -AI_INTENT_RATE * dt, AI_INTENT_RATE * dt)
+  // clamp() passes a NaN straight through — both of its comparisons are false —
+  // and this one accumulates, so a single bad value off a snapshot would leave
+  // the kart with no steering bit set at all and drive it off the map, quietly,
+  // with a finite x and y the whole way.
+  if (!Number.isFinite(kart.intent)) kart.intent = 0
+  // Off the road already: steer at the middle of it, not at a line that sits a
+  // couple of metres inside the far kerb. Shoved onto the grass with only that
+  // to aim at, a kart ground along outside the tarmac for whole corners rather
+  // than coming back onto it. A drop coming up pulls it in as well — they still
+  // go over when they are shoved, it just is not their default line.
+  const shy = Math.abs(kart.lat) > halfWidthAt(kart.s) ? 0 : overVoid(aim) || overVoid(kart.s) ? 0.4 : 1
+  // This kart's share of the racing line, and whatever it currently wants to be
+  // doing about the traffic. The clamp is what keeps either from putting a kart
+  // somewhere there is no road.
+  const lane = clamp(base + kart.intent, -room, room) * shy
+  const tx = p.x + p.nx * lane
+  const ty = p.y + p.ny * lane
   const want = Math.atan2(ty - kart.y, tx - kart.x)
   const err = wrap(want - kart.heading)
-  if (err > 0.05) bits |= IN_RIGHT
-  else if (err < -0.05) bits |= IN_LEFT
-  // Hard corner: let the back end come round rather than understeering wide.
-  if (Math.abs(err) > 0.55) bits |= IN_DRIFT
+  // Mid-drift the wheel is a trim, not a steering input, and leaving it centred
+  // is a slower turn than the corner asked for — so there is no deadband while
+  // one is lit: it is either tightening the line or opening it out.
+  const dead = kart.driftDir === 0 ? 0.05 : 0
+  if (err > dead) bits |= IN_RIGHT
+  else if (err < -dead) bits |= IN_LEFT
+  // Mini-turbos, but only where a drift can actually hold the line. A drift
+  // always turns — DRIFT_OPEN is the slowest it will go and it is still a turn
+  // — so held through anything gentler than that it spirals in and ends on the
+  // inside grass, which is where nearly every off it ever had came from. Speed
+  // times bend is the turn rate the corner is asking for; drift when the corner
+  // wants more than the open trim gives, and let go when it does not. And only
+  // while there is still road on the inside to spend, on a road with somewhere
+  // better to put the kart: a drift only ever turns one way, so one held by a
+  // kart already inside its line keeps tightening until it runs out of tarmac,
+  // but dropping it mid-hairpin where the tarmac is nine metres to a side just
+  // parks the kart somewhere worse.
+  const cut = Math.sign(bend) * (kart.lat - lineAt(kart.s))
+  if (
+    speed * Math.abs(bend) > AI_DRIFT_TURN &&
+    speed > DRIFT_MIN_SPEED + 4 &&
+    (cut < AI_DRIFT_CUT || halfWidthAt(kart.s) < AI_DRIFT_ROOM)
+  ) {
+    bits |= IN_DRIFT
+    // The direction is locked off the wheel on the tick the button goes down,
+    // so on that tick the wheel has to be over the way the corner goes — the
+    // steering error can easily be pointing the other way on the approach.
+    if (kart.driftDir === 0) {
+      bits &= ~(IN_LEFT | IN_RIGHT)
+      bits |= bend > 0 ? IN_RIGHT : IN_LEFT
+    }
+  }
 
   if (kart.item !== null) {
     kart.aiHold += dt
+    // On the clock, deliberately. Holding a shell until there was a target and
+    // a peel until there was a chaser read as the smarter thing and measured as
+    // the worse one: a kart sitting on an item cannot pick a box up, so the
+    // whole field cycled fewer of them and landed fewer hits.
     if (kart.aiHold > AI_ITEM_DELAY) {
       bits |= IN_ITEM
       kart.aiHold = 0
     }
   } else {
     kart.aiHold = 0
-    // Nothing in hand: drift toward the nearest box lane, so the field actually
-    // picks items up instead of driving the same line past every one of them.
-    kart.offset = kart.offset * 0.995
   }
-  // A drop coming up: come back toward the middle. They still go over when they
-  // are shoved, which is the point — it just is not their default line.
-  if (overVoid(kart.s + 20) || overVoid(kart.s)) kart.offset *= 0.92
   // The bit has to fall on the next tick or the rising edge never comes.
   if (kart.itemDown) bits &= ~IN_ITEM
   return bits
@@ -1627,7 +1858,7 @@ function wrap(a) {
 export function hashRace(state) {
   const nums = [state.tick, state.phase.length, state.shells.length, state.hazards.length]
   for (const k of state.karts) {
-    nums.push(k.x, k.y, k.vx, k.vy, k.heading, k.prog, k.place, k.item ?? -1, k.itemCount, k.spin, k.grace, k.driftTime, k.driftDir, k.boost, k.star, k.shrink, k.respawn, k.air, k.mega, k.bullet, k.ink, k.cloud)
+    nums.push(k.x, k.y, k.vx, k.vy, k.heading, k.prog, k.place, k.item ?? -1, k.itemCount, k.spin, k.grace, k.driftTime, k.driftDir, k.boost, k.star, k.shrink, k.respawn, k.air, k.mega, k.bullet, k.ink, k.cloud, k.lat, k.offset, k.intent)
   }
   let h = 2166136261
   for (const n of nums) {
