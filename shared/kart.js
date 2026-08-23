@@ -207,8 +207,26 @@ const AI_TAIL = 10
 const AI_INTENT = 0.6
 const AI_INTENT_RATE = 1.5
 // And how much better the better side has to look before it is worth going
-// there at all, in metres of room.
+// there at all, in metres of room. Scaled by the driver: a timid one wants a
+// gap it cannot miss, a bold one goes for one that is barely there.
 const AI_WORTH = KART_R * 1.5
+// What a skill of 0 and a skill of 1 multiply a per-driver number by. Every
+// difference between two AI karts is one of these applied to a constant the
+// whole field used to share. They straddle 1 rather than sitting above it: the
+// field is meant to spread around the driver it used to be, not be a worse one
+// on average.
+const SKILL_LO = 1.35
+const SKILL_HI = 0.65
+// The steering error the best driver in the field tolerates before it corrects.
+const AI_DEAD = 0.05
+// The turn the corner ahead has to be asking for before a driver comes off the
+// throttle for it, in the same speed-times-bend the drift gate reads. Scaled by
+// skill, and the best of them never reaches it: this is a driver braking for a
+// corner it could have taken flat, which is the most recognisable thing a weak
+// driver does and the thing you catch them on. It is not a speed cap — the
+// worst kart in the field has the same top end as the best and gets there on
+// every straight.
+const AI_LIFT = 12
 const GOLD_SECONDS = 0.9 // one of a Golden Mushroom's several short boosts
 const BLAST_R = 9 // a bomb, or a spiny shell coming home
 const HAZARD_ARM = 0.8 // how long a lobbed peel ignores the kart that threw it
@@ -877,14 +895,11 @@ export function addKart(state, racer) {
     aiHold: 0,
     offset: 1,
     intent: 0,
+    // How good a driver this is, 0 to 1. A kart that has finished is driven by
+    // the AI for the rest of the race and drives it well, same as offset.
+    skill: 1,
   }
   if (kart.ai) kart.chassis = CHASSIS_KEYS[Math.floor(rand(state) * CHASSIS_KEYS.length)]
-  // Drawn from the race's own PRNG, so a field is not six karts on one rail.
-  // How much of the racing line this one takes rather than how far off it it
-  // sits: an early apex and a late one are what tells two drivers apart, and a
-  // share stays on the line's own side of the road — the greediest of them sits
-  // 2% past it, where a metre off it put a kart over the kerb on the inside.
-  if (kart.ai) kart.offset = 0.72 + rand(state) * 0.3
   state.karts.push(kart)
   return kart
 }
@@ -902,6 +917,21 @@ export function begin(state) {
   // that is most of a frame gone at the green light. Here and not in setTrack,
   // because the map screen loads all six roads without driving any of them.
   line()
+  // Deal the ladder, now that the field is known. A rung each and a jitter
+  // inside it rather than six free rolls: free draws deal a field of middling
+  // karts often enough to notice, and a race with nobody to catch and nobody
+  // catching you is the thing a ladder is for. Not in addKart, which does not
+  // yet know how many there are — and a kart that turns up later is a good one
+  // rather than an unplaced one.
+  const ai = state.karts.filter((k) => k.ai)
+  for (let i = 0; i < ai.length; i++) {
+    ai[i].skill = (i + rand(state)) / ai.length
+    // How much of the racing line it takes, which used to be its own roll and
+    // is the tidiest part of driving well. A share stays on the line's own side
+    // of the road — the best of them sits a little past it, where a metre off
+    // it put a kart over the kerb on the inside.
+    ai[i].offset = 0.66 + ai[i].skill * 0.42
+  }
   state.phase = 'COUNT'
   state.timer = COUNTDOWN
 }
@@ -1689,6 +1719,10 @@ export function kartScale(kart) {
 function aiBits(state, kart, dt) {
   let bits = IN_FWD
   const speed = Math.hypot(kart.vx, kart.vy)
+  // Everything this driver does worse than the best one in the field. Not a
+  // speed cap: a slower kart has to be slower because of the corners it makes a
+  // mess of, or it reads from the seat behind as the game holding it back.
+  const worse = SKILL_LO + (SKILL_HI - SKILL_LO) * kart.skill
   // How far the line bends over the next stretch of road, as the angle between
   // two chords along it. A corner is something the AI can see coming rather
   // than something it discovers as steering error, which is what lets it have
@@ -1697,6 +1731,14 @@ function aiBits(state, kart, dt) {
   const b1 = linePoint(kart.s + 22)
   const b2 = linePoint(kart.s + 40)
   const bend = wrap(Math.atan2(b2.y - b1.y, b2.x - b1.x) - Math.atan2(b1.y - b0.y, b1.x - b0.x))
+  // And the same again for the stretch after it, which is what a driver is
+  // looking at when it decides whether to lift. Braking happens on the approach
+  // and not in the corner, so a timid one arrives slow and is then flat through
+  // it — which is what being caught under braking looks like, and it leaves the
+  // corner itself, and the drift in it, alone.
+  const b3 = linePoint(kart.s + 58)
+  const b4 = linePoint(kart.s + 76)
+  const entry = wrap(Math.atan2(b4.y - b3.y, b4.x - b3.x) - Math.atan2(b3.y - b2.y, b3.x - b2.x))
   const aim = kart.s + 10 + speed * 0.35
   const p = pointAt(aim)
   const room = lineLimit(aim)
@@ -1740,7 +1782,7 @@ function aiBits(state, kart, dt) {
     return (ahead ? Math.abs(lane - ahead.kart.lat) : room - Math.abs(lane)) + dir * across * bend
   }
   const dir = ahead || chaser ? (score(1) >= score(-1) ? 1 : -1) : 0
-  const off = dir !== 0 && score(dir) >= AI_WORTH ? dir * across : 0
+  const off = dir !== 0 && score(dir) >= AI_WORTH * worse ? dir * across : 0
   // Nobody worth moving for, and it goes back to its own line over about a
   // second rather than snapping onto it.
   if (off === 0) kart.intent *= damp(1, dt)
@@ -1766,8 +1808,12 @@ function aiBits(state, kart, dt) {
   const err = wrap(want - kart.heading)
   // Mid-drift the wheel is a trim, not a steering input, and leaving it centred
   // is a slower turn than the corner asked for — so there is no deadband while
-  // one is lit: it is either tightening the line or opening it out.
-  const dead = kart.driftDir === 0 ? 0.05 : 0
+  // one is lit: it is either tightening the line or opening it out. Off the
+  // drift it is how coarse this driver's hands are: the worst of them lets the
+  // nose drift a long way off the aim before correcting and then corrects too
+  // much, which is a kart that weaves down a straight and arrives at the corner
+  // having already thrown speed away.
+  const dead = kart.driftDir === 0 ? AI_DEAD * worse * worse : 0
   if (err > dead) bits |= IN_RIGHT
   else if (err < -dead) bits |= IN_LEFT
   // Mini-turbos, but only where a drift can actually hold the line. A drift
@@ -1781,9 +1827,16 @@ function aiBits(state, kart, dt) {
   // kart already inside its line keeps tightening until it runs out of tarmac,
   // but dropping it mid-hairpin where the tarmac is nine metres to a side just
   // parks the kart somewhere worse.
+  //
+  // When it lets go is the whole skill of a mini-turbo: the boost lands on the
+  // release, so the best driver in the field holds to the second tier, cashes
+  // it and lights another one, and the worst lets go a fraction short of the
+  // first tier every time and is paid nothing for a corner spent sideways.
+  const cash = DRIFT_TIERS[1] * (0.4 + 0.6 * kart.skill)
   const cut = Math.sign(bend) * (kart.lat - lineAt(kart.s))
   if (
-    speed * Math.abs(bend) > AI_DRIFT_TURN &&
+    kart.driftTime < cash &&
+    speed * Math.abs(bend) > AI_DRIFT_TURN * Math.max(0.85, worse) &&
     speed > DRIFT_MIN_SPEED + 4 &&
     (cut < AI_DRIFT_CUT || halfWidthAt(kart.s) < AI_DRIFT_ROOM)
   ) {
@@ -1810,6 +1863,9 @@ function aiBits(state, kart, dt) {
   } else {
     kart.aiHold = 0
   }
+  // Off the throttle for the corner coming, if this driver is the sort who
+  // brakes for it. The best of them never reaches this and is flat everywhere.
+  if (speed * Math.abs(entry) > AI_LIFT * (0.5 + kart.skill)) bits &= ~IN_FWD
   // The bit has to fall on the next tick or the rising edge never comes.
   if (kart.itemDown) bits &= ~IN_ITEM
   return bits
@@ -1858,7 +1914,7 @@ function wrap(a) {
 export function hashRace(state) {
   const nums = [state.tick, state.phase.length, state.shells.length, state.hazards.length]
   for (const k of state.karts) {
-    nums.push(k.x, k.y, k.vx, k.vy, k.heading, k.prog, k.place, k.item ?? -1, k.itemCount, k.spin, k.grace, k.driftTime, k.driftDir, k.boost, k.star, k.shrink, k.respawn, k.air, k.mega, k.bullet, k.ink, k.cloud, k.lat, k.offset, k.intent)
+    nums.push(k.x, k.y, k.vx, k.vy, k.heading, k.prog, k.place, k.item ?? -1, k.itemCount, k.spin, k.grace, k.driftTime, k.driftDir, k.boost, k.star, k.shrink, k.respawn, k.air, k.mega, k.bullet, k.ink, k.cloud, k.lat, k.offset, k.intent, k.skill)
   }
   let h = 2166136261
   for (const n of nums) {

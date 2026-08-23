@@ -161,7 +161,7 @@ test('shared/kart.js and shared/kart-tracks.js are untouched by this feature', (
     // Updated again for the AI: it drives a precomputed racing line, drifts on
     // it for mini-turbos, and moves off it for the traffic. Deliberate sim
     // changes; the tripwire fired exactly as intended.
-    'a55c02d204017d3f2535a96cd5804eb7b1165d5ba591cd9a7ead42a4572d547c',
+    '50e5cf4e48f271c2f8f2a7327086c2e4a9c6f0a0d2b6a57d4029d93d1062d98b',
     'shared/kart.js changed — this feature was presentation-only and deliberately did not touch the sim. ' +
       'If you meant to change the sim, update this hash in the same commit.',
   )
