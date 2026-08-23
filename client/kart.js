@@ -26,6 +26,10 @@ import {
 } from './kart-touch.js'
 import { resyncPrediction, withPrediction } from './kart-predict.js'
 import { foldCapped } from './kart-ribbon.js'
+import { themeFor, cssVars, worldColors } from './kart-themes.js'
+import { buildScenery } from './kart-scenery.js'
+import { statsFor } from './kart-stats.js'
+import { planFor, elevFor } from './kart-plan.js'
 import { SIM_VERSION } from '../shared/constants.js'
 import { DAILY_EPOCH, cleared, dailyFor, dayNumber, detailOf, observe, settle, startProgress } from '../shared/kart-daily.js'
 import * as dailyStore from './kart-daily-store.js'
@@ -168,6 +172,16 @@ const SHELL_KINDS = ['green', 'red', 'blue']
 const HAZARD_KINDS = ['banana', 'trap', 'bomb']
 const ITEM_SCALE = 2.6 // models are about 1.2 across; a kart is KART_R 2.2
 const BOX_HALF = 0.43 * ITEM_SCALE // half an item box, which is what it spins about
+
+// The deck skirt's depth is per-theme (worldColors().deckDepth) — a lagoon
+// causeway sits just above the tide flats, the ridge road is cut into a
+// mountainside, and one constant cannot be both.
+// The kerb alternates colour every this many metres of arc length, not every
+// node: the real tracks sample a node every 7-14m, so alternating per node
+// gives 14-28m stripes, far coarser than the two-sample stripe the design's
+// 1m-per-sample curve produced. 6m keeps the stripe short enough to read as a
+// kerb rather than a lane marking.
+const KERB_STRIPE = 6
 
 const AI_NAMES = ['Bolt', 'Ripsaw', 'Comet', 'Nitro', 'Sledge']
 const SOLO_ID = 1
@@ -398,6 +412,18 @@ function wireGate() {
     e.preventDefault()
   })
 
+  // The map screen is driven the same way: the arrows walk the seven cards,
+  // Enter takes the one showing, Escape leaves the choice as it was.
+  addEventListener('keydown', (e) => {
+    if (el('map-screen').hidden || isTyping()) return
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') stepMapCard(1)
+    else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') stepMapCard(-1)
+    else if (e.key === 'Enter' || e.key === ' ') chooseMap(document.activeElement?.dataset?.key ?? mapChoice)
+    else if (e.key === 'Escape') hideMap()
+    else return
+    e.preventDefault()
+  })
+
   // Solo has no host to ask, so it stops its own race; in a room the request goes
   // to whoever owns the simulation and comes back to everyone in the snapshot.
   const togglePause = () => {
@@ -574,27 +600,251 @@ function pickThenJoin(code) {
 }
 
 /**
- * The host's map list: Random first, then the roads. Only the host ever sees it
- * — a joiner has no say — and the choice is remembered, so a host who always
- * wants the same road says so once rather than every race.
+ * The host's map choice: a button naming the road, and the map screen behind
+ * it. Only the host ever sees it — a joiner has no say — and the choice is
+ * remembered, so a host who always wants the same road says so once rather
+ * than every race.
  */
 function wireMapPick() {
   const stored = localStorage.getItem(STORED_MAP)
   mapChoice = stored === RANDOM_MAP || K.TRACKS[stored] ? stored : RANDOM_MAP
-  const map = el('map')
-  map.innerHTML =
-    `<option value="${RANDOM_MAP}">Random</option>` +
-    K.TRACK_KEYS.map((key) => `<option value="${key}">${escapeHtml(K.TRACKS[key].name)}</option>`).join('')
-  map.value = mapChoice
-  map.addEventListener('change', () => {
-    mapChoice = map.value
-    localStorage.setItem(STORED_MAP, mapChoice)
-  })
+  markMap()
+  el('map-open').addEventListener('click', showMap)
+  el('map-close').addEventListener('click', hideMap)
 }
 
 /** The road the next race should be on, or nothing at all for a random one. */
 function pickedMap() {
   return mapChoice === RANDOM_MAP ? null : mapChoice
+}
+
+// The map screen ------------------------------------------------------------
+// Seven cards in a column: Random, then the six roads with a full card each —
+// the theme, the measured numbers, a plan of the lap and its elevation. It is
+// a different way to answer the question the old <select> asked, and nothing
+// downstream knows the difference: it sets `mapChoice`, that goes to
+// localStorage, and pickedMap() still hands beginMatch a key or nothing.
+//
+// Every colour on a card comes from a --track-* custom property, set on the
+// card element by cssVars(). That is what lets six themes render at once on
+// one page: the rules in kart.html are written once and read whichever theme
+// the card they are drawing sits on.
+
+/** Two decimals, which is finer than a viewBox unit ever needs to be. */
+const r2 = (n) => n.toFixed(2)
+
+/** The legend, verbatim and in the design's order. The class is the swatch. */
+const MAP_LEGEND = [
+  ['box', 'Item box — three abreast'],
+  ['pad', 'Boost pad — off the centre line'],
+  ['jump', 'Jump — the road stops'],
+  ['void', 'No barrier — only the drop'],
+  ['kerb', 'Kerb'],
+  ['start', 'Start / finish'],
+]
+
+/**
+ * The eight numbers along the top of a card. Everything but Corners and
+ * Tightest is measured off the loaded road by statsFor(), so a card cannot
+ * describe a track the sim does not have.
+ */
+function mapStatCells(stats) {
+  const m = (n) => `${Math.round(n)}<i>m</i>`
+  return [
+    ['Lap', `${stats.length.toLocaleString('en-GB')}<i>m</i>`],
+    ['Corners', String(stats.corners)],
+    ['Tightest', m(stats.tight)],
+    ['Width', `${Math.round(stats.wmax)}–${Math.round(stats.wmin)}<i>m</i>`],
+    ['Rise', m(stats.rise)],
+    ['Jumps', String(stats.jumps)],
+    ['Boxes', String(stats.boxes)],
+    ['Pads', String(stats.pads)],
+  ]
+    .map(([label, value]) => `<div class="map-stat"><span class="label">${label}</span><b>${value}</b></div>`)
+    .join('')
+}
+
+/**
+ * The plan, back to front so nothing important is buried: road, kerb edges,
+ * centre dashes, voids, jumps, pads, boxes, start line.
+ *
+ * The jump band is the one deliberately unthemed colour on a card, and the
+ * only one that does not move with the theme: `--map-jump` is a flat #cbb98a
+ * on all six, where a pad takes `--track-pad`. A pad is the same object on
+ * every map, so Foundry lightens it to #e8c98f to keep reading as a pad
+ * against that theme; a jump is a different object — the road stops — and the
+ * design draws it in the one warm colour everywhere. One named literal beats a
+ * seventh theme token whose value would never vary.
+ */
+function mapPlanSvg(plan, name) {
+  const rect = (x, y, angle, w, h, rx, paint) =>
+    `<rect x="${r2(-w / 2)}" y="${r2(-h / 2)}" width="${w}" height="${h}" rx="${rx}" ${paint} transform="translate(${r2(x)} ${r2(y)}) rotate(${r2(angle)})"/>`
+  return `<svg class="map-plan" viewBox="${plan.viewBox}" role="img" aria-label="Plan of ${escapeHtml(name)}">
+    <path d="${plan.road}" fill="var(--track-road)"/>
+    <path d="${plan.edgeL}" fill="none" stroke="var(--track-edge)" stroke-width="1.6"/>
+    <path d="${plan.edgeR}" fill="none" stroke="var(--track-edge)" stroke-width="1.6"/>
+    <path d="${plan.centreDash}" fill="none" stroke="var(--map-hairline)" stroke-width="1" stroke-dasharray="5 11"/>
+    <path d="${plan.voidPath}" fill="none" stroke="var(--map-void)" stroke-width="2.4" stroke-dasharray="7 6" opacity="0.85"/>
+    ${plan.jumps.map((d) => `<path d="${d}" fill="none" stroke="var(--map-jump)" stroke-width="7" stroke-linecap="round" opacity="0.5"/>`).join('')}
+    ${plan.pads.map((p) => rect(p.x, p.y, p.angle, 10, 4.8, 1, 'fill="var(--track-pad)" opacity="0.6"')).join('')}
+    ${plan.boxes.map((b) => rect(b.x, b.y, b.angle, 6.8, 6.8, 1.4, 'fill="none" stroke="var(--track-tint)" stroke-width="1.4"')).join('')}
+    <path d="${plan.start}" fill="none" stroke="var(--color-text)" stroke-width="3" stroke-dasharray="4 4"/>
+  </svg>`
+}
+
+/**
+ * The elevation strip: the bands first so the profile crosses them, then the
+ * mean line, then the area under the profile, then the profile itself. The
+ * gradient needs an id, and there are seven cards on the page, so it is keyed
+ * by track.
+ */
+function mapElevSvg(key, elev, rise) {
+  const paint = { jump: 'var(--map-jump)', void: 'var(--map-void)' }
+  return `<div class="map-elev">
+    <div class="map-elev-head">
+      <span class="label">Elevation, one lap</span>
+      <span class="map-elev-note">${Math.round(rise)}m between the low point and the crest · warm bands are the jumps, red the unguarded stretches</span>
+    </div>
+    <svg viewBox="0 0 1000 112" preserveAspectRatio="none" role="presentation">
+      <defs>
+        <linearGradient id="map-elev-${key}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="var(--track-tint)" stop-opacity="1"/>
+          <stop offset="1" stop-color="var(--track-tint)" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      ${elev.bands.map((b) => `<rect x="${r2(b.x)}" y="${b.y}" width="${r2(b.width)}" height="${b.height}" fill="${paint[b.kind]}" opacity="0.16"/>`).join('')}
+      <path d="M 0 56 L 1000 56" fill="none" stroke="var(--map-hairline)" stroke-width="1" stroke-dasharray="6 8"/>
+      <path d="${elev.area}" fill="url(#map-elev-${key})" opacity="0.34"/>
+      <path d="${elev.line}" fill="none" stroke="var(--track-tint)" stroke-width="1.8"/>
+    </svg>
+    <div class="map-ticks">${elev.ticks.map((t) => `<span>${t.label}</span>`).join('')}</div>
+  </div>`
+}
+
+/** One track's card: header, plan and legend, elevation strip. */
+function mapCard(key) {
+  const track = K.TRACKS[key]
+  const theme = themeFor(key)
+  const stats = statsFor(key)
+  const plan = planFor(key)
+  const elev = elevFor(key)
+  const pips = Array.from({ length: 5 }, (_, i) => `<i class="${i < theme.diff ? 'on' : ''}"></i>`).join('')
+  // The circuit's box legend is the one that names its row count. It is the
+  // reference lap and the design spells it out there and nowhere else.
+  const legend = MAP_LEGEND.map(([kind, copy]) => {
+    const text = kind === 'box' && key === 'circuit' ? `${copy}, eight rows` : copy
+    return `<div class="map-key"><i class="${kind}"></i><span>${escapeHtml(text)}</span></div>`
+  }).join('')
+  const prose = [theme.blurb, theme.note, ...theme.notes]
+    .map((p, i) => `<p class="${i === 0 ? 'blurb' : ''}">${escapeHtml(p)}</p>`)
+    .join('')
+
+  return `<div class="map-card" role="option" data-key="${key}" aria-selected="false" tabindex="-1" style="${cssVars(key)}">
+    <div class="map-bg"></div>
+    <div class="map-atmo"></div>
+    <div class="map-body">
+      <div class="map-head">
+        <div>
+          <div class="map-meta">
+            <span class="map-kicker">${escapeHtml(track.kicker)}</span>
+            <span class="map-pips">${pips}</span>
+            <span class="map-diff">${escapeHtml(track.diffLabel)} · ${escapeHtml(track.lapEst)} a lap</span>
+            <span class="map-chip">${escapeHtml(theme.label)}</span>
+          </div>
+          <h2 class="map-name">${escapeHtml(track.name)}</h2>
+          <div class="map-rule"></div>
+        </div>
+        <div class="map-stats">${mapStatCells(stats)}</div>
+      </div>
+      <div class="map-mid">
+        ${mapPlanSvg(plan, track.name)}
+        <div class="map-legend">${legend}<hr />${prose}</div>
+      </div>
+      ${mapElevSvg(key, elev, stats.rise)}
+    </div>
+  </div>`
+}
+
+/**
+ * Random, at the top. It has no road to draw, so it is the header and one line
+ * about what it does. The --track-* names are still set — from Nocturne's own
+ * tokens rather than a theme — so it takes the same card rules unthemed.
+ */
+function randomCard() {
+  const style =
+    '--track-tint: var(--color-accent); --track-edge: var(--color-neutral-800);' +
+    ' --track-pad: var(--color-neutral-500); --track-road: var(--color-neutral-900);' +
+    ' --track-bg: linear-gradient(180deg, rgba(145, 132, 217, 0.09), rgba(22, 24, 38, 0.35));' +
+    ' --track-atmo: none;'
+  return `<div class="map-card random" role="option" data-key="${RANDOM_MAP}" aria-selected="false" tabindex="-1" style="${style}">
+    <div class="map-bg"></div>
+    <div class="map-atmo"></div>
+    <div class="map-body">
+      <div class="map-head">
+        <div>
+          <div class="map-meta">
+            <span class="map-kicker">Any of the six</span>
+            <span class="map-diff">Dealt with the seed</span>
+          </div>
+          <h2 class="map-name">Random</h2>
+          <div class="map-rule"></div>
+        </div>
+      </div>
+      <p>The road comes off the race seed, so nobody on the grid — you included — knows which of the six it is until the lights go out.</p>
+    </div>
+  </div>`
+}
+
+/** The card for the current choice, or the first one if the key is unknown. */
+function currentMapCard() {
+  const list = el('map-list')
+  return list.querySelector(`[data-key="${mapChoice}"]`) ?? list.firstElementChild
+}
+
+/** The chosen card's ring, and the button that opens the screen. */
+function markMap() {
+  for (const card of el('map-list').children) {
+    const on = card.dataset.key === mapChoice
+    card.setAttribute('aria-selected', String(on))
+    card.tabIndex = on ? 0 : -1
+  }
+  el('map-open').textContent = mapChoice === RANDOM_MAP ? 'Random' : K.TRACKS[mapChoice].name
+}
+
+function showMap() {
+  const list = el('map-list')
+  // Built once and kept. Every card samples its whole lap twice — once for the
+  // plan and once for the profile — and the six roads do not change under us.
+  if (!list.children.length) {
+    list.innerHTML = randomCard() + K.TRACK_KEYS.map(mapCard).join('')
+    for (const card of list.children) card.addEventListener('click', () => chooseMap(card.dataset.key))
+  }
+  el('map-screen').hidden = false
+  markMap()
+  currentMapCard()?.focus()
+}
+
+function hideMap() {
+  el('map-screen').hidden = true
+  el('map-open').focus()
+}
+
+/** Picking a card is the whole point: it sets the choice and gets out of the way. */
+function chooseMap(key) {
+  mapChoice = key
+  localStorage.setItem(STORED_MAP, key)
+  markMap()
+  hideMap()
+}
+
+/** Walk the cards with the arrows. Focus moves; Enter is what picks. */
+function stepMapCard(by) {
+  const cards = [...el('map-list').children]
+  const from = cards.indexOf(document.activeElement)
+  const next = cards[(Math.max(from, 0) + by + cards.length) % cards.length]
+  for (const card of cards) card.tabIndex = card === next ? 0 : -1
+  next.focus()
+  next.scrollIntoView({ block: 'nearest' })
 }
 
 /** Show the pick screen; `race` is what pressing Race finally does. */
@@ -1030,9 +1280,10 @@ function initRenderer() {
   renderer = new THREE.WebGLRenderer({ canvas: el('view'), antialias: !phone })
   renderer.setPixelRatio(Math.min(devicePixelRatio, phone ? 1.5 : 2))
 
+  // Background and fog are set in buildWorld() below, not here: the track can
+  // change without initRenderer running again, and the sky has to change with
+  // it.
   scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x0b0e14)
-  scene.fog = new THREE.Fog(0x0b0e14, 120, 320)
 
   camera = new THREE.PerspectiveCamera(60, 1, 1, 900)
   camera.position.set(0, 40, 90)
@@ -1054,17 +1305,33 @@ function buildWorld() {
   // worth of them on the GPU is a leak you would feel.
   if (world) {
     scene.remove(world)
-    world.traverse((o) => o.geometry?.dispose())
+    // InstancedMesh keeps an instance-matrix buffer of its own that the
+    // geometry does not own, and the scenery is nearly all instanced.
+    world.traverse((o) => {
+      o.geometry?.dispose()
+      if (o.isInstancedMesh) o.dispose()
+    })
     boxMeshes.length = 0
   }
   world = new THREE.Group()
   scene.add(world)
 
+  // Every colour below comes from the loaded track's theme, not a literal —
+  // this is the one call buildWorld makes to pick a colour, and every mesh it
+  // builds after this reads from `colors` rather than writing its own.
+  const colors = worldColors(K.activeTrack())
+
+  // Set here rather than in initRenderer: the track can change without that
+  // running again, and the sky and the haze in the distance have to change
+  // with it.
+  scene.background = new THREE.Color(colors.background)
+  scene.fog = new THREE.Fog(colors.background, 120, 320)
+
   // Far below the lowest dip, so the hills never poke through it: at this
   // distance it is a horizon rather than ground you look at.
   const ground = new THREE.Mesh(
     new THREE.CircleGeometry(K.TRACK_R * 2.2, 64),
-    new THREE.MeshStandardMaterial({ color: 0x16301f, roughness: 1 }),
+    new THREE.MeshStandardMaterial({ color: colors.ground, roughness: 1, name: 'ground' }),
   )
   ground.rotation.x = -Math.PI / 2
   ground.position.y = -34
@@ -1080,30 +1347,50 @@ function buildWorld() {
   // those two the road simply is not there, and neither is anything under it.
   const gap = (i) => K.jumpAt(K.TRACK.cum[i]) !== null
   const road = (i) => !gap(i) && !gap((i + 1) % K.TRACK_N)
+  // Which of the kerb's two colours node i sits in, read off arc length so
+  // the stripe length holds regardless of how densely the track is sampled
+  // there — see KERB_STRIPE above.
+  const kerbTone = (i) => Math.floor(K.TRACK.cum[i] / KERB_STRIPE) % 2
 
   // Grass that climbs with the road, so the tarmac is laid on a hillside rather
   // than floating over a flat green plate. Kept in close: pushed much further
   // out, the inside of the hairpin folds over itself.
-  world.add(ribbon((i) => half(i) + 22, -0.35, 0x1c3a26, 1, solid))
+  world.add(ribbon((i) => half(i) + 22, -0.35, colors.grass, 1, solid, 'grass'))
   // Only where the ground gives out: the drop. No wider than the grass it
   // replaces, or it wedges out past the hillside as a black shard, and far
   // enough down to read as somewhere you would not want to be.
-  world.add(ribbon((i) => half(i) + 22, -14, 0x05070c, 1, (i) => !solid(i)))
-  world.add(ribbon((i) => half(i) + K.KERB, 0.01, 0x6b4a22, 1, solid)) // the kerb, then
-  world.add(ribbon(half, 0.03, 0x49536b, 1, road)) // the tarmac on top of it
+  world.add(ribbon((i) => half(i) + 22, -14, colors.drop, 1, (i) => !solid(i), 'drop'))
+  // The kerb, two-tone rather than one mesh: alternating the tint and the
+  // kerb-light colour every KERB_STRIPE metres of arc length.
+  world.add(ribbon((i) => half(i) + K.KERB, 0.01, colors.kerbTint, 1, (i) => solid(i) && kerbTone(i) === 0, 'kerb'))
+  world.add(ribbon((i) => half(i) + K.KERB, 0.01, colors.kerbLight, 1, (i) => solid(i) && kerbTone(i) === 1, 'kerb'))
+  // A vertical skirt hanging under the kerb's outer edge, so the road reads as
+  // a deck standing above the drop rather than a decal laid over it. In
+  // addition to the drop ribbon, not instead of it — the drop is what makes a
+  // void look like somewhere you can go off, and the skirt does not replace
+  // that read, it just gives the road itself some thickness.
+  for (const side of [1, -1]) {
+    world.add(wall((i) => side * (half(i) + K.KERB), -colors.deckDepth, solid, colors.deck, 'deck'))
+  }
+  world.add(ribbon(half, 0.03, colors.tarmac, 1, road, 'tarmac')) // the tarmac on top of it
   // The racing line, in dashes rather than one continuous stripe: a solid line
   // gives the eye nothing to track, and the dashes flicking past the nose are
   // most of what tells you how fast you are actually going.
-  world.add(dashes(0.4, 0.05, 0xffffff, 0.4, road))
+  world.add(dashes(0.4, 0.05, colors.line, 0.4, road, 'line'))
 
   // The barrier, as a wall either side — with the void stretches left open,
   // which is what makes them look like somewhere you can go off.
   for (const side of [1, -1]) {
-    world.add(wall((i) => side * (half(i) + K.KERB), 2.4, solid))
+    world.add(wall((i) => side * (half(i) + K.KERB), 2.4, solid, colors.barrier, 'barrier'))
   }
 
   buildFinish()
-  buildPads()
+  buildPads(colors.boostPad)
+
+  // What stands around the road: the harbour, the orchard, the rift. All of it
+  // decoration — see client/kart-scenery.js — and all of it built from the live
+  // track state this function has already been pointed at.
+  world.add(buildScenery(K.activeTrack(), themeFor(K.activeTrack())))
 
   // Item boxes: one model per spot, hidden while that box is on its cooldown.
   for (const box of K.boxSpots()) {
@@ -1113,6 +1400,16 @@ function buildWorld() {
     const model = buildItem('box')
     model.scale.setScalar(ITEM_SCALE)
     model.position.y = -BOX_HALF
+    // Retinted per-instance, not in kart-items.js: that file also builds the
+    // box for the item gallery page, which stays gold regardless of track.
+    // Each call to buildItem() makes its own fresh materials, so this only
+    // ever touches the copy standing in this world.
+    model.traverse((part) => {
+      if (part.isMesh && (part.material.name === 'box_gold' || part.material.name === 'gold')) {
+        part.material.color.setHex(colors.itemBox)
+        part.material.name = 'item-box'
+      }
+    })
     const mesh = new THREE.Group()
     mesh.add(model)
     mesh.position.set(box.x, K.heightAt(box.s) + BOX_HALF + 0.6, box.y)
@@ -1127,14 +1424,15 @@ function buildWorld() {
  * heading and pitched to its gradient, or a flat panel laid on a hillside cuts
  * into the tarmac at one end and floats off it at the other.
  */
-function buildPads() {
+function buildPads(padColor) {
   const canvas = document.createElement('canvas')
   canvas.width = 128
   canvas.height = 64
   const g = canvas.getContext('2d')
   g.fillStyle = '#241f3d'
   g.fillRect(0, 0, 128, 64)
-  g.strokeStyle = '#8bffe4'
+  // The chevrons themselves, in the theme's pad colour.
+  g.strokeStyle = padColor
   g.lineWidth = 11
   g.lineCap = 'butt'
   // Three chevrons pointing along +x, which the plane below lines up with the
@@ -1147,7 +1445,7 @@ function buildPads() {
     g.stroke()
   }
   const texture = new THREE.CanvasTexture(canvas)
-  const material = new THREE.MeshBasicMaterial({ map: texture })
+  const material = new THREE.MeshBasicMaterial({ map: texture, name: 'boost-pad' })
 
   for (const pad of K.padSpots()) {
     // Length along the road first, width across it second: the geometry is laid
@@ -1219,7 +1517,7 @@ function buildFinish() {
  * A flat strip following the centre line. `halfWidth` is a function of the node
  * index, and `keep` decides which segments are drawn at all.
  */
-function ribbon(halfWidth, y, color, opacity = 1, keep) {
+function ribbon(halfWidth, y, color, opacity = 1, keep, name) {
   // `y` is a height above the road now, not a height above the world.
   const geo = strip(halfWidth, (x, z, i) => [x, nodeY(i) + y, z], keep)
   return new THREE.Mesh(
@@ -1230,12 +1528,13 @@ function ribbon(halfWidth, y, color, opacity = 1, keep) {
       transparent: opacity < 1,
       opacity,
       side: THREE.DoubleSide,
+      name,
     }),
   )
 }
 
 /** Every other segment of the centre line, as a flat dash. */
-function dashes(halfWidth, y, color, opacity, keep = () => true) {
+function dashes(halfWidth, y, color, opacity, keep = () => true, name) {
   const pts = K.TRACK.pts
   const verts = []
   const idx = []
@@ -1258,12 +1557,17 @@ function dashes(halfWidth, y, color, opacity, keep = () => true) {
   geo.computeVertexNormals()
   return new THREE.Mesh(
     geo,
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide }),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide, name }),
   )
 }
 
-/** A vertical band standing on the polyline, offset sideways by `offset(i)`. */
-function wall(offset, height, keep) {
+/**
+ * A vertical band standing on the polyline, offset sideways by `offset(i)`.
+ * `height` may be negative — a band hanging below the polyline rather than
+ * standing above it, which is how the deck skirt reuses this instead of its
+ * own geometry.
+ */
+function wall(offset, height, keep, color, name) {
   const n = K.TRACK.pts.length
   const verts = []
   for (let i = 0; i < n; i++) {
@@ -1272,7 +1576,7 @@ function wall(offset, height, keep) {
   }
   return new THREE.Mesh(
     geometryFrom(verts, n, keep),
-    new THREE.MeshStandardMaterial({ color: 0x596b8c, roughness: 0.8, side: THREE.DoubleSide }),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.8, side: THREE.DoubleSide, name }),
   )
 }
 
@@ -1853,8 +2157,10 @@ function updateHud() {
     setAutoThrottle(autoThrottleWanted(race, me))
   }
   el('hud').hidden = waiting
-  // The grid card comes down the moment the lights do, whoever started it.
+  // The grid card comes down the moment the lights do, whoever started it —
+  // and the map screen with it, since it is only ever open over that card.
   el('waiting').hidden = !waiting
+  if (!waiting) el('map-screen').hidden = true
   if (waiting) {
     showWaitingRoom()
     return
@@ -1874,7 +2180,7 @@ function updateHud() {
   el('place-suffix').textContent = ordinalSuffix(me.place)
   el('speed').textContent = Math.round(Math.hypot(me.vx, me.vy) * 3.6)
   el('time').textContent = clock(race.time)
-  el('track-name').textContent = K.TRACKS[race.track]?.name ?? ''
+  showTrackName(race.track)
 
   showItem(me.item === undefined ? null : me.item, me.itemCount ?? 1)
   // An empty slot takes the BEHIND button off the screen with it, so the latch
@@ -2102,6 +2408,26 @@ function showEffects(me) {
   }
 }
 
+// The road the HUD is currently naming. updateHud runs every frame and the
+// road changes once a race, so the chip is rebuilt on the change rather than
+// sixty times a second.
+let hudTrack = null
+
+/** The road in the HUD: its name in the theme's tint, the theme chipped beside it. */
+function showTrackName(key) {
+  if (key === hudTrack) return
+  hudTrack = key
+  const track = K.TRACKS[key]
+  const box = el('track-name')
+  if (!track) {
+    box.textContent = ''
+    return
+  }
+  const theme = themeFor(key)
+  box.style.color = theme.tint
+  box.innerHTML = `${escapeHtml(track.name)}<em>${escapeHtml(theme.label)}</em>`
+}
+
 /**
  * The day's three, live. A price you cannot see the cost of is not a decision,
  * so this updates as the race runs rather than only at the flag.
@@ -2132,6 +2458,9 @@ function showWaitingRoom() {
   // already on the state everyone on the grid is looking at.
   const track = K.TRACKS[race.track]
   el('waiting-track').textContent = track ? ` · ${track.name}` : ''
+  // The kicker wears the road's tint, so the grid card is already dressed in
+  // the theme of the road it is about to put everyone on.
+  el('waiting-kicker').style.color = track ? themeFor(race.track).tint : ''
   el('start').hidden = !isHost
   el('map-pick').hidden = !isHost
   el('waiting-list').innerHTML = roster
@@ -2145,6 +2474,8 @@ function showWaitingRoom() {
 function showResults() {
   el('waiting').hidden = true
   el('results').hidden = false
+  // Same as the grid card: the kicker keeps the tint of the road just raced.
+  el('results-kicker').style.color = K.TRACKS[race.track] ? themeFor(race.track).tint : ''
   // In a room the host's message is the record; solo, the state is right here.
   const rows =
     results ??
