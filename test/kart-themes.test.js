@@ -185,11 +185,12 @@ test("circuit's legend copy matches the design verbatim, ladder figure corrected
     THEMES.circuit.notes[0],
     'The tarmac breathes from 32m across the line to 14m in the narrows. Four of those narrows have no barrier.',
   )
-  // Corrected against the measured ladder (190.2-205.4s for three laps), not
-  // the design's stale 69.57–69.64s.
+  // Corrected against shared/kart-par.js's clean-lap PAR.circuit (163,017-
+  // 179,583ms for three laps, items cleared every tick), not the design's
+  // stale 69.57–69.64s or the spec's items-live ladder figure.
   assert.equal(
     THEMES.circuit.notes[1],
-    'All six chassis solve to 63.4–68.5s a lap here, so it sits between Foundry Loop and Cliff Spiral on this ladder.',
+    'All six chassis solve to 54.3–59.9s a lap here, so it sits between Foundry Loop and Cliff Spiral on this ladder.',
   )
   assert.ok(!THEMES.circuit.notes.some((p) => p.includes('69.57') || p.includes('69.64')), 'circuit note still quotes the stale ladder figure')
 })

@@ -45,7 +45,6 @@ export function statsFor(key) {
     const t = TRACKS[key]
     const widths = Array.from({ length: TRACK.pts.length }, (_, i) => halfWidthAt((i / TRACK.pts.length) * TRACK.length))
     const heights = Array.from({ length: TRACK.pts.length }, (_, i) => heightAt((i / TRACK.pts.length) * TRACK.length))
-    const voidMetres = t.voids.reduce((sum, [from, to]) => sum + (to - from) * TRACK.length, 0)
     return {
       // Rounded. The comments beside each track's nodes carry the design's own
       // length (2279/1380/1680/2020/2380/2720m), measured off the drawn
@@ -61,7 +60,6 @@ export function statsFor(key) {
       boxes: boxSpots().length,
       pads: padSpots().length,
       voids: t.voids.length,
-      voidMetres,
     }
   })
 }

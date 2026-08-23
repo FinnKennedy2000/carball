@@ -50,12 +50,15 @@ export const THEMES = {
     note: 'None of it is the same corner twice: two hairpins you have to brake for, three long radii you can carry, and a hook with a blind exit.',
     notes: [
       'The tarmac breathes from 32m across the line to 14m in the narrows. Four of those narrows have no barrier.',
-      // The design's third paragraph quoted 69.57–69.64s and is corrected
-      // here the way cliff's 15m and fracture's 11m are: the measured ladder
-      // in the spec has the circuit's three-lap time at 190.2-205.4s, i.e.
-      // 63.4–68.5s a lap, not 69.57–69.64s. The point it makes — the circuit
-      // sits between Foundry Loop and Cliff Spiral — still holds.
-      'All six chassis solve to 63.4–68.5s a lap here, so it sits between Foundry Loop and Cliff Spiral on this ladder.',
+      // The design's third paragraph quoted 69.57–69.64s, and the spec's own
+      // "ladder" table later gave 63.4–68.5s — both measured with the AI's
+      // item live, which it lays down and then drives into on a one-kart
+      // race (see scripts/kart-par.mjs's comment). shared/kart-par.js is the
+      // clean-lap authority: PAR.circuit's six chassis, each divided by
+      // three laps, run 54,339-59,861ms, i.e. 54.3-59.9s a lap. The point the
+      // sentence makes — the circuit sits between Foundry Loop and Cliff
+      // Spiral — still holds either way.
+      'All six chassis solve to 54.3–59.9s a lap here, so it sits between Foundry Loop and Cliff Spiral on this ladder.',
     ],
   },
   bayside: {

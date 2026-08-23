@@ -10,12 +10,10 @@ import {
   activeTrack,
   TRACK,
   heightAt,
-  createRace,
-  begin,
-  step,
   CHASSIS_KEYS,
 } from '../shared/kart.js'
 import { statsFor, withTrack, CORNERS } from '../client/kart-stats.js'
+import { PAR } from '../shared/kart-par.js'
 
 const sha256 = (path) => createHash('sha256').update(readFileSync(path)).digest('hex')
 
@@ -128,45 +126,46 @@ test('pad spacing: the five new tracks are a family, and none is pad-starved or 
   }
 })
 
-// The ladder is thirty-six simulated races (six chassis x six tracks), which
-// is minutes of CPU. It exists to be run by hand after a tuning change, not
-// on every `pnpm test`; the measured table lives in the spec.
+// The ladder used to be thirty-six simulated races (six chassis x six
+// tracks) run by hand behind KART_LADDER=1, because driving them all takes
+// minutes of CPU. shared/kart-par.js is that same 36-cell table, already
+// simulated and committed, and test/kart-par.test.js pins its SIM_VERSION
+// against the sim's — so a tuning change can't leave it stale unnoticed.
+// Reading the ordering off PAR instead of re-driving the sim gets the same
+// property in microseconds, always on, per chassis, so one inverted pair
+// names both tracks and the chassis instead of failing the whole test.
 const LADDER = ['bayside', 'grove', 'foundry', 'circuit', 'cliff', 'fracture']
 
-test('the ladder holds: three-lap time increases bayside to fracture', { skip: process.env.KART_LADDER !== '1' && 'set KART_LADDER=1 to run the ladder' }, () => {
-  try {
-    for (const chassis of CHASSIS_KEYS) {
-      const times = LADDER.map((key) => {
-        const state = createRace([{ id: 1, name: 'ai', ai: true, chassis }], 7, key)
-        begin(state)
-        for (let i = 0; i < 60 * 700 && state.phase !== 'OVER'; i++) step(state, {})
-        assert.equal(state.phase, 'OVER', `${chassis} on ${key} never finished`)
-        const kart = state.karts[0]
-        assert.notEqual(kart.finished, null, `${chassis} on ${key} never crossed the line`)
-        return kart.finished
-      })
-      for (let i = 1; i < times.length; i++) {
-        assert.ok(
-          times[i] > times[i - 1],
-          `${chassis}: ${LADDER[i - 1]} (${times[i - 1].toFixed(1)}s) is not faster than ${LADDER[i]} (${times[i].toFixed(1)}s)`,
-        )
-      }
+test('the ladder holds: three-lap par increases bayside to fracture', () => {
+  for (const chassis of CHASSIS_KEYS) {
+    for (let i = 1; i < LADDER.length; i++) {
+      const prev = PAR[LADDER[i - 1]][chassis]
+      const next = PAR[LADDER[i]][chassis]
+      assert.ok(
+        next > prev,
+        `${chassis}: ${LADDER[i - 1]} (${prev}ms) is not faster than ${LADDER[i]} (${next}ms)`,
+      )
     }
-  } finally {
-    setTrack(DEFAULT_TRACK)
   }
 })
 
-test('shared/kart.js and shared/kart-tracks.js are untouched by this plan', () => {
+// This feature is presentation-only — themes, stats cards, the map and the
+// 3D scenery around the sim — and was deliberately built without touching
+// the sim itself. The pin is a tripwire for that boundary, not a ban on ever
+// changing these files: if you meant to change the sim, update the hash
+// below in the same commit.
+test('shared/kart.js and shared/kart-tracks.js are untouched by this feature', () => {
   const base = fileURLToPath(new URL('../shared/', import.meta.url))
   assert.equal(
     sha256(base + 'kart.js'),
     '432a5152241e6efc3f3c90e0e42b81c2864c08ebf8d1440c2987122606c152f5',
-    'shared/kart.js changed — the plan for this task forbids modifying it',
+    'shared/kart.js changed — this feature was presentation-only and deliberately did not touch the sim. ' +
+      'If you meant to change the sim, update this hash in the same commit.',
   )
   assert.equal(
     sha256(base + 'kart-tracks.js'),
     'f50a15272a1545560e7e2c4320fa77eb27f94d582fee8d4569d154ec106cfaf2',
-    'shared/kart-tracks.js changed — the plan for this task forbids modifying it',
+    'shared/kart-tracks.js changed — this feature was presentation-only and deliberately did not touch the sim. ' +
+      'If you meant to change the sim, update this hash in the same commit.',
   )
 })

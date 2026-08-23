@@ -1,5 +1,14 @@
 # Kart themes, map screen and 3D scenery — implementation plan
 
+**Status: shipped**, head commit `14be96c`. The checkboxes below were left
+unticked as the working record of the plan rather than updated retroactively;
+treat this paragraph as the status instead of the tasks. Two deviations from
+the plan as written: Task 3 (the map screen) split into a pure-geometry half
+and a UI half, rather than landing as one step; and Task 4's planned
+`test/kart-world.test.js` was folded into `test/kart-themes.test.js` because
+the code under test needs a DOM, which `kart-world.test.js` wasn't set up
+for.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to
 > implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

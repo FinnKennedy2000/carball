@@ -96,6 +96,20 @@ The `lapEst` labels already in `shared/kart-tracks.js` (`≈ 42s` … `≈ 88s`)
 long against these times by up to 15%. They are the design's estimates for a
 person rather than the AI's measured lap, and they stay as they are.
 
+**This table runs 14-17% slow and is not the number to quote for a lap time.**
+It was measured with the AI's item live, which on a one-kart race keeps
+rolling the leader's item — bananas, shells, fake boxes — so the AI lays them
+down and then drives into its own hazards. `shared/kart-par.js` (landed on
+`main` after this table was measured) regenerates the same 36 cells with the
+AI's item cleared every tick, and its circuit row divided by three laps gives
+54.3–59.9s a lap against this table's 63.4–68.5s. The ordering is identical
+either way — verified across all 36 cells — so nothing here about *which*
+track is faster than which changes. Only a lap-time number quoted on its own,
+like the circuit's below, needs the clean-lap table instead of this one. The
+table stays as the record of what was actually measured and what `lapEst`
+and the difficulty pips were pitched against; treat `shared/kart-par.js` as
+the authority whenever an actual seconds figure is needed.
+
 ## Theme tokens
 
 One set per track, consumed by the map screen, the world, the HUD and the
@@ -265,12 +279,15 @@ theme token whose value never varies is not worth having.
 **circuit** — *None of it is the same corner twice: two hairpins you have to
 brake for, three long radii you can carry, and a hook with a blind exit.*
 - The tarmac breathes from 32m across the line to 14m in the narrows. Four of those narrows have no barrier.
-- All six chassis solve to 63.4–68.5s a lap here, so it sits between Foundry Loop and Cliff Spiral on this ladder.
+- All six chassis solve to 54.3–59.9s a lap here, so it sits between Foundry Loop and Cliff Spiral on this ladder.
 
-The design's third paragraph put this at 69.57–69.64s a lap; corrected here
-against the measured ladder (190.2–205.4s for three laps), which puts it at
-63.4–68.5s. The point it makes — the circuit sits between Foundry Loop and
-Cliff Spiral — still holds.
+The design's third paragraph put this at 69.57–69.64s a lap. It was first
+corrected here against the ladder above (190.2–205.4s for three laps, items
+live), giving 63.4–68.5s — but that ladder itself runs slow for the reason
+given under "The ladder": the AI spinning out on its own items. The figure
+now quoted is `shared/kart-par.js`'s clean-lap PAR.circuit (163,017–179,583ms
+for three laps) divided by three, i.e. 54.3–59.9s. The point either version
+makes — the circuit sits between Foundry Loop and Cliff Spiral — still holds.
 
 **bayside** — *Six bends, none tighter than 85m, joined by two long sweeps.
 Nothing punishes a bad line, so the lap is decided by the item you are holding.*

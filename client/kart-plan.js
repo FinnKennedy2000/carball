@@ -215,10 +215,10 @@ export function elevFor(key) {
     ]
 
     const length = Math.round(L)
-    const ticks = Array.from({ length: 5 }, (_, i) => {
-      const metres = Math.round((i / 4) * length)
-      return { x: (i / 4) * ELEV_VB.w, label: `${withCommas(metres)}m` }
-    })
+    // No `x`: the card lays these out with `justify-content: space-between`,
+    // which is exact because ticks are at i/4 by construction — a position
+    // field here would just be an unread contract to keep in sync.
+    const ticks = Array.from({ length: 5 }, (_, i) => ({ label: `${withCommas(Math.round((i / 4) * length))}m` }))
 
     return { line, area, bands, ticks }
   })
