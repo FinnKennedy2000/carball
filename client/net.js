@@ -96,8 +96,9 @@ function hostSend(event, payload) {
   }
 }
 
+// Callers leave() first: createRoom has already opened the room's channel by the
+// time it gets here, and leaving now would close it under the new host.
 async function startHosting(extra, code) {
-  await leave()
   const started = await spawnWorker({ code, ...extra })
   hosting = true
   me = started.hostId

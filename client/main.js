@@ -122,6 +122,7 @@ $('m-settings').onclick = () => { $('o-settings').hidden = false; $('o-settings'
 $('join-code').oninput = (e) => (e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))
 $('join-form').onsubmit = (e) => { e.preventDefault(); const c = $('join-code').value; if (c.length >= 4) { $('o-join').hidden = true; doJoin(c) } }
 async function doJoin(code) {
+  toast(`Joining ${code}…`)
   try { await net.joinRoom({ ...driver(), code }) } catch (err) { toast(err.message ?? 'Could not join room'); show('menu') }
 }
 
