@@ -1,61 +1,29 @@
-// Transport plus the snapshot buffer. The room is a Supabase Realtime channel
-// rather than a socket to our own server, because Vercel has nowhere to run one.
-// One peer in the channel is the host and owns the simulation (see host.js);
-// everyone else sends inputs and renders what comes back.
+// Transport + client-side state. The room is a Supabase Realtime channel
+// `room:<CODE>`; the creator's tab hosts the sim in a Web Worker (host.js), peers
+// send inputs and render snapshots. Offline play is the same worker with no channel.
 //
-// Realtime's message allowance is project-wide, so the two rates that matter are
-// SNAPSHOT_HZ and how often inputs go out. Inputs are sent only when the pressed
-// keys actually change — holding W is one message, not sixty a second — which is
-// what brings a match inside the budget.
+// Message budget (Realtime free tier ~100 msg/s project-wide, counting fan-out):
+// the host sends SNAPSHOT_HZ snapshots/s (each delivered to every peer); a peer
+// sends inputs only on change, capped at 20/s, plus a 1/s keepalive. Roster /
+// welcome / matchover are a handful per match. See the NET report for numbers.
 //
-// The client does not simulate: it renders a short way in the past and
-// interpolates between the two snapshots straddling that moment.
+// The pure parts (interpolation, prediction, event dedupe) live in predict.js and
+// the wire format in shared/protocol.js, both unit-tested without a browser.
 
-import * as C from '../shared/constants.js'
-import { currentBits, onInputChange } from './input.js'
-import { randomCode } from './host.js'
 import { supabase, enabled as supabaseEnabled } from './auth.js'
+import { randomCode } from './host.js'
+import { currentInput } from './input.js'
+import { stepCar } from '../shared/sim.js'
+import {
+  cleanCode, cleanName, cleanTeam, cleanBody, decodeSnapshot, parseRoster, parseWelcome, parseResult,
+  quantizeInput, inputChanged,
+} from '../shared/protocol.js'
+import {
+  createBuffer, pushSnapshot, sampleBuffer, createEventQueue, acceptEvents, releaseEvents,
+  createRtt, noteSent, noteAck, createPredictor,
+} from './predict.js'
 
-// Above one snapshot interval (1/12 s) or there is nothing to interpolate
-// towards and motion stutters at the buffer's edge. Every millisecond here is a
-// millisecond of input lag, so it sits just far enough clear of that floor to
-// absorb ordinary jitter: raise it if Realtime is stuttering, lower it and the
-// view starts running off the end of the buffer.
-let INTERP_DELAY_MS = 120
-
-/**
- * How far in the past the view runs, in milliseconds. Tunable at runtime because
- * the right number is a thing you feel in a real room rather than derive: 1/12s
- * is 83ms, so this is the floor plus whatever jitter slack the connection needs.
- * Also lets the host take the same delay as everyone else — it normally renders
- * its own sim with none, which is why a room feels different depending on whose
- * tab it is.
- */
-export function viewDelay(ms, alsoHost) {
-  if (typeof ms === 'number') INTERP_DELAY_MS = Math.max(0, ms)
-  if (typeof alsoHost === 'boolean') delayHostToo = alsoHost
-  return { delayMs: INTERP_DELAY_MS, delayHostToo }
-}
-let delayHostToo = false
-const BUFFER_MAX = 24
-// Generous, because giving up early is worse than waiting: the host may already
-// have seated us by the time we stop listening. Measured round trips to a room
-// on the far side of Realtime are well under a second; this is for a bad one.
-const JOIN_TIMEOUT_MS = 10000
-
-const buffer = [] // [{ recvAt, s }], oldest first
-// Only used when the host has asked to be held back to a peer's view.
-const hostRing = []
-// The host's own sim, handed over every tick by the worker. Present rather than
-// interpolated, so the host plays with no buffer delay at all.
-let liveState = null
-let channel = null
-let host = null // the sim worker, in the tab that created the room
-let seq = 0
-let inputTimer = null
-let lastBits = -1
-let settleJoin = () => {} // replaced while a join is in flight
-const cid = crypto.randomUUID()
+export const enabled = supabaseEnabled
 
 export const handlers = {
   onJoined: () => {},
@@ -65,325 +33,345 @@ export const handlers = {
   onClosed: () => {},
 }
 
-/**
- * Realtime is the transport, so a project must be configured for multiplayer to
- * work at all — unlike accounts, which stay optional.
- */
-export const enabled = supabaseEnabled
+const INPUT_MIN_GAP_MS = 50 // <= 20 Hz
+const KEEPALIVE_MS = 1000
+const JOIN_TIMEOUT_MS = 10000
+const HELLO_RETRY_MS = 1500
+let interpDelayMs = 100
 
-/**
- * Which game this tab is playing. Both games use the same channel, the same
- * snapshot buffer and the same input path; they differ in the worker that owns
- * the simulation and in how two snapshots are blended. The football page takes
- * the defaults, and client/kart.js calls this on the way in.
- *
- * The worker comes in as a factory rather than a URL because Vite only bundles
- * a worker whose `new URL(...)` it can read literally at the call site.
- */
-export function configure({ makeWorker, blend: blendFn }) {
-  if (makeWorker) newWorker = makeWorker
-  if (blendFn) blendSnapshots = blendFn
+/** Render delay behind the newest snapshot. Must exceed one snapshot interval (~67 ms). */
+export function setInterpDelay(ms) {
+  interpDelayMs = Math.max(0, ms)
 }
 
-let newWorker = () => new Worker(new URL('./sim-worker.js', import.meta.url), { type: 'module' })
-let blendSnapshots = blend
+const cid = crypto.randomUUID()
 
-export async function createRoom(name, team, car, mode, chassis) {
-  const code = randomCode()
-  await open(code)
+let worker = null // host / offline only
+let channel = null
+let me = null // my car id
+let hosting = false
+let rosterList = []
+let liveState = null // host: the sim's own state, zero delay
+const buf = createBuffer()
+const events = createEventQueue()
+const rtt = createRtt()
+const predictor = createPredictor(stepCar)
+let renderTick = 0
+let lastSampleAt = 0
+let inputTimer = null
+let seq = 0
+let lastSent = null
+let lastSentAt = 0
+let settleJoin = () => {}
 
-  host = newWorker()
-  const started = new Promise((resolve) => {
-    host.onmessage = ({ data }) => {
-      if (data.type === 'send') hostSend(data.event, data.payload)
-      else if (data.type === 'live') liveState = data.s
+export const myId = () => me
+export const isHost = () => hosting
+export const roster = () => rosterList.slice()
+
+// ---------- room lifecycle ----------
+
+function spawnWorker(msg) {
+  worker = new Worker(new URL('./sim-worker.js', import.meta.url), { type: 'module' })
+  return new Promise((resolve) => {
+    worker.onmessage = ({ data }) => {
+      if (data.type === 'live') {
+        liveState = data.s
+        acceptEvents(events, data.events)
+      } else if (data.type === 'send') hostSend(data.event, data.payload)
       else if (data.type === 'started') resolve(data)
     }
+    worker.postMessage({ type: 'start', ...msg })
   })
-  host.postMessage({
-    type: 'start',
-    code,
-    hostName: name,
-    hostTeam: team,
-    hostCar: car,
-    hostChassis: chassis,
-    mode,
-  })
-
-  const { hostId, hostTeam, roster } = await started
-  handlers.onJoined({ id: hostId, code, team: hostTeam })
-  handlers.onRoster(roster)
-  startSendingInput()
 }
 
-export async function joinRoom(name, code, team, car, chassis) {
-  await open(code)
+/** What the host broadcasts. Realtime does not echo to the sender, so handle it locally too. */
+function hostSend(event, payload) {
+  channel?.send({ type: 'broadcast', event, payload })
+  if (event === 'roster') {
+    rosterList = parseRoster(payload) ?? rosterList
+    handlers.onRoster(rosterList.slice())
+  } else if (event === 'matchover') {
+    const result = parseResult(payload.result)
+    if (result) handlers.onMatchOver(result)
+  }
+}
 
-  const settled = waitForWelcome()
-  // Everything aimed at the host goes on the one 'peer' event, so host.js has a
-  // single validated entry point rather than a listener per message type.
-  send('peer', { t: 'hello', cid, name, team, car, chassis })
-  const welcome = await settled
-  if (!welcome) {
-    // We may have been seated after all, by a welcome that arrived too late to
-    // catch. Leaving it at that parks an undriven car in the match for the rest
-    // of the game, so give the seat back before walking away.
-    await close()
-    return // the error has already been reported
+async function startHosting(extra, code) {
+  await leave()
+  const started = await spawnWorker({ code, ...extra })
+  hosting = true
+  me = started.hostId
+  rosterList = parseRoster({ players: started.roster }) ?? []
+  startInputLoop()
+  handlers.onJoined({ code, myId: me, isHost: true })
+  handlers.onRoster(rosterList.slice())
+}
+
+const hostArgs = ({ name, team, body, teamSize }) => ({
+  name: cleanName(name) ?? 'player',
+  team: cleanTeam(team),
+  body: cleanBody(body) ?? undefined,
+  teamSize,
+})
+
+export async function createRoom(opts) {
+  if (!enabled) throw new Error('Multiplayer is not configured')
+  await leave()
+  let code = null
+  for (let attempt = 0; attempt < 3 && !code; attempt++) {
+    const candidate = randomCode()
+    await open(candidate, true)
+    // A room is its host's presence in the channel; if one is already there, the code is taken.
+    if (await presenceHasOtherHost()) await closeChannel()
+    else code = candidate
+  }
+  if (!code) throw new Error('Could not find a free room code, try again')
+  await startHosting(hostArgs(opts), code)
+  return { code }
+}
+
+export async function playOffline(opts) {
+  await leave()
+  await startHosting(hostArgs(opts), null)
+  worker.postMessage({ type: 'begin' }) // no lobby offline; harmless if the UI also calls beginMatch()
+}
+
+export async function joinRoom({ name, code, team, body }) {
+  const room = cleanCode(code)
+  if (!room) throw reportError(new Error('Room codes are 4 letters'))
+  if (!enabled) throw reportError(new Error('Multiplayer is not configured'))
+  await leave()
+  try {
+    await open(room, false)
+  } catch (e) {
+    throw reportError(e)
   }
 
-  handlers.onJoined({ id: welcome.id, code, team: welcome.team })
-  startSendingInput()
-}
-
-/** Subscribe to the room's channel and wire every event we care about. */
-async function open(code) {
-  await close()
-  channel = supabase.channel(`room:${code}`, {
-    // The host must not receive its own snapshots back, and a joiner's own
-    // input echo is equally useless: self defaults to false, which is what we want.
-    config: { presence: { key: cid } },
+  const hello = { t: 'hello', cid, name: cleanName(name) ?? 'player', team: cleanTeam(team), body: cleanBody(body) }
+  const welcome = await new Promise((resolve) => {
+    let retry = null
+    const done = (w, error) => {
+      clearTimeout(timer)
+      clearInterval(retry)
+      settleJoin = () => {}
+      resolve({ w, error })
+    }
+    const timer = setTimeout(() => done(null, 'No room with that code'), JOIN_TIMEOUT_MS)
+    settleJoin = done
+    // The host may not be subscribed yet, and a hello is cheap: ask until answered.
+    send('peer', hello)
+    retry = setInterval(() => send('peer', hello), HELLO_RETRY_MS)
   })
 
-  channel
-    .on('broadcast', { event: 'snap' }, ({ payload }) => {
-      buffer.push({ recvAt: performance.now(), s: payload.s })
-      while (buffer.length > BUFFER_MAX) buffer.shift()
+  if (!welcome.w) {
+    // A late welcome may already have seated us; give the seat back rather than park a car.
+    await leave()
+    const err = new Error(welcome.error)
+    handlers.onError(err.message)
+    throw err
+  }
+  me = welcome.w.id
+  hosting = false
+  startInputLoop()
+  handlers.onJoined({ code: room, myId: me, isHost: false })
+}
+
+function reportError(e) {
+  handlers.onError(e.message)
+  return e
+}
+
+/** Host only: leave the pregame and start the countdown. */
+export function beginMatch() {
+  worker?.postMessage({ type: 'begin' })
+}
+
+export async function leave() {
+  stopInputLoop()
+  const wasHost = hosting
+  if (worker) {
+    if (wasHost && channel) channel.send({ type: 'broadcast', event: 'closed', payload: {} })
+    worker.postMessage({ type: 'stop' })
+    worker.terminate()
+    worker = null
+  } else if (channel) {
+    // Awaited: removing the channel first would drop the goodbye and leave a parked car.
+    await channel.send({ type: 'broadcast', event: 'peer', payload: { t: 'bye', cid } })
+  }
+  await closeChannel()
+  hosting = false
+  me = null
+  rosterList = []
+  liveState = null
+  buf.snaps.length = 0
+  buf.offset = null
+  events.pending.length = 0
+  events.lastId = -1
+  predictor.reset()
+  rtt.sent.clear()
+  rtt.lastAck = -1
+}
+
+async function closeChannel() {
+  const c = channel
+  channel = null
+  if (c) await supabase.removeChannel(c)
+}
+
+// Free the seat if the tab goes away. Best effort: the host also drops anyone
+// Realtime reports as gone from presence.
+if (typeof addEventListener !== 'undefined') addEventListener('pagehide', () => void leave())
+
+// ---------- channel ----------
+
+const send = (event, payload) => channel?.send({ type: 'broadcast', event, payload })
+
+function open(code, asHost) {
+  channel = supabase.channel(`room:${code}`, { config: { presence: { key: cid } } })
+  const ch = channel
+
+  ch
+    .on('broadcast', { event: 'peer' }, ({ payload }) => worker?.postMessage({ type: 'peer', payload }))
+    .on('broadcast', { event: 'snap' }, ({ payload }) => !worker && onSnapshot(payload?.s))
+    .on('broadcast', { event: 'roster' }, ({ payload }) => {
+      const players = !worker && parseRoster(payload)
+      if (players) {
+        rosterList = players
+        handlers.onRoster(players.slice())
+      }
     })
-    .on('broadcast', { event: 'roster' }, ({ payload }) => handlers.onRoster(payload.players))
-    .on('broadcast', { event: 'matchover' }, ({ payload }) =>
-      handlers.onMatchOver(payload.score, payload.players, payload.matchId),
-    )
-    // Peer messages are only the host's business, and only in the host's tab.
-    .on('broadcast', { event: 'peer' }, ({ payload }) =>
-      host?.postMessage({ type: 'peer', payload }),
-    )
-    // The answer to our own hello. Bound here rather than in joinRoom because a
-    // channel only registers listeners added before subscribe().
     .on('broadcast', { event: 'welcome' }, ({ payload }) => {
-      if (payload.cid === cid) settleJoin(payload)
+      const w = payload?.cid === cid && parseWelcome(payload)
+      if (w) settleJoin(w)
     })
     .on('broadcast', { event: 'reject' }, ({ payload }) => {
-      if (payload.cid === cid) settleJoin(null, payload.reason)
+      if (payload?.cid === cid) settleJoin(null, typeof payload.reason === 'string' ? payload.reason.slice(0, 80) : 'Could not join')
     })
+    .on('broadcast', { event: 'matchover' }, ({ payload }) => {
+      const result = !worker && parseResult(payload?.result)
+      if (result) handlers.onMatchOver(result)
+    })
+    .on('broadcast', { event: 'closed' }, () => !worker && hostGone())
     .on('presence', { event: 'leave' }, ({ leftPresences }) => {
-      for (const p of leftPresences) host?.postMessage({ type: 'dropPeer', cid: p.key ?? p.cid })
+      for (const p of leftPresences) {
+        if (worker) worker.postMessage({ type: 'dropPeer', cid: p.cid ?? p.key })
+        else if (p.host) hostGone()
+      }
     })
 
   return new Promise((resolve, reject) => {
-    channel.subscribe((status) => {
+    ch.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
-        // Input is sent only when the keys change, so after a reconnect the host
-        // may be sitting on bits from before the drop with nothing to correct
-        // them. Forgetting what we last sent makes the next look resend it.
-        lastBits = -1
-        channel.track({ cid })
+        lastSent = null // the host may hold stale input from before a reconnect
+        ch.track({ cid, host: asHost })
         resolve()
-      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-        reject(new Error('could not reach the room'))
-      }
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') reject(new Error('Could not reach the room'))
     })
   })
 }
 
-/**
- * A room only exists while its host is in the channel, so "no room with that
- * code" is really "nobody answered" — hence a timeout rather than a lookup.
- */
-function waitForWelcome() {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => settleJoin(null, 'No room with that code'), JOIN_TIMEOUT_MS)
-    // The channel's listeners outlive this promise, so settleJoin is what makes
-    // sure only the first answer counts.
-    settleJoin = (welcome, error) => {
-      clearTimeout(timer)
-      settleJoin = () => {}
-      if (error) handlers.onError(error)
-      resolve(welcome)
+async function presenceHasOtherHost() {
+  await new Promise((r) => setTimeout(r, 600)) // let the first presence sync land
+  const state = channel?.presenceState() ?? {}
+  return Object.entries(state).some(([key, metas]) => key !== cid && metas.some((m) => m.host))
+}
+
+let closing = false
+async function hostGone() {
+  if (closing || !channel) return
+  closing = true
+  try {
+    await leave()
+  } finally {
+    closing = false
+  }
+  handlers.onClosed()
+}
+
+// ---------- snapshots (peer) ----------
+
+function onSnapshot(raw) {
+  const snap = decodeSnapshot(raw)
+  if (!snap) return
+  const now = performance.now()
+  if (!pushSnapshot(buf, snap.state, now)) return
+  acceptEvents(events, snap.events)
+
+  if (me && me in snap.acks) noteAck(rtt, snap.acks[me], now)
+  const own = snap.state.cars.find((c) => c.id === me)
+  if (!own) return
+  // Prediction only means anything while the car is actually being driven.
+  if (snap.state.phase !== 'play') predictor.reset()
+  predictor.correct(own, rtt.ms / 2000, currentInput(), snap.state)
+}
+
+function decorate(state) {
+  const by = new Map(rosterList.map((p) => [p.id, p]))
+  for (const c of state.cars) {
+    const r = by.get(c.id)
+    if (r) {
+      c.name = r.name
+      c.team = r.team
+      c.body = r.body
+      c.bot = r.bot
     }
-  })
+  }
+  return state
 }
 
-/**
- * Host only: leave the waiting phase. A peer has no host worker to tell. `track`
- * is the map the host picked, or nothing at all for a random one — it rides the
- * same message rather than being stored at room creation, so it applies to every
- * race rather than only the first.
- */
-export function beginMatch(track) {
-  host?.postMessage({ type: 'begin', track })
+/** The state to draw now (ms from performance.now()), or null before anything has arrived. */
+export function sampleState(nowMs = performance.now()) {
+  if (liveState) return liveState // host / offline: the present, no delay
+
+  const res = sampleBuffer(buf, nowMs, interpDelayMs)
+  if (!res) return null
+  renderTick = res.tick
+  const dt = Math.min(0.1, Math.max(0, (nowMs - lastSampleAt) / 1000))
+  lastSampleAt = nowMs
+
+  const state = { ...res.state, cars: res.state.cars.map((c) => ({ ...c })) }
+  if (res.state.phase === 'play') {
+    const pred = predictor.advance(dt, currentInput(), res.state)
+    const i = state.cars.findIndex((c) => c.id === me)
+    if (pred && i >= 0) state.cars[i] = { ...state.cars[i], ...pred }
+  }
+  return decorate(state)
 }
 
-/**
- * Stop the race for everyone, or start it again. The host owns the simulation so
- * it is the one that decides, but anyone may ask: a peer puts it on the channel
- * and the host applies it, which is the same path an input already takes.
- */
-export function setPaused(on, name) {
-  if (host) host.postMessage({ type: 'pause', on, by: name })
-  else send('peer', { t: 'pause', cid, on })
+/** New events since the last call, each exactly once. Peers see them as the render clock reaches them. */
+export function drainEvents() {
+  return releaseEvents(events, worker ? Infinity : renderTick)
 }
 
-/** Send the pressed keys if they have changed since the last time we looked. */
-function flushInput() {
-  const bits = currentBits()
-  if (bits === lastBits) return
-  lastBits = bits
-  if (host) host.postMessage({ type: 'localBits', bits })
-  else send('peer', { t: 'input', cid, seq: seq++, bits })
+// ---------- input ----------
+
+function startInputLoop() {
+  stopInputLoop()
+  inputTimer = setInterval(flushInput, 16)
 }
 
-export function startSendingInput() {
-  if (inputTimer) return
-  // Driven off the key change, so a press goes out on the spot rather than
-  // waiting up to a poll interval. Costs no extra messages: the same changes
-  // are sent, just sooner.
-  onInputChange(flushInput)
-  // The poll stays as the backstop, for a bit that changes without a key event
-  // of its own — a key held across a tab switch, or the blur handler clearing
-  // one. Only a change costs a message, so an idle poll is free.
-  inputTimer = setInterval(flushInput, 1000 / C.TICK_HZ)
-}
-
-function stopSendingInput() {
-  onInputChange(null)
+function stopInputLoop() {
   clearInterval(inputTimer)
   inputTimer = null
-  lastBits = -1
+  lastSent = null
 }
 
-function send(event, payload) {
-  channel?.send({ type: 'broadcast', event, payload })
-}
-
-/**
- * What the host sends. Realtime does not echo a message back to its sender, so
- * the host's own tab has to be handed everything it broadcasts or it would miss
- * its own roster and full-time panel. Snapshots are the exception: the host
- * renders liveState, which is the same sim five times fresher.
- */
-function hostSend(event, payload) {
-  send(event, payload)
-  if (event === 'roster') {
-    handlers.onRoster(payload.players)
-  } else if (event === 'matchover') {
-    handlers.onMatchOver(payload.score, payload.players, payload.matchId)
-  }
-}
-
-export async function close() {
-  stopSendingInput()
-  const wasHost = Boolean(host)
-  host?.postMessage({ type: 'stop' })
-  host?.terminate()
-  host = null
-
-  const leaving = channel
-  channel = null
-  buffer.length = 0
-  hostRing.length = 0
-  liveState = null
-  if (!leaving) return
-
-  // A joiner frees its seat on the way out. A host has no one to tell: the room
-  // is the host, and it ends with them. The send is awaited because removing
-  // the channel first would drop the goodbye and leave a parked car behind.
-  if (!wasHost) await leaving.send({ type: 'broadcast', event: 'peer', payload: { t: 'bye', cid } })
-  supabase.removeChannel(leaving)
-}
-
-// Leaving the tab should free the seat rather than leave a parked car behind.
-// Nothing can be awaited here, so this is best effort: the host also drops a
-// peer that Realtime reports as gone from the channel's presence.
-addEventListener('pagehide', () => void close())
-
-/**
- * The newest snapshot exactly as it arrived, unblended and undelayed. The view
- * from sampleState() is deliberately in the past; a peer predicting its own kart
- * wants the freshest truth it has instead.
- */
-export function newestSnapshot() {
-  return buffer.length ? buffer[buffer.length - 1].s : null
-}
-
-/** Interpolated view of the world, or null until two snapshots have arrived. */
-export function sampleState() {
-  // The host is the authority and its sim is right here, a tick old at most —
-  // unless it has asked to be held back to what a peer sees, which is the only
-  // honest way to judge whether a peer's delay is actually playable.
-  if (liveState && !delayHostToo) return liveState
-  if (liveState) {
-    hostRing.push({ recvAt: performance.now(), s: liveState })
-    while (hostRing.length > BUFFER_MAX) hostRing.shift()
-    const at = performance.now() - INTERP_DELAY_MS
-    for (let i = hostRing.length - 1; i >= 0; i--) if (hostRing[i].recvAt <= at) return hostRing[i].s
-    return hostRing[0].s
-  }
-  if (buffer.length === 0) return null
-  const renderAt = performance.now() - INTERP_DELAY_MS
-
-  let older = null
-  let newer = null
-  for (let i = buffer.length - 1; i >= 0; i--) {
-    if (buffer[i].recvAt <= renderAt) {
-      older = buffer[i]
-      newer = buffer[i + 1] ?? null
-      break
+function flushInput() {
+  const now = performance.now()
+  const input = currentInput()
+  const q = quantizeInput(input)
+  if (worker) {
+    // The host's own input never touches the network: any change goes straight in.
+    if (inputChanged(lastSent, q, 1)) {
+      lastSent = q
+      worker.postMessage({ type: 'input', input })
     }
+    return
   }
-  // Not enough history yet, or we have fallen behind the buffer: show the newest.
-  if (!older) return buffer[0].s
-  if (!newer) return older.s
-
-  const span = newer.recvAt - older.recvAt
-  const t = span > 0 ? (renderAt - older.recvAt) / span : 0
-  return blendSnapshots(older.s, newer.s, t)
-}
-
-function blend(a, b, t) {
-  const carsA = new Map(a.cars.map((c) => [c.id, c]))
-  return {
-    // Discrete fields come from the older snapshot so the banner and the score
-    // change at the same moment the bodies do.
-    tick: a.tick,
-    // Named explicitly, like everything else here: a field this function does
-    // not mention is a field a joiner never sees.
-    mode: a.mode,
-    phase: a.phase,
-    phaseTimer: a.phaseTimer,
-    clock: a.clock,
-    overtime: a.overtime,
-    score: a.score,
-    lastScorer: a.lastScorer,
-    ball: {
-      x: lerp(a.ball.x, b.ball.x, t),
-      y: lerp(a.ball.y, b.ball.y, t),
-      vx: b.ball.vx,
-      vy: b.ball.vy,
-      freeze: b.ball.freeze,
-      stuckTo: b.ball.stuckTo,
-    },
-    cars: b.cars.map((cb) => {
-      const ca = carsA.get(cb.id)
-      if (!ca) return cb // joined between snapshots
-      return {
-        ...cb,
-        x: lerp(ca.x, cb.x, t),
-        y: lerp(ca.y, cb.y, t),
-        heading: lerpAngle(ca.heading, cb.heading, t),
-        boost: lerp(ca.boost, cb.boost, t),
-      }
-    }),
-  }
-}
-
-function lerp(a, b, t) {
-  return a + (b - a) * t
-}
-
-function lerpAngle(a, b, t) {
-  let d = b - a
-  while (d > Math.PI) d -= Math.PI * 2
-  while (d < -Math.PI) d += Math.PI * 2
-  return a + d * t
+  const due = now - lastSentAt >= INPUT_MIN_GAP_MS && inputChanged(lastSent, q)
+  if (!due && now - lastSentAt < KEEPALIVE_MS) return
+  lastSent = q
+  lastSentAt = now
+  noteSent(rtt, ++seq, now)
+  send('peer', { t: 'input', cid, seq, a: q.a, b: q.b })
 }

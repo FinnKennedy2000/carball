@@ -1,13 +1,8 @@
-// The host's simulation, run off the main thread.
-//
-// It has to be off it. The host renders the same match it is simulating, and on
-// the main thread a slow frame is a slow tick — measured at 5 ticks/sec instead
-// of 60 while three.js was busy, which stretches the clock for every player in
-// the room, not just the host. A worker keeps the tick loop at real speed no
-// matter what the host's GPU is doing.
-//
-// The worker owns the state and nothing else: the channel stays on the main
-// thread, which forwards peer messages in and broadcasts what comes out.
+// The host's simulation, off the main thread: on the main thread a slow render
+// frame is a slow tick, which stretches the match clock for everyone. The worker
+// owns the state; the channel stays on the main thread, which forwards peer
+// messages in and broadcasts what comes out. Offline play is the same worker with
+// no channel: the main thread just handles 'send' locally.
 
 import { startHost } from './host.js'
 
@@ -16,14 +11,17 @@ let host = null
 onmessage = ({ data }) => {
   switch (data.type) {
     case 'start':
+      host?.stop()
       host = startHost({
         code: data.code,
+        name: data.name,
+        team: data.team,
+        body: data.body,
+        teamSize: data.teamSize,
         send: (event, payload) => postMessage({ type: 'send', event, payload }),
-        live: (state) => postMessage({ type: 'live', s: state }),
-        hostName: data.hostName,
-        hostTeam: data.hostTeam,
-        hostCar: data.hostCar,
-        mode: data.mode,
+        // Every tick, in order. `events` is just this tick's, so the main thread
+        // can queue them without diffing.
+        live: (s, events) => postMessage({ type: 'live', s, events }),
       })
       postMessage({ type: 'started', hostId: host.hostId, hostTeam: host.hostTeam, roster: host.roster() })
       break
@@ -33,8 +31,8 @@ onmessage = ({ data }) => {
     case 'begin':
       host?.begin()
       break
-    case 'localBits':
-      host?.setLocalBits(data.bits)
+    case 'input':
+      host?.setLocalInput(data.input)
       break
     case 'dropPeer':
       host?.dropPeer(data.cid)

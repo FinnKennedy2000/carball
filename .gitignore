@@ -8,3 +8,4 @@ dist/
 .agents/
 .claude/skills/
 .claude/worktrees/
+.shots/

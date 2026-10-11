@@ -3,146 +3,154 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Car Football</title>
+    <meta name="theme-color" content="#070b16" />
+    <title>CARBALL</title>
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="stylesheet" href="./nocturne.css" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,500;0,700;1,700;1,800;1,900&family=Inter:wght@400;500;600&display=swap"
+    />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <div id="lobby">
-      <div id="topbar" hidden>
-        <div class="brand">Car Football</div>
-        <div class="who">
-          signed in as <b id="account-name"></b>
-          <button id="sign-out" class="btn btn-ghost">Sign out</button>
-        </div>
+    <canvas id="bg" aria-hidden="true"></canvas>
+    <div id="vignette" aria-hidden="true"></div>
+
+    <!-- ===== HUD ===== -->
+    <div id="hud" hidden>
+      <div id="hud-score">
+        <div class="team blue"><b id="h-name0">BLUE</b><span id="h-s0">0</span></div>
+        <div id="h-clock-wrap"><span id="h-clock">5:00</span><i id="h-ot" hidden>OVERTIME</i></div>
+        <div class="team orange"><span id="h-s1">0</span><b id="h-name1">ORANGE</b></div>
       </div>
+      <div id="feed" aria-live="polite"></div>
+      <div id="countdown" hidden></div>
+      <div id="goal-banner" hidden>
+        <div id="gb-title">BLUE SCORES!</div>
+        <div id="gb-sub"></div>
+      </div>
+      <div id="ballcam"><kbd id="bc-key">F</kbd> <span id="bc-text">BALL CAM</span></div>
+      <div id="boost">
+        <svg viewBox="0 0 120 120" aria-hidden="true">
+          <circle class="trk" cx="60" cy="60" r="52" />
+          <circle class="bar" id="boost-bar" cx="60" cy="60" r="52" />
+        </svg>
+        <div id="boost-n">100</div>
+        <div id="boost-l">BOOST</div>
+      </div>
+      <div id="tabboard" hidden></div>
+      <div id="fps" hidden></div>
+    </div>
 
-      <div id="lobby-cols">
-        <section id="col-left">
-          <div class="stack">
-            <div class="kicker accent">Four letters. Six cars. One ball.</div>
-            <h1>Car&nbsp;Football</h1>
-            <div class="accent-rule"></div>
+    <!-- ===== Title ===== -->
+    <section class="screen" id="s-title" data-screen="title">
+      <div class="logo big"><span>CAR</span><em>BALL</em></div>
+      <p class="tag">Cars. Ball. Gravity optional.</p>
+      <button class="press" id="press-start">Press any key to start</button>
+    </section>
+
+    <!-- ===== Main menu ===== -->
+    <section class="screen" id="s-menu" data-screen="menu">
+      <header class="brand"><div class="logo"><span>CAR</span><em>BALL</em></div></header>
+      <nav class="menu" aria-label="Main menu">
+        <div class="mrow">
+          <button class="mbtn primary" id="m-offline"><small>Solo</small>Play vs Bots</button>
+          <div class="seg" id="size-seg" role="radiogroup" aria-label="Team size">
+            <button role="radio" data-n="1">1v1</button>
+            <button role="radio" data-n="2" class="on">2v2</button>
+            <button role="radio" data-n="3">3v3</button>
           </div>
+        </div>
+        <button class="mbtn" id="m-create"><small>Online</small>Create Room</button>
+        <button class="mbtn" id="m-join"><small>Online</small>Join Room</button>
+        <button class="mbtn" id="m-garage"><small>Customize</small>Garage</button>
+        <button class="mbtn" id="m-settings"><small>Options</small>Settings</button>
+        <p class="note" id="online-note" hidden>Online play is unavailable: no Supabase configuration was found. Offline mode works fully.</p>
+      </nav>
+      <div class="whoami"><span>PLAYING AS</span><b id="m-name">Player</b></div>
+    </section>
 
-          <div class="stack wide-gap">
-            <div class="kicker" id="play-label">Play as a guest</div>
-            <input id="name" class="input" placeholder="your name" maxlength="16" autocomplete="off" />
+    <!-- ===== Garage ===== -->
+    <section class="screen" id="s-garage" data-screen="garage">
+      <button class="back" data-back>&lsaquo; Back</button>
+      <div class="gpanel">
+        <h2>GARAGE</h2>
+        <label class="field">Driver name
+          <input id="g-name" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Your name" />
+        </label>
+        <div class="label">Team</div>
+        <div class="seg wide" id="g-team" role="radiogroup" aria-label="Team">
+          <button role="radio" data-t="0" class="blue on">Blue</button>
+          <button role="radio" data-t="1" class="orange">Orange</button>
+        </div>
+        <div class="label">Body</div>
+        <div id="g-cars" class="cars" role="radiogroup" aria-label="Car body"></div>
+        <button class="mbtn primary" id="g-done">Save &amp; Continue</button>
+      </div>
+      <canvas id="preview" aria-label="Car preview"></canvas>
+      <div id="g-carname" class="carname"></div>
+    </section>
 
-            <div class="kicker">Side</div>
-            <div id="teams">
-              <button class="btn btn-secondary team on" data-team="">Auto</button>
-              <button class="btn btn-secondary team blue" data-team="0">Blue</button>
-              <button class="btn btn-secondary team orange" data-team="1">Orange</button>
-            </div>
+    <!-- ===== Lobby ===== -->
+    <section class="screen" id="s-lobby" data-screen="lobby">
+      <div class="lpanel">
+        <div class="label">Room code</div>
+        <div id="l-code" class="code">----</div>
+        <button class="btn" id="l-copy">Copy invite link</button>
+        <p class="note" id="l-status"></p>
+      </div>
+      <div class="roster">
+        <div class="rteam blue"><h3>BLUE</h3><ul id="r-0"></ul></div>
+        <div class="rteam orange"><h3>ORANGE</h3><ul id="r-1"></ul></div>
+      </div>
+      <div class="lactions">
+        <button class="mbtn primary" id="l-start">Start Match</button>
+        <button class="mbtn" id="l-leave">Leave</button>
+      </div>
+    </section>
 
-            <div class="kicker">Car</div>
-            <!-- The silhouette and its numbers come from shared/cars.js, so this
-                 cannot drift from the model the renderer builds. -->
-            <button id="garage-link" class="car-pick">
-              <span id="car-thumb" class="thumb"></span>
-              <span class="chassis-label">
-                <span id="car-name" class="chassis-name"></span>
-                <span id="car-dims" class="chassis-dims tabular"></span>
-              </span>
-              <span class="chassis-mark">Garage</span>
-            </button>
+    <!-- ===== Post-match ===== -->
+    <section class="screen" id="s-post" data-screen="post">
+      <div id="p-banner" class="pbanner"><small>FULL TIME</small><b id="p-win">BLUE WINS</b><span id="p-score">0 - 0</span></div>
+      <div class="board" id="p-board"></div>
+      <div class="lactions">
+        <button class="mbtn primary" id="p-again">Play Again</button>
+        <button class="mbtn" id="p-menu">Main Menu</button>
+      </div>
+    </section>
 
-            <!-- The mode belongs to the room, so it is only the host's to pick;
-                 a joiner inherits it from the first snapshot. -->
-            <div class="kicker">Mode <span class="kicker-note">· the room you create</span></div>
-            <div id="modes">
-              <button class="btn btn-secondary mode on" data-mode="normal">Normal</button>
-              <button class="btn btn-secondary mode" data-mode="rumble">Rumble</button>
-            </div>
-            <p class="hint" id="mode-hint">Football, plainly.</p>
+    <!-- ===== Overlays ===== -->
+    <div class="modal" id="o-join" hidden role="dialog" aria-modal="true" aria-label="Join room">
+      <form class="card" id="join-form">
+        <h2>JOIN ROOM</h2>
+        <input id="join-code" maxlength="4" autocomplete="off" spellcheck="false" placeholder="ABCD" aria-label="Room code" />
+        <div class="row">
+          <button type="submit" class="mbtn primary">Join</button>
+          <button type="button" class="mbtn" data-close>Cancel</button>
+        </div>
+      </form>
+    </div>
 
-            <div class="row">
-              <button id="create" class="btn btn-primary">Create room</button>
-              <input id="code" class="input" placeholder="CODE" maxlength="4" autocomplete="off" />
-              <button id="join" class="btn btn-secondary">Join</button>
-            </div>
-
-            <p class="hint">
-              Room codes are four letters. Share the link and the code fills itself in.
-            </p>
-            <p id="lobby-error"></p>
-          </div>
-
-          <!-- The other game. No room, no account, no waiting for anyone. -->
-          <div class="stack">
-            <div class="kicker">Also here</div>
-            <div class="row">
-              <a class="btn btn-secondary" href="./kart">Kart — three laps, items, solo or in a room</a>
-            </div>
-          </div>
-
-          <div class="stack">
-            <div class="kicker">Controls</div>
-            <dl id="controls">
-              <div><dt>Drive</dt><dd>WASD</dd></div>
-              <div><dt>Boost</dt><dd>Space</dd></div>
-              <div><dt>Drift</dt><dd>Shift</dd></div>
-              <div><dt>Item <span class="kicker-note">rumble</span></dt><dd>E</dd></div>
-              <div><dt>Mute</dt><dd>M</dd></div>
-            </dl>
-          </div>
-        </section>
-
-        <aside id="col-right">
-          <div id="account" hidden>
-            <div id="account-signed-out" class="stack wide-gap">
-              <div class="kicker">Sign in to keep your record</div>
-              <div class="field">
-                <label for="email">Email</label>
-                <input id="email" class="input" type="email" autocomplete="username" />
-              </div>
-              <div class="field">
-                <label for="password">Password</label>
-                <input id="password" class="input" type="password" autocomplete="current-password" />
-              </div>
-              <div class="row">
-                <button id="sign-in" class="btn btn-primary">Sign in</button>
-                <button id="sign-up" class="btn btn-ghost">Create account</button>
-              </div>
-              <p class="hint">Optional — guests play with a typed-in name.</p>
-              <p id="account-note"></p>
-            </div>
-
-            <div id="account-signed-in" hidden>
-              <div class="card">
-                <div class="card-kicker">Your name</div>
-                <!-- The name others see. Your record follows the account rather
-                     than the name, so changing it keeps every goal. -->
-                <div class="row">
-                  <input id="rename" class="input" maxlength="16" autocomplete="off" />
-                  <button id="rename-go" class="btn btn-secondary">Save</button>
-                </div>
-                <div id="rename-note" class="hint"></div>
-              </div>
-              <div class="card">
-                <div class="card-kicker">Your record</div>
-                <div id="record">
-                  <div><b id="record-goals">0</b><span>goals</span></div>
-                  <div><b id="record-wins">0</b><span>wins</span></div>
-                  <div><b id="record-matches">0</b><span>matches</span></div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="hr" id="account-divider" hidden></div>
-
-          <div id="leaderboard" hidden class="stack">
-            <div class="kicker">Top scorers</div>
-            <div id="leaderboard-rows"></div>
-          </div>
-        </aside>
+    <div class="modal" id="o-pause" hidden role="dialog" aria-modal="true" aria-label="Paused">
+      <div class="card">
+        <h2>PAUSED</h2>
+        <button class="mbtn primary" id="pa-resume">Resume</button>
+        <button class="mbtn" id="pa-settings">Settings</button>
+        <button class="mbtn" id="pa-leave">Leave Match</button>
       </div>
     </div>
 
-    <script type="module" src="./lobby.js"></script>
+    <div class="modal" id="o-settings" hidden role="dialog" aria-modal="true" aria-label="Settings">
+      <div class="card wide">
+        <h2>SETTINGS</h2>
+        <div id="set-body" class="setbody"></div>
+        <button class="mbtn primary" data-close>Done</button>
+      </div>
+    </div>
+
+    <div id="toasts" aria-live="assertive"></div>
+    <script type="module" src="./main.js"></script>
   </body>
 </html>

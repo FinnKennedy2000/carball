@@ -1,484 +1,327 @@
-// The only authoritative simulation. Pure and deterministic: fixed timestep,
-// fixed body iteration order, no Math.random, no Date, no I/O.
-//
-// Damping uses linear (1 - rate*dt) rather than exp(-rate*dt) so results do not
-// depend on a JS engine's transcendental function accuracy.
-
+// Authoritative match simulation. Pure data in, pure data out: no Date, no Math.random.
+// Physics lives in shared/physics/*; this file owns phases, scoring, events and stats.
 import * as C from './constants.js'
-import { initCarItems, stepRumble, afterBodies } from './rumble.js'
+import { ARENA, BOOST_PADS, inGoal } from './arena.js'
+import { CARS, DEFAULT_CAR } from './cars.js'
+import { stepCar as physStepCar, hitboxOf } from './physics/car.js'
+import { stepBall, carHitsBall } from './physics/ball.js'
+import { botInput } from './bot.js'
+import { qyaw, qrot, dot, len, clamp } from './physics/math.js'
 
-/**
- * `mode` is 'normal' or 'rumble', and `seed` is the item PRNG's starting value —
- * drawn once by the host, because nothing in here may call Math.random. Both
- * travel in the snapshot, so a joiner inherits the mode without asking for it.
- */
-export function createState(mode = 'normal', seed = 1) {
-  const state = {
-    tick: 0,
-    mode: mode === 'rumble' ? 'rumble' : 'normal',
-    seed: seed >>> 0,
-    // Nothing moves until the host starts the match, so a room can fill up first.
-    phase: 'WAITING',
-    phaseTimer: 0,
-    clock: C.MATCH_SECONDS,
-    overtime: false, // sudden death: the clock ran out level
-    lastScorer: null, // car id credited with the most recent goal, or null
-    score: [0, 0],
-    // lastTouch: the car that hit the ball most recently, for goal credit.
-    // stuckTo: the car carrying the ball on a Spike, or null.
-    ball: { x: 0, y: 0, vx: 0, vy: 0, lastTouch: null, freeze: 0, stuckTo: null },
-    cars: [],
-  }
-  return state
+export const NEUTRAL_INPUT = Object.freeze({
+  thr: 0, steer: 0, pitch: 0, yaw: 0, roll: 0, jump: false, boost: false, handbrake: false,
+})
+
+/** Client prediction entry point: car-only physics + arena collision. Mutates `car`. */
+export function stepCar(car, input, dt = C.DT, _state) {
+  return physStepCar(car, input, dt)
 }
 
-export function addCar(state, id, team) {
-  const car = { id, team, x: 0, y: 0, vx: 0, vy: 0, heading: 0, boost: C.BOOST_MAX }
-  // Only a Rumble car carries item state: a normal match should not pay for the
-  // mode in every snapshot it sends.
-  if (state.mode === 'rumble') initCarItems(car)
+const BOT_NAMES = ['Apex', 'Blitz', 'Cinder', 'Dash', 'Echo', 'Flux', 'Gizmo', 'Havoc', 'Ion', 'Jolt', 'Kilo', 'Nova']
+// kickoff slots for blue (x, z); orange is the point-mirror
+const SLOTS = [[-20.48, -25.6], [20.48, -25.6], [0, -46.08]]
+const TOUCH_MEMORY = 5 * C.TICK_HZ
+
+function rand(state) { // mulberry32
+  let t = (state.rng = (state.rng + 0x6d2b79f5) >>> 0)
+  t = Math.imul(t ^ (t >>> 15), t | 1)
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+}
+
+function emit(state, type, fields) {
+  const e = { id: state.nextEventId++, type, tick: state.tick, ...fields }
+  state.events.push(e)
+  return e
+}
+
+export function createMatch({ teamSize = 3, seed = 1 } = {}) {
+  return {
+    tick: 0, phase: 'pregame', phaseT: 0, clock: C.MATCH_SECONDS, overtime: false,
+    score: [0, 0], teamSize: clamp(teamSize | 0, 1, C.MAX_PLAYERS / 2),
+    ball: { p: [0, C.BALL_R, 0], v: [0, 0, 0], q: [0, 0, 0, 1], w: [0, 0, 0] },
+    cars: [], pads: BOOST_PADS.map(() => true), padT: BOOST_PADS.map(() => 0),
+    lastTouch: null, events: [], nextEventId: 0,
+    inputs: {}, touches: [], rng: seed >>> 0, botSeq: 0, cdN: 3, threat: -1, threatBy: null,
+  }
+}
+
+function makeCar({ id, name, team, body, bot }) {
+  return {
+    id: String(id), name: name ?? String(id), team: team === 1 ? 1 : 0, body: CARS[body] ? body : DEFAULT_CAR, bot: !!bot,
+    p: [0, 1, 0], v: [0, 0, 0], q: [0, 0, 0, 1], w: [0, 0, 0],
+    boost: C.BOOST_START, onGround: true, onWall: false, boosting: false, supersonic: false,
+    dodging: false, jumped: false, doubleJumped: false, demolished: 0,
+    stats: { score: 0, goals: 0, assists: 0, saves: 0, shots: 0, demos: 0 },
+  }
+}
+
+function spawn(state, car, slotIdx) {
+  const [sx, sz] = SLOTS[slotIdx % SLOTS.length]
+  const m = car.team === 0 ? 1 : -1
+  const x = sx * m, z = sz * m
+  car.p = [x, hitboxOf(car)[1] / 2 + 0.02, z]
+  car.v = [0, 0, 0]; car.w = [0, 0, 0]
+  car.q = qyaw(Math.atan2(-x, -z))
+  car.boost = C.BOOST_START
+  Object.assign(car, { onGround: true, onWall: false, boosting: false, supersonic: false, dodging: false, jumped: false, doubleJumped: false, demolished: 0, dodgeT: 0, jumpT: 0, pj: undefined })
+}
+
+function resetPositions(state) {
+  for (const team of [0, 1]) {
+    const order = [0, 1, 2]
+    for (let i = 2; i > 0; i--) { const j = Math.floor(rand(state) * (i + 1)); [order[i], order[j]] = [order[j], order[i]] }
+    let k = 0
+    for (const c of state.cars) if (c.team === team) spawn(state, c, order[k++ % 3])
+  }
+  state.ball = { p: [0, C.BALL_R, 0], v: [0, 0, 0], q: [0, 0, 0, 1], w: [0, 0, 0] }
+  state.pads.fill(true); state.padT.fill(0)
+  state.lastTouch = null; state.touches = []; state.threat = -1; state.threatBy = null
+}
+
+export function addPlayer(state, { id, name, team, body, bot = false }) {
+  const car = makeCar({ id, name, team, body, bot })
   state.cars.push(car)
-  // Cars are kept sorted by id so the collision iteration order never depends on
-  // join order. Determinism, and it makes snapshots diff-friendly.
-  state.cars.sort((a, b) => a.id - b.id)
-  // Only the joining car is placed. A mid-match join must not move the ball.
-  placeCar(car, state.cars.filter((c) => c.team === team).indexOf(car))
+  state.inputs[car.id] = NEUTRAL_INPUT
+  spawn(state, car, state.cars.filter((c) => c.team === car.team).length - 1)
   return car
 }
 
-export function removeCar(state, id) {
-  const i = state.cars.findIndex((c) => c.id === id)
-  if (i !== -1) state.cars.splice(i, 1)
+export function removePlayer(state, id) {
+  state.cars = state.cars.filter((c) => c.id !== id)
+  delete state.inputs[id]
+  state.touches = state.touches.filter((t) => t.id !== id)
+  if (state.lastTouch === id) state.lastTouch = null
 }
 
-/** Leave WAITING and run the kickoff countdown. The host's call to make. */
-export function kickoff(state) {
-  if (state.phase !== 'WAITING') return
-  state.phase = 'KICKOFF'
-  state.phaseTimer = C.KICKOFF_SECONDS
-}
-
-export function resetPositions(state) {
-  state.ball.x = 0
-  state.ball.y = 0
-  state.ball.vx = 0
-  state.ball.vy = 0
-  state.ball.lastTouch = null
-  state.ball.freeze = 0
-  state.ball.stuckTo = null
-
-  const perTeam = [0, 0]
-  for (const car of state.cars) {
-    placeCar(car, perTeam[car.team]++)
-    // A kickoff clears whatever anyone was holding, and restarts the wait.
-    if (state.mode === 'rumble') initCarItems(car)
+const num = (x) => (Number.isFinite(x) ? clamp(x, -1, 1) : 0)
+export function setInput(state, id, i) {
+  if (!i) return
+  state.inputs[id] = {
+    thr: num(i.thr), steer: num(i.steer), pitch: num(i.pitch), yaw: num(i.yaw), roll: num(i.roll),
+    jump: !!i.jump, boost: !!i.boost, handbrake: !!i.handbrake,
   }
 }
 
-// Kickoff spots for one side, as fractions of its half. Corners first and the
-// back centre last, so nobody lines up on the ball until a side has three cars
-// in it: the old fan-out handed the centre spot out first, which put someone
-// directly on the ball at every single kickoff.
-const KICKOFF = [
-  { x: 0.55, y: 0.62 },
-  { x: 0.55, y: -0.62 },
-  { x: 0.8, y: 0 },
-]
-
-function placeCar(car, slot) {
-  const side = car.team === C.TEAM_BLUE ? -1 : 1
-  // Clamped rather than wrapped: MAX_PER_TEAM is 3 today, so this only matters
-  // if that cap ever moves, and a fourth car sharing the back spot beats one
-  // placed off the end of the table.
-  const spot = KICKOFF[Math.min(slot, KICKOFF.length - 1)]
-  // Both axes take the side, so one side's spots are the other's turned a half
-  // turn: the two first cars start on opposite corners rather than nose to nose.
-  car.x = side * spot.x * (C.ARENA_W / 2)
-  car.y = side * spot.y * (C.ARENA_H / 2)
-  // Aimed at the centre spot from wherever that put them. A corner start facing
-  // straight down the pitch would point at the far wall.
-  car.heading = Math.atan2(-car.y, -car.x)
-  car.vx = 0
-  car.vy = 0
-  car.boost = C.BOOST_MAX
+export function fillBots(state) {
+  for (const team of [0, 1]) {
+    let n = state.cars.filter((c) => c.team === team).length
+    while (n++ < state.teamSize) {
+      const k = state.botSeq++
+      addPlayer(state, { id: `bot-${k}`, name: BOT_NAMES[k % BOT_NAMES.length] + (k >= BOT_NAMES.length ? ` ${Math.floor(k / BOT_NAMES.length) + 1}` : ''), team, body: Object.keys(CARS)[k % Object.keys(CARS).length], bot: true })
+    }
+  }
 }
 
-/** Advance one fixed tick. `inputs` maps car id -> input bitmask. Mutates and returns state. */
-export function step(state, inputs) {
+export function startMatch(state) {
+  if (state.phase !== 'pregame') return
+  state.score = [0, 0]; state.clock = C.MATCH_SECONDS; state.overtime = false
+  beginCountdown(state)
+}
+
+function beginCountdown(state) {
+  resetPositions(state)
+  state.phase = 'countdown'; state.phaseT = C.COUNTDOWN_SECONDS; state.cdN = C.COUNTDOWN_SECONDS
+  emit(state, 'countdown', { n: state.cdN })
+}
+
+const carById = (state, id) => state.cars.find((c) => c.id === id)
+
+/** Which team's goal (0/1) is the ball on course to enter, ignoring everything but gravity? -1 = none. */
+function shotThreat(ball) {
+  const vz = ball.v[2]
+  if (Math.abs(vz) < 8) return -1
+  const gz = vz > 0 ? ARENA.halfLength : -ARENA.halfLength
+  const t = (gz - ball.p[2]) / vz
+  if (t <= 0 || t > 3) return -1
+  const x = ball.p[0] + ball.v[0] * t, y = ball.p[1] + ball.v[1] * t - 0.5 * C.GRAVITY * t * t
+  if (Math.abs(x) > ARENA.goal.halfWidth + 1 || y < 0 || y > ARENA.goal.height) return -1
+  return vz > 0 ? 1 : 0 // team whose goal it is
+}
+
+function award(car, key, pts) { car.stats[key]++; car.stats.score += pts }
+
+function onTouch(state, car, strength) {
+  const t = state.touches
+  if (state.lastTouch !== car.id) t.push({ id: car.id, team: car.team, tick: state.tick })
+  else t[t.length - 1].tick = state.tick
+  if (t.length > 6) t.shift()
+  state.lastTouch = car.id
+  const before = state.threat, after = shotThreat(state.ball)
+  if (before === car.team && after !== car.team && state.threatBy !== car.team) { award(car, 'saves', C.POINTS.save); emit(state, 'save', { carId: car.id }) }
+  if (after === 1 - car.team && before !== after) { award(car, 'shots', C.POINTS.shot); emit(state, 'shot', { carId: car.id }) }
+  state.threat = after; state.threatBy = after >= 0 ? car.team : null
+  if (strength > 0.08) emit(state, 'hit', { carId: car.id, strength, p: state.ball.p.slice() })
+}
+
+function goalScored(state, conceded) {
+  const team = 1 - conceded
+  const b = state.ball
+  state.score[team]++
+  let scorerId = state.lastTouch, assistId = null
+  const last = carById(state, scorerId)
+  if (last && last.team === team) {
+    award(last, 'goals', C.POINTS.goal)
+    const prev = [...state.touches].reverse().find((x) => x.id !== scorerId)
+    if (prev && prev.team === team && state.tick - prev.tick < TOUCH_MEMORY) {
+      const a = carById(state, prev.id)
+      if (a) { award(a, 'assists', C.POINTS.assist); assistId = a.id }
+    }
+  }
+  emit(state, 'goal', { team, scorerId, assistId, speed: len(b.v) * 3.6, p: b.p.slice() })
+  state.phase = 'goal'; state.phaseT = C.GOAL_SECONDS
+}
+
+function endMatch(state) {
+  const [a, b] = state.score
+  const winner = a > b ? 0 : b > a ? 1 : 0
+  const pool = state.cars.filter((c) => c.team === winner)
+  pool.sort((x, y) => y.stats.score - x.stats.score || y.stats.goals - x.stats.goals)
+  state.phase = 'over'; state.phaseT = 0
+  emit(state, 'matchOver', { winner, mvpId: pool[0]?.id ?? null })
+}
+
+function padPickups(state, car) {
+  if (car.boost >= C.BOOST_MAX || car.p[1] > 4) return
+  for (let i = 0; i < BOOST_PADS.length; i++) {
+    if (!state.pads[i]) continue
+    const pad = BOOST_PADS[i]
+    const r = pad.big ? C.PAD_BIG_R : C.PAD_SMALL_R
+    const dx = car.p[0] - pad.p[0], dz = car.p[2] - pad.p[2]
+    if (dx * dx + dz * dz > r * r) continue
+    car.boost = Math.min(C.BOOST_MAX, car.boost + (pad.big ? C.PAD_BIG : C.PAD_SMALL))
+    state.pads[i] = false; state.padT[i] = pad.big ? C.PAD_BIG_RESPAWN : C.PAD_SMALL_RESPAWN
+    emit(state, 'boostPickup', { carId: car.id, pad: i, big: pad.big })
+    if (car.boost >= C.BOOST_MAX) return
+  }
+}
+
+function carVsCar(state, a, b) {
+  const [aw, , al] = hitboxOf(a), [bw, , bl] = hitboxOf(b)
+  const ra = aw / 2, rb = bw / 2
+  const fa = qrot(a.q, [0, 0, 1]), fb = qrot(b.q, [0, 0, 1])
+  let best = null, bestPen = 0
+  for (const sa of [-1, 1]) for (const sb of [-1, 1]) {
+    const o1 = sa * (al / 2 - ra), o2 = sb * (bl / 2 - rb)
+    const d = [b.p[0] + fb[0] * o2 - a.p[0] - fa[0] * o1, b.p[1] + fb[1] * o2 - a.p[1] - fa[1] * o1, b.p[2] + fb[2] * o2 - a.p[2] - fa[2] * o1]
+    const dist = Math.hypot(d[0], d[1], d[2])
+    const pen = ra + rb - dist
+    if (pen > bestPen) { bestPen = pen; best = d.map((x) => x / (dist || 1)) }
+  }
+  if (!best) return
+  const n = best // from a to b
+  const vn = dot([b.v[0] - a.v[0], b.v[1] - a.v[1], b.v[2] - a.v[2]], n)
+  const mid = [(a.p[0] + b.p[0]) / 2, (a.p[1] + b.p[1]) / 2, (a.p[2] + b.p[2]) / 2]
+  for (let i = 0; i < 3; i++) { a.p[i] -= n[i] * bestPen / 2; b.p[i] += n[i] * bestPen / 2 }
+  // demolition: a supersonic car ramming an opponent
+  if (a.team !== b.team) {
+    const closeA = dot(a.v, n), closeB = -dot(b.v, n)
+    const [att, vic, close] = closeA >= closeB ? [a, b, closeA] : [b, a, closeB]
+    if (att.supersonic && close > 6) {
+      vic.demolished = C.RESPAWN_SECONDS; vic.v = [0, 0, 0]; vic.w = [0, 0, 0]; vic.boosting = false; vic.supersonic = false
+      award(att, 'demos', C.POINTS.demo)
+      emit(state, 'demo', { attackerId: att.id, victimId: vic.id, p: mid })
+      return
+    }
+  }
+  if (vn < 0) {
+    const j = (-(1 + C.BUMP_RESTITUTION) * vn) / 2
+    for (let i = 0; i < 3; i++) { a.v[i] -= n[i] * j; b.v[i] += n[i] * j }
+    if (-vn > 3) emit(state, 'bump', { carId: a.id, otherId: b.id, strength: clamp(-vn / 30, 0, 1) })
+  }
+}
+
+export function step(state) {
   const dt = C.DT
+  state.events = []
   state.tick++
+  const { phase } = state
 
-  if (state.phase === 'WAITING') return state
-
-  if (state.phase === 'OVER') {
-    // Nothing moves, but the timer runs so the room knows when to reset.
-    state.phaseTimer = Math.max(0, state.phaseTimer - dt)
+  // ---- phase timers
+  if (phase === 'countdown') {
+    state.phaseT -= dt
+    const n = Math.max(0, Math.ceil(state.phaseT - 1e-9))
+    if (n < state.cdN) { state.cdN = n; emit(state, 'countdown', { n }) }
+    if (state.phaseT <= 0) { state.phase = 'play'; emit(state, 'kickoff', {}) }
     return state
   }
+  if (phase === 'pregame') return state
 
-  if (state.phase === 'KICKOFF' || state.phase === 'GOAL') {
-    // Bodies are frozen during the countdown; only the timer runs.
-    state.phaseTimer -= dt
-    if (state.phaseTimer <= 0) {
-      if (state.phase === 'GOAL') {
-        resetPositions(state)
-        state.phase = 'KICKOFF'
-        state.phaseTimer = C.KICKOFF_SECONDS
-      } else {
-        state.phase = 'PLAY'
-        state.phaseTimer = 0
-      }
+  const live = state.phase === 'play' || state.phase === 'goal'
+
+  // ---- cars
+  for (const c of state.cars) {
+    if (c.demolished > 0) {
+      c.demolished -= dt
+      if (c.demolished <= 0) spawn(state, c, c.team === 0 ? 2 : 2)
+      continue
     }
-    return state
+    const input = !live ? NEUTRAL_INPUT : c.bot ? botInput(state, c) ?? NEUTRAL_INPUT : state.inputs[c.id] ?? NEUTRAL_INPUT
+    const was = { g: c.onGround, j: c.jumped, d: c.doubleJumped, dg: c.dodging, ss: c.supersonic }
+    stepCar(c, input, dt, state)
+    if (input.jump && was.g && c.jumped && !was.j) emit(state, 'jump', { carId: c.id })
+    else if (c.doubleJumped && !was.d) emit(state, c.dodging && !was.dg ? 'dodge' : 'jump', { carId: c.id })
+    if (c.onGround && !was.g) emit(state, 'land', { carId: c.id })
+    if (c.supersonic && !was.ss) emit(state, 'supersonic', { carId: c.id })
+    padPickups(state, c)
+  }
+  for (let i = 0; i < state.padT.length; i++) {
+    if (!state.pads[i] && (state.padT[i] -= dt) <= 0) state.pads[i] = true
   }
 
-  state.clock -= dt
-
-  // Before the bodies are integrated, so an item's acceleration lands in the
-  // same tick as the engine's rather than a frame behind it.
-  if (state.mode === 'rumble') stepRumble(state, inputs, dt)
-
-  for (const car of state.cars) stepCar(car, inputs[car.id] | 0, dt)
-  stepBall(state.ball, dt)
-  // After the bodies have moved: a winched car and a carried ball, both of
-  // which set their own velocity and must not then be damped.
-  if (state.mode === 'rumble') afterBodies(state)
-
+  // ---- contacts
   for (let i = 0; i < state.cars.length; i++) {
+    const a = state.cars[i]
+    if (a.demolished > 0) continue
     for (let j = i + 1; j < state.cars.length; j++) {
-      collide(state.cars[i], state.cars[j], C.CAR_R, C.CAR_R, C.CAR_MASS, C.CAR_MASS, C.RAM_BONUS)
+      const b = state.cars[j]
+      if (b.demolished > 0 || a.demolished > 0) continue
+      if (Math.abs(a.p[0] - b.p[0]) + Math.abs(a.p[2] - b.p[2]) < 8) carVsCar(state, a, b)
     }
   }
-  for (const car of state.cars) {
-    if (collide(car, state.ball, C.CAR_R, C.BALL_R, C.CAR_MASS, C.BALL_MASS)) {
-      state.ball.lastTouch = car.id
-      // A held ball is freed by anyone reaching it, as in the real game — and it
-      // must be, or the impulse just applied would be zeroed on the next tick.
-      state.ball.freeze = 0
-      // An armed Spike welds the ball on contact; anyone else reaching a carried
-      // ball knocks it loose, which is how a carry is defended against.
-      // Reaching the ball is what the hook was for, so it lets go there rather
-      // than dragging you through it for the rest of its clock.
-      if (car.hook > 0) car.hook = 0
-      if (car.spike > 0) state.ball.stuckTo = car.id
-      else if (state.ball.stuckTo !== null && state.ball.stuckTo !== car.id) {
-        state.ball.stuckTo = null
+  const ball = state.ball
+  stepBall(ball, dt)
+  for (const c of state.cars) {
+    if (c.demolished > 0) continue
+    const s = carHitsBall(ball, c)
+    if (s > 0 && live) onTouch(state, c, s)
+  }
+  if (state.phase === 'play') state.threat = state.threat === -1 ? shotThreat(ball) : state.threat
+  state.threat = shotThreat(ball)
+
+  // ---- scoring + clock
+  if (state.phase === 'play') {
+    const g = inGoal(ball.p, C.BALL_R)
+    if (g >= 0) goalScored(state, g)
+    else if (state.overtime) state.clock += dt
+    else {
+      state.clock = Math.max(0, state.clock - dt)
+      if (state.clock <= 0) {
+        if (state.score[0] !== state.score[1]) endMatch(state)
+        else { state.overtime = true; state.clock = 0; emit(state, 'overtime', {}) }
       }
-      pinch(state.ball, car)
     }
-  }
-
-  for (const car of state.cars) confineCar(car)
-
-  // Speed ceilings are enforced *after* collisions, not just after engine forces —
-  // an impulse from a car is exactly what would otherwise launch the ball past its cap.
-  clampSpeed(state.ball, C.BALL_MAX_SPEED)
-  // Headroom above the engine cap so a collision can still shove a car around,
-  // but a pile-up cannot accumulate speed without bound.
-  for (const car of state.cars) clampSpeed(car, C.CAR_BOOST_MAX_SPEED * 1.5)
-
-  // Posts before the goal line: a ball that catches one is deflected first, and
-  // may well end up outside the mouth and rebound off the end wall instead.
-  for (const py of [-C.GOAL_H / 2, C.GOAL_H / 2]) {
-    collidePost(state.ball, C.MIN_X, py)
-    collidePost(state.ball, C.MAX_X, py)
-  }
-
-  const scorer = confineBall(state.ball)
-  if (scorer !== null) {
-    state.score[scorer]++
-    // Credited only if the last toucher was attacking that goal — an own goal
-    // counts on the scoreboard but is nobody's goal.
-    const toucher = state.cars.find((c) => c.id === state.ball.lastTouch)
-    state.lastScorer = toucher && toucher.team === scorer ? toucher.id : null
-    // Entering either phase freezes the ball, so this cannot re-trigger while it
-    // sits in the net. In overtime the first goal is the last one.
-    state.phase = state.overtime ? 'OVER' : 'GOAL'
-    state.phaseTimer = state.overtime ? C.OVER_SECONDS : C.GOAL_SECONDS
-  }
-
-  if (state.clock <= 0) {
-    state.clock = 0
-    if (state.score[0] === state.score[1]) {
-      // Level at full time: play on rather than draw. Also covers a goal that
-      // levelled it on the final tick — the GOAL pause runs, then sudden death.
-      state.overtime = true
-    } else {
-      // A goal on the whistle still counts, and ends it either way.
-      state.phase = 'OVER'
-      state.phaseTimer = C.OVER_SECONDS
+  } else if (state.phase === 'goal') {
+    state.phaseT -= dt
+    if (state.phaseT <= 0) {
+      if (state.overtime || (state.clock <= 0 && state.score[0] !== state.score[1])) endMatch(state)
+      else beginCountdown(state)
     }
   }
   return state
 }
 
-function stepCar(car, bits, dt) {
-  const boosting = (bits & C.IN_BOOST) !== 0 && car.boost > 0
-  const drifting = (bits & C.IN_DRIFT) !== 0
-  const speed = Math.hypot(car.vx, car.vy)
-
-  // Steering authority scales with speed, with a floor so you can still pivot slowly.
-  const turnScale =
-    (C.TURN_MIN_FACTOR +
-      (1 - C.TURN_MIN_FACTOR) *
-        Math.min(1, speed / (C.CAR_MAX_SPEED * C.TURN_FULL_SPEED_FRACTION))) *
-    (drifting ? C.TURN_DRIFT_FACTOR : 1)
-  // Left steers clockwise on screen: the camera looks down the -z axis, which
-  // mirrors the sim's y, so a positive heading change reads as a right turn.
-  let steer = 0
-  if (bits & C.IN_LEFT) steer -= 1
-  if (bits & C.IN_RIGHT) steer += 1
-  car.heading = wrapAngle(car.heading + steer * C.TURN_RATE * turnScale * dt)
-
-  const fx = Math.cos(car.heading)
-  const fy = Math.sin(car.heading)
-
-  let accel = 0
-  if (bits & C.IN_FWD) accel += C.CAR_ACCEL
-  if (bits & C.IN_BACK) accel -= C.CAR_REVERSE_ACCEL
-  if (boosting) accel += C.CAR_BOOST_ACCEL
-  car.vx += fx * accel * dt
-  car.vy += fy * accel * dt
-
-  if (boosting) car.boost = Math.max(0, car.boost - C.BOOST_DRAIN * dt)
-  else car.boost = Math.min(C.BOOST_MAX, car.boost + C.BOOST_REFILL * dt)
-
-  // Split velocity into forward and lateral, damp them at different rates. The
-  // lateral term is what makes this feel like a car and not a hovercraft; drift
-  // slackens it so the car slides through a turn instead of railing round it.
-  const fwd = car.vx * fx + car.vy * fy
-  const lat = car.vx * -fy + car.vy * fx
-  const newFwd = fwd * damp(C.CAR_DRAG, dt)
-  const newLat = lat * damp(drifting ? C.GRIP_DRIFT : C.GRIP, dt)
-  car.vx = fx * newFwd - fy * newLat
-  car.vy = fy * newFwd + fx * newLat
-
-  // A winched car is allowed boost pace: afterBodies puts it on HOOK_SPEED, and
-  // the engine ceiling would otherwise cut that straight back to CAR_MAX_SPEED
-  // before it moved an inch.
-  const winched = car.hook > 0
-  clampSpeed(car, boosting || winched ? C.CAR_BOOST_MAX_SPEED : C.CAR_MAX_SPEED)
-
-  car.x += car.vx * dt
-  car.y += car.vy * dt
-}
-
-function stepBall(ball, dt) {
-  // Frozen: stepRumble already emptied its velocity, and it must not drift.
-  if (ball.freeze > 0) return
-  const d = damp(C.BALL_DRAG, dt)
-  ball.vx *= d
-  ball.vy *= d
-  ball.x += ball.vx * dt
-  ball.y += ball.vy * dt
-}
-
-/**
- * Resolve a circle/circle overlap: separate by mass, then apply a normal impulse.
- * `ramBonus` adds restitution in proportion to closing speed — see RAM_BONUS.
- * Without it restitution is below 1, so repeated collisions cannot inject energy.
- */
-function collide(a, b, ra, rb, ma, mb, ramBonus = 0) {
-  const dx = b.x - a.x
-  const dy = b.y - a.y
-  const r = ra + rb
-  const d2 = dx * dx + dy * dy
-  if (d2 >= r * r) return false
-
-  let d = Math.sqrt(d2)
-  let nx
-  let ny
-  if (d < 1e-6) {
-    // Exactly coincident centres have no normal. Pick one deterministically.
-    nx = 1
-    ny = 0
-    d = 1e-6
-  } else {
-    nx = dx / d
-    ny = dy / d
+const SKIP = new Set(['inputs', 'rng', 'touches', 'padT', 'cdN', 'botSeq', 'threat', 'threatBy', 'pj', 'jumpT', 'dodgeT'])
+function copy(o) {
+  if (Array.isArray(o)) return o.map(copy)
+  if (o && typeof o === 'object') {
+    const r = {}
+    for (const k in o) if (!SKIP.has(k) && o[k] !== undefined) r[k] = copy(o[k])
+    return r
   }
-
-  const invA = 1 / ma
-  const invB = 1 / mb
-  const invSum = invA + invB
-
-  const overlap = r - d
-  a.x -= nx * overlap * (invA / invSum)
-  a.y -= ny * overlap * (invA / invSum)
-  b.x += nx * overlap * (invB / invSum)
-  b.y += ny * overlap * (invB / invSum)
-
-  const vn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny
-  if (vn > 0) return true // already separating
-
-  const e = C.RESTITUTION_BODY + ramBonus * Math.min(1, -vn / C.CAR_MAX_SPEED)
-  const j = (-(1 + e) * vn) / invSum
-  a.vx -= j * invA * nx
-  a.vy -= j * invA * ny
-  b.vx += j * invB * nx
-  b.vy += j * invB * ny
-  return true
+  return o
 }
-
-/**
- * The wall the ball is pressed against, as the normal pointing back into the
- * pitch, or null. An end wall only counts outside the goal mouth, where there is
- * one to be pinned against.
- */
-function pinnedTo(ball) {
-  if (ball.y <= C.MIN_Y + C.BALL_R + C.PINCH_SKIN) return [0, 1]
-  if (ball.y >= C.MAX_Y - C.BALL_R - C.PINCH_SKIN) return [0, -1]
-  if (Math.abs(ball.y) > C.GOAL_H / 2) {
-    if (ball.x <= C.MIN_X + C.BALL_R + C.PINCH_SKIN) return [1, 0]
-    if (ball.x >= C.MAX_X - C.BALL_R - C.PINCH_SKIN) return [-1, 0]
-  }
-  return null
-}
-
-/**
- * Squeeze the ball out along a wall it is trapped against. Left to the ordinary
- * collision the wall simply returns RESTITUTION_WALL of whatever the car put in,
- * which is a tap: the ball is free to move back through the car, so nothing
- * converts the squeeze into speed. A real pinch works because the ball cannot
- * give way, and the only way out is along the wall.
- *
- * So the component driving the ball into the wall is dropped rather than bounced,
- * and the car's speed into the wall is paid out along it instead. Called only on
- * a tick where the car and ball actually touched.
- */
-function pinch(ball, car) {
-  const wall = pinnedTo(ball)
-  if (wall === null) return
-  const [nx, ny] = wall
-
-  // How hard the car is driving into that wall. Away from it is not a pinch.
-  const press = -(car.vx * nx + car.vy * ny)
-  if (press <= 0) return
-
-  // Along the wall, in the direction the contact already points the ball.
-  const tx = -ny
-  const ty = nx
-  let side = (ball.x - car.x) * tx + (ball.y - car.y) * ty
-  if (Math.abs(side) < 1e-6) side = ball.vx * tx + ball.vy * ty
-  const dir = side >= 0 ? 1 : -1
-
-  const away = ball.vx * nx + ball.vy * ny
-  const along = ball.vx * tx + ball.vy * ty + dir * press * C.PINCH_GAIN
-  // Motion off the wall survives; motion into it does not, since it cannot.
-  const kept = Math.max(0, away)
-  ball.vx = nx * kept + tx * along
-  ball.vy = ny * kept + ty * along
-}
-
-/**
- * A post is a static circle: nothing moves it, so this separates the ball and
- * reflects the normal component rather than exchanging an impulse.
- */
-function collidePost(ball, px, py) {
-  const dx = ball.x - px
-  const dy = ball.y - py
-  const r = C.BALL_R + C.POST_R
-  const d2 = dx * dx + dy * dy
-  // Dead centre on the post has no normal, and cannot be reached from open play.
-  if (d2 >= r * r || d2 < 1e-12) return false
-
-  const d = Math.sqrt(d2)
-  const nx = dx / d
-  const ny = dy / d
-  ball.x = px + nx * r
-  ball.y = py + ny * r
-
-  const vn = ball.vx * nx + ball.vy * ny
-  if (vn < 0) {
-    // Coming in, not already leaving: take the rebound off the woodwork.
-    ball.vx -= (1 + C.RESTITUTION_BODY) * vn * nx
-    ball.vy -= (1 + C.RESTITUTION_BODY) * vn * ny
-  }
-  return true
-}
-
-/** Cars are confined to the pitch, plus the two goals they can drive into. */
-function confineCar(car) {
-  // Clearing the posts is what earns the extra depth: a car overlapping one is
-  // stopped at the goal line like the end wall it is part of.
-  const inMouth = Math.abs(car.y) <= C.GOAL_H / 2 - C.CAR_R
-  const lo = C.MIN_X + C.CAR_R - (inMouth ? C.GOAL_DEPTH : 0)
-  const hi = C.MAX_X - C.CAR_R + (inMouth ? C.GOAL_DEPTH : 0)
-  reflectAxis(car, 'x', 'vx', lo, hi)
-
-  // Past the line the mouth is the wall, or the car drives out through the side
-  // of the net. Checked after the x clamp, so a car held on the line is on the
-  // pitch's walls and only one actually in the goal gets the narrow ones.
-  const inNet = car.x < C.MIN_X || car.x > C.MAX_X
-  const yLimit = inNet ? C.GOAL_H / 2 - C.CAR_R : C.MAX_Y - C.CAR_R
-  reflectAxis(car, 'y', 'vy', -yLimit, yLimit)
-}
-
-/**
- * Confine the ball, allowing it through the goal mouths.
- * Returns the scoring team index, or null.
- */
-function confineBall(ball) {
-  reflectAxis(ball, 'y', 'vy', C.MIN_Y + C.BALL_R, C.MAX_Y - C.BALL_R)
-
-  const inMouth = Math.abs(ball.y) <= C.GOAL_H / 2
-  if (inMouth) {
-    // Goal line is the wall itself, and it takes the *whole* ball: a ball still
-    // sitting on the line is play on, as in the real game.
-    if (ball.x + C.BALL_R <= C.MIN_X) return C.TEAM_ORANGE
-    if (ball.x - C.BALL_R >= C.MAX_X) return C.TEAM_BLUE
-    return null
-  }
-  reflectAxis(ball, 'x', 'vx', C.MIN_X + C.BALL_R, C.MAX_X - C.BALL_R)
-  return null
-}
-
-/** Positional clamp plus velocity reflection — cannot tunnel, since it is not a raycast. */
-function reflectAxis(body, pos, vel, lo, hi) {
-  if (body[pos] < lo) {
-    body[pos] = lo
-    body[vel] = Math.abs(body[vel]) * C.RESTITUTION_WALL
-  } else if (body[pos] > hi) {
-    body[pos] = hi
-    body[vel] = -Math.abs(body[vel]) * C.RESTITUTION_WALL
-  }
-}
-
-function damp(rate, dt) {
-  return Math.max(0, 1 - rate * dt)
-}
-
-function clampSpeed(body, max) {
-  const s = Math.hypot(body.vx, body.vy)
-  if (s > max) {
-    const k = max / s
-    body.vx *= k
-    body.vy *= k
-  }
-}
-
-function wrapAngle(a) {
-  const twoPi = Math.PI * 2
-  a %= twoPi
-  if (a > Math.PI) a -= twoPi
-  else if (a < -Math.PI) a += twoPi
-  return a
-}
-
-/** Cheap structural hash, used by the determinism test. */
-export function hashState(state) {
-  const nums = [state.tick, state.phase.length, state.overtime ? 1 : 0, state.score[0], state.score[1], state.ball.x, state.ball.y, state.ball.vx, state.ball.vy]
-  // The seed and the items are hashed too, so the determinism test covers a
-  // Rumble match rather than only the physics underneath it.
-  nums.push(state.seed, state.ball.freeze ?? 0, state.ball.stuckTo ?? -1)
-  for (const c of state.cars) nums.push(c.id, c.x, c.y, c.vx, c.vy, c.heading, c.boost, c.item ?? -1, c.itemTimer ?? -1, c.fx ?? -1, c.fxTimer ?? -1)
-  let h = 2166136261
-  for (const n of nums) {
-    const s = String(Math.round(n * 1e6))
-    for (let i = 0; i < s.length; i++) {
-      h ^= s.charCodeAt(i)
-      h = Math.imul(h, 16777619)
-    }
-  }
-  return h >>> 0
+/** JSON-safe deep copy of everything clients need (internal bookkeeping omitted). */
+export function snapshot(state) {
+  return copy(state)
 }
