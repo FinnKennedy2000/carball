@@ -92,3 +92,30 @@ test('predictor: steps with input, blends toward authority, snaps on big error',
   p2.correct(auth(0), 0.1, { thr: 1 })
   assert.ok(Math.abs(p2.car.p[0] - 0.3 * 1.0) < 0.31)
 })
+
+test('acceptEvents caps the queue and rejects absurd ids and ticks', () => {
+  const q = createEventQueue()
+  acceptEvents(q, [{ id: 10, tick: 0 }]) // first event may be any id (late join)
+  acceptEvents(q, [{ id: 99999, tick: 0 }, { id: 12, tick: 5000 }], 100)
+  assert.equal(q.pending.length, 1)
+  for (let i = 0; i < 400; i++) acceptEvents(q, [{ id: 11 + i, tick: 0 }])
+  assert.equal(q.pending.length, 256)
+})
+
+test('pushSnapshot resets the event queue on host restart', () => {
+  const buf = createBuffer(), q = createEventQueue()
+  pushSnapshot(buf, st(1000, 0), 0, q)
+  acceptEvents(q, [{ id: 50, tick: 0 }])
+  pushSnapshot(buf, st(5, 0), 10, q)
+  assert.equal(q.lastId, -1)
+})
+
+test('predictor render offset decays smoothly after a correction', () => {
+  const step = (c) => { c.p[0] += 0; return c }
+  const p = createPredictor(step, { blend: 0.5 })
+  const car = (x) => ({ p: [x, 0, 0], v: [0, 0, 0], q: [0, 0, 0, 1], w: [0, 0, 0], demolished: 0 })
+  p.correct(car(0), 0, {}, {})
+  p.correct(car(1), 0, {}, {})
+  assert.ok(Math.abs(p.advance(0, {}, {}).p[0]) < 1e-9) // drawn where it was
+  assert.ok(Math.abs(p.advance(0.1, {}, {}).p[0] - 0.316) < 0.01)
+})

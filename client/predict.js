@@ -72,11 +72,11 @@ export function createBuffer(max = 24) {
   return { snaps: [], offset: null, max }
 }
 
-export function pushSnapshot(buf, state, recvAt) {
+export function pushSnapshot(buf, state, recvAt, events = null) {
   const last = buf.snaps[buf.snaps.length - 1]
   if (last && state.tick <= last.state.tick) {
     if (state.tick === last.state.tick) return false // duplicate
-    if (last.state.tick - state.tick > TICK_HZ) { buf.snaps.length = 0; buf.offset = null } // host restarted
+    if (last.state.tick - state.tick > TICK_HZ) { buf.snaps.length = 0; buf.offset = null; if (events) { events.lastId = -1; events.pending.length = 0 } } // host restarted
     else return false // late and out of order
   }
   const t = (state.tick * 1000) / TICK_HZ
@@ -116,9 +116,15 @@ export function createEventQueue() {
   return { lastId: -1, pending: [] }
 }
 
-export function acceptEvents(q, events) {
+const MAX_PENDING = 256
+const MAX_ID_JUMP = 5000
+const MAX_TICK_AHEAD = 600
+
+/** `latestTick` (newest snapshot tick) bounds how far ahead an event may claim to be. */
+export function acceptEvents(q, events, latestTick = Infinity) {
   for (const e of events) {
-    if (e.id <= q.lastId) continue
+    if (e.id <= q.lastId || (q.lastId >= 0 && e.id > q.lastId + MAX_ID_JUMP) || e.tick > latestTick + MAX_TICK_AHEAD) continue
+    if (q.pending.length >= MAX_PENDING) q.pending.shift()
     q.lastId = e.id
     q.pending.push(e)
   }
@@ -160,27 +166,31 @@ const clone = (c) => ({ ...c, p: [...c.p], v: [...c.v], q: [...c.q], w: [...c.w]
 export function createPredictor(stepCar, { dt = 1 / TICK_HZ, blend = 0.3, snapDist = 3, maxLatencyS = 0.3 } = {}) {
   let car = null
   let acc = 0
+  const off = [0, 0, 0] // render-only position error, decays smoothly instead of stepping at each snapshot
   const step = (c, input, state) => stepCar(c, input, dt, state) ?? c
 
   return {
     get car() { return car },
-    reset() { car = null; acc = 0 },
+    reset() { car = null; acc = 0; off[0] = off[1] = off[2] = 0 },
     /** Advance by frame time with local input. Returns the predicted car (or null before the first snapshot). */
     advance(frameDt, input, state) {
       if (!car) return null
+      const k = Math.exp(-frameDt * 10)
+      off[0] *= k; off[1] *= k; off[2] *= k
       acc = Math.min(acc + frameDt, 0.1)
       while (acc >= dt) { car = step(car, input, state); acc -= dt }
-      return car
+      return { ...car, p: [car.p[0] + off[0], car.p[1] + off[1], car.p[2] + off[2]] }
     },
     /** Fold in the host's version of our car. `latencyS` = estimated one-way time. */
     correct(auth, latencyS, input, state) {
       if (!auth) return
-      if (!car || auth.demolished > 0 || car.demolished > 0) { car = clone(auth); return }
+      if (!car || auth.demolished > 0 || car.demolished > 0) { car = clone(auth); off[0] = off[1] = off[2] = 0; return }
       let target = clone(auth)
       const n = Math.min(Math.round(Math.min(latencyS, maxLatencyS) / dt), 30)
       for (let i = 0; i < n; i++) target = step(target, input, state)
       const err = Math.hypot(target.p[0] - car.p[0], target.p[1] - car.p[1], target.p[2] - car.p[2])
-      if (err > snapDist) { car = { ...target }; return }
+      if (err > snapDist) { car = { ...target }; off[0] = off[1] = off[2] = 0; return }
+      const was = car.p
       car = {
         ...target, // discrete flags, boost, stats are authoritative
         p: lerp3(car.p, target.p, blend),
@@ -188,6 +198,7 @@ export function createPredictor(stepCar, { dt = 1 / TICK_HZ, blend = 0.3, snapDi
         q: slerp(car.q, target.q, blend),
         w: lerp3(car.w, target.w, blend),
       }
+      for (let i = 0; i < 3; i++) off[i] += was[i] - car.p[i] // keep what is drawn where it was
     },
   }
 }

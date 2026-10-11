@@ -8,16 +8,28 @@ import { startHost } from './host.js'
 
 let host = null
 
-onmessage = ({ data }) => {
+onmessage = (m) => {
+  try {
+    handle(m.data)
+  } catch (err) {
+    postMessage({ type: 'fatal', message: String(err?.message ?? err) })
+    host?.stop()
+    host = null
+  }
+}
+
+function handle(data) {
   switch (data.type) {
     case 'start':
       host?.stop()
       host = startHost({
         code: data.code,
+        hostCid: data.hostCid,
         name: data.name,
         team: data.team,
         body: data.body,
         teamSize: data.teamSize,
+        onFatal: (err) => postMessage({ type: 'fatal', message: String(err?.message ?? err) }),
         send: (event, payload) => postMessage({ type: 'send', event, payload }),
         // Every tick, in order. `events` is just this tick's, so the main thread
         // can queue them without diffing.

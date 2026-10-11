@@ -14,6 +14,7 @@ import { supabase, enabled as supabaseEnabled } from './auth.js'
 import { randomCode } from './host.js'
 import { currentInput } from './input.js'
 import { stepCar } from '../shared/sim.js'
+import { MAX_PLAYERS } from '../shared/constants.js'
 import {
   cleanCode, cleanName, cleanTeam, cleanBody, decodeSnapshot, parseRoster, parseWelcome, parseResult,
   quantizeInput, inputChanged,
@@ -37,7 +38,11 @@ const INPUT_MIN_GAP_MS = 50 // <= 20 Hz
 const KEEPALIVE_MS = 1000
 const JOIN_TIMEOUT_MS = 10000
 const HELLO_RETRY_MS = 1500
+const CORRUPT_AFTER_MS = 3000
+const REJECT_MIN_GAP_MS = 1000
+const WARN_GAP_MS = 5000
 let interpDelayMs = 100
+const HOST_DELAY_MS = 25 // ~1.5 ticks: the host's own view is interpolated too, or it aliases against rAF
 
 /** Render delay behind the newest snapshot. Must exceed one snapshot interval (~67 ms). */
 export function setInterpDelay(ms) {
@@ -51,7 +56,6 @@ let channel = null
 let me = null // my car id
 let hosting = false
 let rosterList = []
-let liveState = null // host: the sim's own state, zero delay
 const buf = createBuffer()
 const events = createEventQueue()
 const rtt = createRtt()
@@ -63,6 +67,15 @@ let seq = 0
 let lastSent = null
 let lastSentAt = 0
 let settleJoin = () => {}
+let hostCid = null // peers: the cid that welcomed us; its presence is the room
+let joinedAt = 0
+let gotSnap = false
+let badSnaps = 0
+let corruptReported = false
+let lastRejectAt = 0
+const lastWarn = {}
+
+const warn = (what, e) => console.warn(what, e)
 
 export const myId = () => me
 export const isHost = () => hosting
@@ -71,22 +84,56 @@ export const roster = () => rosterList.slice()
 // ---------- room lifecycle ----------
 
 function spawnWorker(msg) {
-  worker = new Worker(new URL('./sim-worker.js', import.meta.url), { type: 'module' })
-  return new Promise((resolve) => {
-    worker.onmessage = ({ data }) => {
+  const w = new Worker(new URL('./sim-worker.js', import.meta.url), { type: 'module' })
+  worker = w
+  return new Promise((resolve, reject) => {
+    let started = false
+    const fatal = (message) => {
+      if (w !== worker) return
+      if (!started) {
+        w.terminate()
+        worker = null
+        reject(new Error(message))
+      } else {
+        handlers.onError('The match engine crashed')
+        hostGone()
+      }
+    }
+    w.onerror = (e) => { e.preventDefault?.(); fatal(e.message || 'The match engine failed to start') }
+    w.onmessageerror = () => fatal('The match engine sent unreadable data')
+    w.onmessage = ({ data }) => {
       if (data.type === 'live') {
-        liveState = data.s
+        pushSnapshot(buf, data.s, performance.now())
         acceptEvents(events, data.events)
       } else if (data.type === 'send') hostSend(data.event, data.payload)
-      else if (data.type === 'started') resolve(data)
+      else if (data.type === 'fatal') fatal(data.message || 'The match engine crashed')
+      else if (data.type === 'started') { started = true; resolve(data) }
     }
-    worker.postMessage({ type: 'start', ...msg })
+    w.postMessage({ type: 'start', ...msg })
   })
+}
+
+/** Fire a broadcast and warn when Realtime does not report 'ok' (snapshots at most every few seconds). */
+function sendLogged(event, payload) {
+  const c = channel
+  if (!c) return
+  const report = (what) => {
+    const now = Date.now()
+    if (event === 'snap' && now - (lastWarn[event] ?? 0) < WARN_GAP_MS) return
+    lastWarn[event] = now
+    console.warn(`broadcast '${event}' failed:`, what)
+  }
+  c.send({ type: 'broadcast', event, payload }).then((r) => r !== 'ok' && report(r), report)
 }
 
 /** What the host broadcasts. Realtime does not echo to the sender, so handle it locally too. */
 function hostSend(event, payload) {
-  channel?.send({ type: 'broadcast', event, payload })
+  if (event === 'reject') {
+    const now = Date.now()
+    if (now - lastRejectAt < REJECT_MIN_GAP_MS) return
+    lastRejectAt = now
+  }
+  sendLogged(event, payload)
   if (event === 'roster') {
     rosterList = parseRoster(payload) ?? rosterList
     handlers.onRoster(rosterList.slice())
@@ -99,7 +146,7 @@ function hostSend(event, payload) {
 // Callers leave() first: createRoom has already opened the room's channel by the
 // time it gets here, and leaving now would close it under the new host.
 async function startHosting(extra, code) {
-  const started = await spawnWorker({ code, ...extra })
+  const started = await spawnWorker({ code, hostCid: cid, ...extra })
   hosting = true
   me = started.hostId
   rosterList = parseRoster({ players: started.roster }) ?? []
@@ -127,7 +174,12 @@ export async function createRoom(opts) {
     else code = candidate
   }
   if (!code) throw new Error('Could not find a free room code, try again')
-  await startHosting(hostArgs(opts), code)
+  try {
+    await startHosting(hostArgs(opts), code)
+  } catch (e) {
+    await closeChannel().catch((err) => warn('closeChannel failed', err))
+    throw e
+  }
   return { code }
 }
 
@@ -145,6 +197,7 @@ export async function joinRoom({ name, code, team, body }) {
   try {
     await open(room, false)
   } catch (e) {
+    await closeChannel().catch((err) => warn('closeChannel failed', err))
     throw reportError(e)
   }
 
@@ -171,7 +224,6 @@ export async function joinRoom({ name, code, team, body }) {
     handlers.onError(err.message)
     throw err
   }
-  me = welcome.w.id
   hosting = false
   startInputLoop()
   handlers.onJoined({ code: room, myId: me, isHost: false })
@@ -189,28 +241,35 @@ export function beginMatch() {
 
 export async function leave() {
   stopInputLoop()
-  const wasHost = hosting
-  if (worker) {
-    if (wasHost && channel) channel.send({ type: 'broadcast', event: 'closed', payload: {} })
-    worker.postMessage({ type: 'stop' })
-    worker.terminate()
-    worker = null
-  } else if (channel) {
-    // Awaited: removing the channel first would drop the goodbye and leave a parked car.
-    await channel.send({ type: 'broadcast', event: 'peer', payload: { t: 'bye', cid } })
+  try {
+    if (worker) {
+      worker.postMessage({ type: 'stop' })
+      worker.terminate()
+      worker = null
+    } else if (channel) {
+      // Awaited: removing the channel first would drop the goodbye and leave a parked car.
+      try {
+        await channel.send({ type: 'broadcast', event: 'peer', payload: { t: 'bye', cid } })
+      } catch (e) {
+        warn('could not send goodbye', e)
+      }
+    }
+    await closeChannel()
+  } catch (e) {
+    warn('leave failed', e)
+  } finally {
+    hosting = false
+    me = null
+    hostCid = null
+    rosterList = []
+    buf.snaps.length = 0
+    buf.offset = null
+    events.pending.length = 0
+    events.lastId = -1
+    predictor.reset()
+    rtt.sent.clear()
+    rtt.lastAck = -1
   }
-  await closeChannel()
-  hosting = false
-  me = null
-  rosterList = []
-  liveState = null
-  buf.snaps.length = 0
-  buf.offset = null
-  events.pending.length = 0
-  events.lastId = -1
-  predictor.reset()
-  rtt.sent.clear()
-  rtt.lastAck = -1
 }
 
 async function closeChannel() {
@@ -225,48 +284,72 @@ if (typeof addEventListener !== 'undefined') addEventListener('pagehide', () => 
 
 // ---------- channel ----------
 
-const send = (event, payload) => channel?.send({ type: 'broadcast', event, payload })
+const send = (event, payload) => channel?.send({ type: 'broadcast', event, payload })?.catch((e) => warn(`send '${event}' failed`, e))
 
 function open(code, asHost) {
   channel = supabase.channel(`room:${code}`, { config: { presence: { key: cid } } })
   const ch = channel
 
+  const hostPresent = () => Object.values(ch.presenceState()).some((metas) => metas.some((m) => m.host))
+
   ch
-    .on('broadcast', { event: 'peer' }, ({ payload }) => worker?.postMessage({ type: 'peer', payload }))
-    .on('broadcast', { event: 'snap' }, ({ payload }) => !worker && onSnapshot(payload?.s))
+    .on('broadcast', { event: 'peer' }, ({ payload }) => {
+      // Presence key = cid, so a peer that is not in the channel cannot take a seat.
+      const c = payload?.cid
+      if (worker && typeof c === 'string' && Object.hasOwn(ch.presenceState(), c)) worker.postMessage({ type: 'peer', payload })
+    })
+    .on('broadcast', { event: 'snap' }, ({ payload }) => !worker && me && onSnapshot(payload?.s))
     .on('broadcast', { event: 'roster' }, ({ payload }) => {
-      const players = !worker && parseRoster(payload)
+      const players = !worker && me && parseRoster(payload)
       if (players) {
         rosterList = players
         handlers.onRoster(players.slice())
       }
     })
     .on('broadcast', { event: 'welcome' }, ({ payload }) => {
-      const w = payload?.cid === cid && parseWelcome(payload)
-      if (w) settleJoin(w)
+      const w = ch === channel && !worker && payload?.cid === cid && parseWelcome(payload)
+      if (!w) return
+      // Seat state is set here, not after joinRoom resumes: the roster and first snapshots can
+      // arrive in the very next tasks and must not be dropped as "before welcome".
+      if (!me) {
+        joinedAt = performance.now()
+        gotSnap = false
+        badSnaps = 0
+        corruptReported = false
+      }
+      me = w.id
+      hostCid = w.host
+      settleJoin(w)
     })
     .on('broadcast', { event: 'reject' }, ({ payload }) => {
       if (payload?.cid === cid) settleJoin(null, typeof payload.reason === 'string' ? payload.reason.slice(0, 80) : 'Could not join')
     })
     .on('broadcast', { event: 'matchover' }, ({ payload }) => {
-      const result = !worker && parseResult(payload?.result)
+      const result = !worker && me && parseResult(payload?.result)
       if (result) handlers.onMatchOver(result)
     })
-    .on('broadcast', { event: 'closed' }, () => !worker && hostGone())
     .on('presence', { event: 'leave' }, ({ leftPresences }) => {
       for (const p of leftPresences) {
         if (worker) worker.postMessage({ type: 'dropPeer', cid: p.cid ?? p.key })
-        else if (p.host) hostGone()
+        else if (p.host && !hostPresent()) hostGone()
       }
     })
 
   return new Promise((resolve, reject) => {
+    let joined = false
     ch.subscribe((status) => {
+      if (ch !== channel) return // we left (or replaced it): that CLOSED is ours
       if (status === 'SUBSCRIBED') {
         lastSent = null // the host may hold stale input from before a reconnect
         ch.track({ cid, host: asHost })
-        resolve()
-      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') reject(new Error('Could not reach the room'))
+        if (!joined) { joined = true; resolve() }
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        if (!joined) reject(new Error('Could not reach the room'))
+        else {
+          handlers.onError('Connection lost')
+          if (!asHost) hostGone()
+        }
+      }
     })
   })
 }
@@ -279,24 +362,34 @@ async function presenceHasOtherHost() {
 
 let closing = false
 async function hostGone() {
-  if (closing || !channel) return
+  if (closing || (!channel && !worker)) return
   closing = true
   try {
     await leave()
+  } catch (e) {
+    warn('hostGone failed', e)
   } finally {
     closing = false
+    handlers.onClosed()
   }
-  handlers.onClosed()
 }
 
 // ---------- snapshots (peer) ----------
 
 function onSnapshot(raw) {
   const snap = decodeSnapshot(raw)
-  if (!snap) return
   const now = performance.now()
-  if (!pushSnapshot(buf, snap.state, now)) return
-  acceptEvents(events, snap.events)
+  if (!snap) {
+    badSnaps++
+    if (!gotSnap && !corruptReported && now - joinedAt > CORRUPT_AFTER_MS) {
+      corruptReported = true
+      handlers.onError('Incompatible or corrupt data from host — refresh')
+    }
+    return
+  }
+  gotSnap = true
+  if (!pushSnapshot(buf, snap.state, now, events)) return
+  acceptEvents(events, snap.events, snap.state.tick)
 
   if (me && me in snap.acks) noteAck(rtt, snap.acks[me], now)
   const own = snap.state.cars.find((c) => c.id === me)
@@ -308,21 +401,21 @@ function onSnapshot(raw) {
 
 function decorate(state) {
   const by = new Map(rosterList.map((p) => [p.id, p]))
+  // A car the roster does not name has no team or body to draw with: leave it out.
+  state.cars = state.cars.filter((c) => by.has(c.id)).slice(0, MAX_PLAYERS)
   for (const c of state.cars) {
     const r = by.get(c.id)
-    if (r) {
-      c.name = r.name
-      c.team = r.team
-      c.body = r.body
-      c.bot = r.bot
-    }
+    c.name = r.name
+    c.team = r.team
+    c.body = r.body
+    c.bot = r.bot
   }
   return state
 }
 
 /** The state to draw now (ms from performance.now()), or null before anything has arrived. */
 export function sampleState(nowMs = performance.now()) {
-  if (liveState) return liveState // host / offline: the present, no delay
+  if (worker) return sampleBuffer(buf, nowMs, HOST_DELAY_MS)?.state ?? null // host / offline: own sim, barely delayed
 
   const res = sampleBuffer(buf, nowMs, interpDelayMs)
   if (!res) return null

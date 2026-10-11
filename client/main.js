@@ -189,7 +189,7 @@ function startMatchUi() {
 }
 function leaveToMenu() {
   closeOverlays()
-  try { net.leave() } catch (err) { console.warn('leave failed', err) }
+  net.leave().catch((err) => console.warn('leave failed', err))
   lastState = null
   show('menu')
 }

@@ -26,8 +26,10 @@ export function randomCode() {
 
 export function startHost({
   code,
+  hostCid = null,
   send = () => {},
   live = () => {},
+  onFatal = () => {},
   name,
   team,
   body,
@@ -43,6 +45,7 @@ export function startHost({
   let accumulator = 0
   let lastAt = 0
   let ticks = 0
+  let pumpEvents = []
   let recentEvents = [[], []] // events of the last two snapshots, resent so one loss is harmless
 
   const HOST_CID = ' host' // cannot collide: parse() produces no cid with a leading space
@@ -86,7 +89,7 @@ export function startHost({
       const existing = players.get(msg.cid)
       // Realtime redelivers and joiners retry; a repeat is a re-announce, not a second seat.
       if (existing) {
-        send('welcome', { cid: msg.cid, id: existing.id, code, team: existing.team })
+        send('welcome', { cid: msg.cid, id: existing.id, code, team: existing.team, host: hostCid })
         return
       }
       if (players.size >= capacity) {
@@ -94,7 +97,7 @@ export function startHost({
         return
       }
       const p = seat(msg.cid, msg.name, msg.team, msg.body)
-      send('welcome', { cid: msg.cid, id: p.id, code, team: p.team })
+      send('welcome', { cid: msg.cid, id: p.id, code, team: p.team, host: hostCid })
       broadcastRoster()
     } else if (msg.t === 'input') {
       const p = players.get(msg.cid)
@@ -137,7 +140,7 @@ export function startHost({
     if (events.some((e) => e.type === 'matchOver')) send('matchover', { result: result() })
 
     ticks++
-    live(snapshot(state), events)
+    pumpEvents.push(...events)
     recentEvents[0].push(...events)
     if (ticks % SNAP_EVERY === 0) {
       const acks = {}
@@ -148,6 +151,16 @@ export function startHost({
   }
 
   function pump() {
+    try {
+      pumpSteps()
+    } catch (err) {
+      clearInterval(timer)
+      timer = null
+      onFatal(err)
+    }
+  }
+
+  function pumpSteps() {
     const now = performance.now()
     accumulator += (now - lastAt) / 1000
     lastAt = now
@@ -158,6 +171,10 @@ export function startHost({
       steps++
     }
     if (accumulator >= C.DT) accumulator = 0 // fell too far behind; drop the debt
+    // One state per pump, after catch-up: the main thread interpolates between these.
+    // Events from every tick of the pump ride along, in order.
+    if (steps > 0) live(snapshot(state), pumpEvents)
+    pumpEvents = []
   }
 
   lastAt = performance.now()

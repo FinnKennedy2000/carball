@@ -13,8 +13,10 @@
 //   host -> all   events:
 //     'snap'    {s: [...]}  see encodeSnapshot (arrays of ints, cm / cm/s / int16 quats)
 //     'roster'  {players:[{id,name,team,body,bot,host}], teamSize}
-//     'welcome' {cid, id, code, team}   'reject' {cid, reason}
-//     'matchover' {result}              'closed' {}
+//     'welcome' {cid, id, code, team, host}   'reject' {cid, reason}
+//     'matchover' {result}
+
+import { BOOST_PADS } from './arena.js' // pure data, no further imports
 
 export const PHASES = ['pregame', 'countdown', 'play', 'goal', 'over']
 export const WIRE_VERSION = 1
@@ -145,7 +147,7 @@ export function parseRoster(payload) {
 
 export function parseWelcome(p) {
   if (!p || typeof p.id !== 'string' || !ID_RE.test(p.id)) return null
-  return { id: p.id, team: p.team === 1 ? 1 : 0 }
+  return { id: p.id, team: p.team === 1 ? 1 : 0, host: cleanCid(p.host) }
 }
 
 const num = (x) => (Number.isFinite(x) ? x : 0)
@@ -258,6 +260,14 @@ export const EVENT_TYPES = new Set([
   'boostPickup', 'supersonic', 'overtime', 'matchOver', 'bump',
 ])
 
+const CLAMPS = {
+  strength: (v) => clamp(v, 0, 1),
+  speed: (v) => clamp(v, 0, 400),
+  n: (v) => clamp(Math.trunc(v), 0, 3),
+  team: (v) => (v === 1 ? 1 : 0),
+  pad: (v) => clamp(Math.trunc(v), 0, BOOST_PADS.length - 1),
+}
+
 /**
  * Events come from the host and some are rendered into HTML, so: known type,
  * integer id, finite tick, and only primitive fields survive. Strings must look
@@ -270,7 +280,8 @@ export function cleanEvent(e) {
   for (const k of Object.keys(e)) {
     if (k in out || !/^[A-Za-z]{1,16}$/.test(k)) continue
     const v = e[k]
-    if (Number.isFinite(v) || typeof v === 'boolean') out[k] = v
+    if (v === null || typeof v === 'boolean') out[k] = v
+    else if (Number.isFinite(v)) out[k] = CLAMPS[k] ? CLAMPS[k](v) : v
     else if (typeof v === 'string' && ID_RE.test(v)) out[k] = v
     else if (Array.isArray(v) && v.length <= 3 && v.every(Number.isFinite)) out[k] = v
   }
@@ -287,6 +298,9 @@ const isInts = (a, n) => Array.isArray(a) && a.length === n && a.every(Number.is
 export function decodeSnapshot(s) {
   if (!Array.isArray(s) || s.length !== 14 || s[0] !== WIRE_VERSION) return null
   if (!s.slice(1, 9).every(Number.isFinite) || !isInts(s[9], 13) || typeof s[10] !== 'string') return null
+  if (!Number.isInteger(s[8]) || s[8] < 1 || s[8] > 3) return null
+  if (s[11] !== null && !(typeof s[11] === 'string' && ID_RE.test(s[11]))) return null
+  if (s[3] < 0 || s[3] > 100000 || s[4] < -100000 || s[4] > 1000000) return null // centiseconds
   if (!Array.isArray(s[12]) || s[12].length > MAX_PLAYERS_WIRE || !Array.isArray(s[13]) || s[13].length > 64) return null
 
   const acks = {}
@@ -326,7 +340,7 @@ export function decodeSnapshot(s) {
       ball: readBody(s[9], 0),
       cars,
       pads: [...s[10]].map((c) => c === '1'),
-      lastTouch: typeof s[11] === 'string' ? s[11] : null,
+      lastTouch: s[11],
       events: [],
     },
     acks,

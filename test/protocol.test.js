@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   parse, quantizeInput, dequantizeInput, inputChanged, encodeSnapshot, decodeSnapshot,
-  cleanCode, cleanName, parseRoster,
+  cleanCode, cleanName, parseRoster, cleanEvent,
 } from '../shared/protocol.js'
 
 const body = (x) => ({ p: [x, 1.234, -3.5], v: [10.55, 0, -22], q: [0, 0.7071, 0, 0.7071], w: [0, 1.5, 0] })
@@ -100,4 +100,21 @@ test('decodeSnapshot rejects garbage', () => {
   assert.equal(decodeSnapshot(bad), null)
   const bad2 = structuredClone(wire); bad2[0] = 99
   assert.equal(decodeSnapshot(bad2), null)
+})
+
+test('cleanEvent clamps numeric fields and keeps nulls', () => {
+  const e = cleanEvent({ id: 1, type: 'hit', tick: 5, strength: 9, speed: 1e6, n: 99, team: 7, pad: 500 })
+  assert.deepEqual([e.strength, e.speed, e.n, e.team], [1, 400, 3, 0])
+  assert.ok(e.pad <= 40 && e.pad >= 0 && cleanEvent({ id: 1, type: 'boostPickup', tick: 1, pad: -4 }).pad === 0)
+  const g = cleanEvent({ id: 2, type: 'goal', tick: 1, scorerId: null, assistId: 'p1' })
+  assert.equal(g.scorerId, null)
+  assert.equal(g.assistId, 'p1')
+})
+
+test('decodeSnapshot validates teamSize, lastTouch and ranges', () => {
+  const w = encodeSnapshot(state())
+  for (const [i, v] of [[8, 9], [11, 'bad id!'], [3, -5], [4, 1e12]]) {
+    const bad = structuredClone(w); bad[i] = v
+    assert.equal(decodeSnapshot(bad), null, `index ${i}`)
+  }
 })
