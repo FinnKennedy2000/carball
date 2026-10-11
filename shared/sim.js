@@ -253,7 +253,8 @@ export function step(state) {
   for (const c of state.cars) {
     if (c.demolished > 0) {
       c.demolished -= dt
-      if (c.demolished <= 0) spawn(state, c, c.team === 0 ? 2 : 2)
+      // Each car its own slot, so two demolished at once do not respawn inside each other.
+      if (c.demolished <= 0) spawn(state, c, state.cars.indexOf(c))
       continue
     }
     const input = !live ? NEUTRAL_INPUT : c.bot ? botInput(state, c) ?? NEUTRAL_INPUT : state.inputs[c.id] ?? NEUTRAL_INPUT

@@ -93,7 +93,7 @@ snapshots and every client fires each event exactly once (dedupe by id).
   car/ball/boost physics constants, MAX_PLAYERS=6). Rewrite freely.
 - `shared/arena.js` — `ARENA = { halfWidth, halfLength, height, cornerR, wallR, goal:{halfWidth,height,depth} }`,
   `BOOST_PADS = [{ p:[x,y,z], big }]`, `arenaDistance(p) -> {d, n}` (signed distance
-  inside the arena, d>0 inside, n = inward normal), `inGoal(p, r) -> team|-1`.
+  inside the arena, d>0 inside, n = inward normal), `inGoal(p, r) -> concedingTeam|-1` (the team whose goal the ball is in, not the scorer).
 - `shared/cars.js` — `CARS = { octane:{name, hitbox:[w,h,l], offset, color...}, ... }`
   at least 4 bodies, `DEFAULT_CAR`.
 - `shared/sim.js` — `createMatch({teamSize, seed})`, `addPlayer(state,{id,name,team,body,bot})`,
