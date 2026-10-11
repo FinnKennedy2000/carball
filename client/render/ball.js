@@ -33,10 +33,10 @@ export function createBall(radius) {
       vec3 bn = normalize(vObj); float d1=-2., d2=-2.; int i1=0;
       for(int i=0;i<${S.length};i++){ float d = dot(bn, SEEDS[i]); if(d>d1){ d2=d1; d1=d; i1=i; } else if(d>d2){ d2=d; } }
       float seam = 1. - smoothstep(0., 0.05, d1-d2);
-      vec3 panel = i1 < 12 ? vec3(0.015,0.025,0.06) : vec3(0.82,0.88,0.96);
+      vec3 panel = i1 < 12 ? vec3(0.045,0.047,0.052) : vec3(0.82,0.88,0.96);
       diffuseColor.rgb = mix(panel, vec3(0.02), seam);`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-      totalEmissiveRadiance += uSeam * seam * uGlow * 2.6 + (i1<12 ? uSeam*0.06*uGlow : vec3(0.));`)
+      totalEmissiveRadiance += uSeam * seam * uGlow * 1.5;`)
   }
   const geo = new THREE.SphereGeometry(radius, 48, 32)
   const mesh = new THREE.Mesh(geo, mat)

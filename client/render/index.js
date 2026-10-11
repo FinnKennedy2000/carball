@@ -251,8 +251,9 @@ export function createRenderer(canvas, { quality = 'medium' } = {}) {
       if (hl < 0.3) { hx = Math.sin(cam.yaw); hz = Math.cos(cam.yaw) } else { hx /= hl; hz /= hl }
       const toBx = bp[0] - me.p[0], toBz = bp[2] - me.p[2]
       const bd = Math.hypot(toBx, toBz)
-      const ballCam = cam.mode === 'ball' && bd > dist * 0.5
-      if (ballCam) { hx = toBx / bd; hz = toBz / bd }
+      const bw = THREE.MathUtils.smoothstep(bd, 4, 8) // 0 = ball overhead -> car-cam
+      const ballCam = cam.mode === 'ball' && bw > 0
+      if (ballCam) { hx = hx + (toBx / (bd || 1) - hx) * bw; hz = hz + (toBz / (bd || 1) - hz) * bw; const hn = Math.hypot(hx, hz) || 1; hx /= hn; hz /= hn }
       const target = Math.atan2(hx, hz)
       let d = target - cam.yaw
       d = Math.atan2(Math.sin(d), Math.cos(d))
@@ -261,7 +262,8 @@ export function createRenderer(canvas, { quality = 'medium' } = {}) {
       _v.set(me.p[0] - sx * dist, me.p[1] + hgt, me.p[2] - sz * dist)
       if (ballCam) {
         // aim between car and ball, favouring the ball
-        _look.set(bp[0] * 0.75 + me.p[0] * 0.25, Math.max(bp[1], 1) * 0.75 + me.p[1] * 0.25 + 0.5, bp[2] * 0.75 + me.p[2] * 0.25)
+        const lw = 0.75 * bw
+        _look.set(bp[0] * lw + me.p[0] * (1 - lw) + (sx * dist * 0.9) * (1 - bw), Math.max(bp[1], 1) * lw + me.p[1] * (1 - lw) + 0.5, bp[2] * lw + me.p[2] * (1 - lw) + (sz * dist * 0.9) * (1 - bw))
       } else {
         _look.set(me.p[0] + sx * dist * 0.9, me.p[1] + hgt * 0.35, me.p[2] + sz * dist * 0.9)
       }
@@ -329,12 +331,13 @@ export function createRenderer(canvas, { quality = 'medium' } = {}) {
     let me = null
     if (state) {
       const cars = state.cars
+      let made = 0
       for (let i = 0; i < cars.length; i++) {
         const car = cars[i]
         let e = rigs.get(car.id)
         const t = car.team ? 1 : 0
         if (e && (e.body !== car.body || e.team !== t || e.name !== car.name)) { freeEntry(e); rigs.delete(car.id); e = null }
-        if (!e) { e = makeEntry(car); rigs.set(car.id, e) }
+        if (!e) { if (made >= 2) continue; made++; e = makeEntry(car); rigs.set(car.id, e) }
         e.seen = nowT
         const rig = e.rig
         car.rigL = rig.L
@@ -359,11 +362,11 @@ export function createRenderer(canvas, { quality = 'medium' } = {}) {
         // trails
         e.trailW += ((car.boosting ? 1 : 0) - e.trailW) * damp(14, dt)
         _w.set(0, -rig.H * 0.1, -rig.L * 0.5).applyQuaternion(_q).add(rig.root.position)
-        e.boostTrail.push(_w.x, _w.y, _w.z, _r.x, _r.y, _r.z, rig.W * 0.22 * e.trailW)
+        if (q !== 'low') e.boostTrail.push(_w.x, _w.y, _w.z, _r.x, _r.y, _r.z, rig.W * 0.22 * e.trailW)
         e.superW += ((car.supersonic ? 1 : 0) - e.superW) * damp(10, dt)
         for (const [tr, sx] of [[e.sTrailL, -1], [e.sTrailR, 1]]) {
           _w.set(sx * rig.W * 0.5, rig.H * 0.1, -rig.L * 0.4).applyQuaternion(_q).add(rig.root.position)
-          tr.push(_w.x, _w.y, _w.z, _u.x, _u.y, _u.z, 0.18 * e.superW)
+          if (q !== 'low') tr.push(_w.x, _w.y, _w.z, _u.x, _u.y, _u.z, 0.18 * e.superW)
         }
         // blob shadow
         const h = Math.max(car.p[1] - rig.H * 0.5, 0)
@@ -399,7 +402,7 @@ export function createRenderer(canvas, { quality = 'medium' } = {}) {
       _w.copy(camera.position).sub(ball.group.position)
       _r.crossVectors(_v, _w).normalize()
       const tw = THREE.MathUtils.clamp((bsp - 22) / 30, 0, 1)
-      ballTrail.push(b.p[0], b.p[1], b.p[2], _r.x, _r.y, _r.z, BALL_R * 0.85 * tw)
+      if (q !== 'low') ballTrail.push(b.p[0], b.p[1], b.p[2], _r.x, _r.y, _r.z, BALL_R * 0.85 * tw)
       // ground ring + blob
       const bh = Math.max(b.p[1] - BALL_R, 0)
       const rs = BALL_R * (1.1 + bh * 0.05)
@@ -424,7 +427,12 @@ export function createRenderer(canvas, { quality = 'medium' } = {}) {
     }
     stadium.update(state, nowT, dt, ex)
     stadium.uniforms.uFlash.value = excite
-    ball.halo.material.opacity = 0.5 + 0.3 * Math.sin(nowT * 3)
+    { // halo shrinks and fades as the camera closes in
+      const cd = camera.position.distanceTo(ball.group.position)
+      const f = THREE.MathUtils.smoothstep(cd, BALL_R * 2.5, BALL_R * 14)
+      ball.halo.scale.setScalar(BALL_R * 3.2 * (0.6 + 0.4 * f))
+      ball.halo.material.opacity = (0.3 + 0.12 * Math.sin(nowT * 3)) * f
+    }
     updateCamera(state, myId, dt, me)
     fx.update(dt, camera, Hh)
     if (composer) composer.render(dt)
@@ -434,6 +442,8 @@ export function createRenderer(canvas, { quality = 'medium' } = {}) {
 
   function onEvent(ev) {
     if (!ev) return
+    const fin = (p) => Array.isArray(p) && p.length >= 3 && p.every((n) => Number.isFinite(n) && Math.abs(n) < 1e4)
+    if (ev.p !== undefined && !fin(ev.p)) return
     const st = lastState
     const find = (id) => st?.cars?.find((c) => c.id === id)
     switch (ev.type) {
@@ -458,7 +468,7 @@ export function createRenderer(canvas, { quality = 'medium' } = {}) {
       case 'hit': {
         const p = ev.p
         if (!p) break
-        const s = ev.strength ?? 0.3
+        const s = Math.min(1, Math.max(0, +ev.strength || 0.3))
         fx.sparks(p[0], p[1], p[2], 6 + Math.floor(s * 34), 7 + s * 16, 1.8, 1.4, 0.8, 0, 0.3, 0, 1)
         if (s > 0.6) fx.wave(false, p[0], Math.max(p[1] - 0.5, 0.1), p[2], 3 + s * 5, 0.35, _col.set(1, 0.9, 0.7), 0.6)
         const d = Math.hypot(p[0] - camera.position.x, p[1] - camera.position.y, p[2] - camera.position.z)

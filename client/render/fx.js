@@ -142,6 +142,12 @@ export function createFx(scene) {
     const m = new THREE.Mesh(i < 6 ? ringGeo : shellGeo, new THREE.MeshBasicMaterial({
       transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
     }))
+    if (i >= 6) m.material.onBeforeCompile = (sh) => { // fade to nothing at the silhouette: no hard edge
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vN; varying vec3 vV;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvN = normalize(normalMatrix * normal); vV = -(modelViewMatrix * vec4(position, 1.)).xyz;')
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vN; varying vec3 vV;')
+        .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.a *= pow(abs(dot(normalize(vN), normalize(vV))), 1.6);')
+    }
     m.visible = false
     group.add(m)
     waves.push({ m, t: 0, dur: 1, r1: 10, a: 1, shell: i >= 6 })
@@ -185,14 +191,14 @@ export function createFx(scene) {
 
   // ---- emitters ----
   function sparks(x, y, z, n, speed, r, g, b, dirx = 0, diry = 1, dirz = 0, spread = 1) {
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < Math.min(n, 150); i++) {
       const vx = (R() - 0.5) * 2 * spread + dirx, vy = (R() - 0.3) * 1.6 * spread + diry, vz = (R() - 0.5) * 2 * spread + dirz
       const k = speed * (0.4 + R() * 0.8)
       emitP(add, x, y, z, vx * k, vy * k, vz * k, 0.35 + R() * 0.5, 0.3, 0.05, r, g, b, 1, 14, 0.8)
     }
   }
   function burst(x, y, z, n, speed, color, life = 1.2, size = 0.8, grav = 6) {
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < Math.min(n, 150); i++) {
       let vx = R() - 0.5, vy = R() - 0.5, vz = R() - 0.5
       const l = Math.hypot(vx, vy, vz) || 1
       const k = (speed * (0.3 + R() * 0.9)) / l
@@ -200,7 +206,7 @@ export function createFx(scene) {
     }
   }
   function smokePuff(x, y, z, n, speed, size, r, g, b, a = 0.35, life = 1.2) {
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < Math.min(n, 150); i++) {
       emitP(smoke, x + (R() - 0.5) * size, y, z + (R() - 0.5) * size, (R() - 0.5) * speed, R() * speed * 0.5 + 0.3, (R() - 0.5) * speed, life * (0.6 + R() * 0.6), size * 0.4, size * 1.6, r, g, b, a, -0.5, 1.2)
     }
   }

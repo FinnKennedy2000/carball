@@ -190,7 +190,7 @@ export function createCarKit() {
     }
     add(boxGeo, tailMat, 0, 0, -L * 0.495, W * 0.78, H * 0.05, L * 0.015, false)
 
-    const wr = Math.min(H * 0.31, W * 0.18)
+    const wr = Math.min(H * 0.37, W * 0.19)
     const tw = wr * 0.85
     const wheels = []
     for (const fz of [1, -1]) for (const sx of [-1, 1]) {
