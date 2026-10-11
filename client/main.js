@@ -42,7 +42,14 @@ const setBallCam = (on) => { ballCam = on; renderer.setCameraMode(on ? 'ball' : 
 
 initSettings($('set-body'), (s) => {
   renderer.setQuality(s.quality)
-  renderer.setCameraSettings?.({ fov: s.fov, distance: s.distance, height: s.height, stiffness: s.stiffness }) // optional RENDER hook
+  // Settings speak Rocket League's units (horizontal FOV, distance 270, height
+  // 100, stiffness 0-100); the renderer takes vertical FOV and multipliers.
+  renderer.setCameraSettings({
+    fov: (2 * Math.atan(Math.tan((s.fov * Math.PI) / 360) / (16 / 9)) * 180) / Math.PI,
+    distance: s.distance / 270,
+    height: s.height / 100,
+    stiffness: 0.4 + (s.stiffness / 100) * 1.2,
+  })
   audio.setVolume({ master: s.master, sfx: s.sfx, music: s.music, crowd: s.crowd })
 })
 
@@ -96,7 +103,9 @@ function begin() {
   }
   show('menu')
 }
-addEventListener('keydown', (e) => { if (screen === 'title' && !e.repeat && !['F5', 'F12'].includes(e.code)) begin() })
+// preventDefault: begin() focuses the first menu button, and without it the same
+// Enter would go on to press that button and drop straight into a match.
+addEventListener('keydown', (e) => { if (screen === 'title' && !e.repeat && !['F5', 'F12'].includes(e.code)) { e.preventDefault(); begin() } })
 $('s-title').addEventListener('pointerdown', begin)
 
 $('m-offline').onclick = async () => {
@@ -328,3 +337,4 @@ if (mock) {
   else show(['menu', 'garage'].includes(mock) ? mock : 'menu')
 } else show('title')
 requestAnimationFrame(frame)
+if (import.meta.env.DEV) window.__carball = { net, renderer }
